@@ -15,6 +15,7 @@ import androidx.fragment.app.viewModels
 import com.google.android.material.snackbar.Snackbar
 import com.kaleaon.mnxmindmaker.R
 import com.kaleaon.mnxmindmaker.databinding.FragmentMindMapBinding
+import com.kaleaon.mnxmindmaker.ktheme.KthemeManager
 import com.kaleaon.mnxmindmaker.model.NodeType
 
 class MindMapFragment : Fragment() {
@@ -82,6 +83,18 @@ class MindMapFragment : Fragment() {
 
         viewModel.isLoading.observe(viewLifecycleOwner) { loading ->
             binding.progressBar.visibility = if (loading) View.VISIBLE else View.GONE
+        }
+
+        // Apply active Ktheme to the canvas (and react to future changes)
+        KthemeManager.activeTheme.observe(viewLifecycleOwner) { theme ->
+            binding.mindMapCanvas.applyTheme(theme)
+            // Also tint the status bar and action toolbar
+            theme?.colorScheme?.let { cs ->
+                binding.statusBar.setBackgroundColor(KthemeManager.parseColor(cs.surfaceVariant))
+                binding.toolbarActions.setBackgroundColor(KthemeManager.parseColor(cs.surface))
+                binding.tvGraphName.setTextColor(KthemeManager.parseColor(cs.onSurface))
+                binding.tvSelectedNode.setTextColor(KthemeManager.parseColor(cs.onSurfaceVariant))
+            }
         }
 
         // Button handlers

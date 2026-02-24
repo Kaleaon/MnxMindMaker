@@ -21,6 +21,51 @@
             android:textColor="@color/colorOnPrimary"
             android:layout_marginBottom="16dp" />
 
+        <!-- ===== Ktheme: Theme Picker ===== -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/theme_section_title"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            android:textColor="@color/colorOnPrimary"
+            android:layout_marginBottom="4dp" />
+
+        <TextView
+            android:id="@+id/tv_active_theme"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/theme_default"
+            android:textSize="12sp"
+            android:textColor="@color/colorOnSurface"
+            android:layout_marginBottom="8dp" />
+
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/rv_themes"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:clipToPadding="false"
+            android:paddingEnd="8dp"
+            android:layout_marginBottom="8dp" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_reset_theme"
+            style="@style/Widget.MaterialComponents.Button.TextButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/theme_reset"
+            android:textColor="@color/colorAccent"
+            android:layout_marginBottom="24dp" />
+
+        <!-- Divider -->
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="@color/colorSurface"
+            android:layout_marginBottom="16dp" />
+
+        <!-- ===== LLM API Settings ===== -->
+
         <!-- Provider picker -->
         <TextView
             android:layout_width="match_parent"
