@@ -1,0 +1,50 @@
+<resources>
+    <string name="app_name">MnxMindMaker</string>
+
+    <!-- Mind Map -->
+    <string name="mind_map_title">Mind Map</string>
+    <string name="no_node_selected">Tap a node to select it</string>
+    <string name="add_node">Add Node</string>
+    <string name="remove_node">Remove Node</string>
+    <string name="export_mnx">Export .mnx</string>
+    <string name="import_mnx">Import .mnx</string>
+    <string name="ask_ai">Ask AI</string>
+    <string name="reset_view">Reset View</string>
+    <string name="label_required">Label is required</string>
+    <string name="add">Add</string>
+    <string name="cancel">Cancel</string>
+    <string name="ok">OK</string>
+    <string name="export_success">Exported: %1$s</string>
+
+    <!-- AI dialog -->
+    <string name="ask_ai_title">Ask AI for Mind Design Help</string>
+    <string name="ai_prompt_hint">E.g. Suggest personality traits for a curious, empathetic AI…</string>
+    <string name="ask">Ask</string>
+    <string name="ai_response_title">AI Suggestion</string>
+
+    <!-- Import -->
+    <string name="import_title">Import Data</string>
+    <string name="import_empty_error">Paste or load some text/JSON first</string>
+    <string name="import_parse_error">Parse error: %1$s</string>
+    <string name="import_ready">%1$d nodes ready — open in Mind Map to visualize</string>
+    <string name="open_in_mind_map">Open</string>
+    <string name="default_import_name">Imported Mind</string>
+    <string name="section_mapping_preview">%1$d nodes mapped to MNX sections:\n%2$s</string>
+
+    <!-- Settings -->
+    <string name="settings_title">LLM API Settings</string>
+    <string name="settings_saved">%1$s settings saved</string>
+    <string name="hint_anthropic_key">Get your key at console.anthropic.com</string>
+    <string name="hint_openai_key">Get your key at platform.openai.com</string>
+    <string name="hint_gemini_key">Get your key at aistudio.google.com</string>
+    <string name="anthropic_api_info">Anthropic Claude — powerful reasoning, long context</string>
+    <string name="openai_api_info">OpenAI GPT — broad capability, wide model choice</string>
+    <string name="gemini_api_info">Google Gemini — multimodal, large context window</string>
+    <string name="provider_label">LLM Provider</string>
+    <string name="api_key_label">API Key</string>
+    <string name="model_label">Model</string>
+    <string name="max_tokens_label">Max Tokens</string>
+    <string name="temperature_label">Temperature (0–2)</string>
+    <string name="enabled_label">Enable this provider</string>
+    <string name="save_settings">Save Settings</string>
+</resources>
