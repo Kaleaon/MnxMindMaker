@@ -24,12 +24,13 @@
 
     <!-- Import -->
     <string name="import_title">Import Data</string>
-    <string name="import_empty_error">Paste or load some text/JSON first</string>
+    <string name="import_empty_error">Paste or load some text first (.md, .json, .csv, .txt)</string>
     <string name="import_parse_error">Parse error: %1$s</string>
     <string name="import_ready">%1$d nodes ready — open in Mind Map to visualize</string>
     <string name="open_in_mind_map">Open</string>
     <string name="default_import_name">Imported Mind</string>
     <string name="section_mapping_preview">%1$d nodes mapped to MNX sections:\n%2$s</string>
+    <string name="import_file_loaded">Loaded %1$s — tap Parse &amp; Map to import</string>
 
     <!-- Settings -->
     <string name="settings_title">LLM API Settings</string>

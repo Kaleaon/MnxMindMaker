@@ -12,17 +12,61 @@ import com.kaleaon.mnxmindmaker.R
 import com.kaleaon.mnxmindmaker.databinding.FragmentImportBinding
 import com.kaleaon.mnxmindmaker.model.MindGraph
 import com.kaleaon.mnxmindmaker.util.DataMapper
+import com.kaleaon.mnxmindmaker.util.FileImporter
 
 class ImportFragment : Fragment() {
 
     private var _binding: FragmentImportBinding? = null
     private val binding get() = _binding!!
 
-    private val openTextFile = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+    /**
+     * The format detected when the user loaded a file via the picker.
+     * Remembered so the parse button can use the correct importer.
+     * Resets to UNKNOWN whenever the user edits the text manually.
+     */
+    private var loadedFormat: FileImporter.Format = FileImporter.Format.UNKNOWN
+
+    private val openFile = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri ?: return@registerForActivityResult
-        val text = requireContext().contentResolver.openInputStream(uri)?.bufferedReader()?.readText()
-        if (text != null) {
-            binding.etImportText.setText(text)
+
+        val format = FileImporter.detectFormat(uri, requireContext())
+        val graphName = binding.etGraphName.text.toString().trim()
+            .ifEmpty { getString(R.string.default_import_name) }
+
+        if (FileImporter.isBinaryFormat(format)) {
+            // Binary format (e.g. .docx): parse immediately — cannot display raw bytes in a text field
+            val result = FileImporter.importFromUri(uri, requireContext(), graphName)
+            result.onSuccess { graph ->
+                ImportDataHolder.pendingGraph = graph
+                showMappingPreview(graph)
+                Snackbar.make(
+                    binding.root,
+                    getString(R.string.import_ready, graph.nodes.size),
+                    Snackbar.LENGTH_LONG
+                ).setAction(R.string.open_in_mind_map) {
+                    findNavController().navigate(R.id.action_importFragment_to_mindMapFragment)
+                }.show()
+            }.onFailure { e ->
+                Snackbar.make(
+                    binding.root,
+                    getString(R.string.import_parse_error, e.message),
+                    Snackbar.LENGTH_LONG
+                ).show()
+            }
+        } else {
+            // Text-based format: load into the editor so the user can review / edit before parsing
+            val text = requireContext().contentResolver.openInputStream(uri)
+                ?.bufferedReader(Charsets.UTF_8)?.readText()
+            if (text != null) {
+                binding.etImportText.setText(text)
+                loadedFormat = format
+                val formatLabel = formatDisplayName(format)
+                Snackbar.make(
+                    binding.root,
+                    getString(R.string.import_file_loaded, formatLabel),
+                    Snackbar.LENGTH_SHORT
+                ).show()
+            }
         }
     }
 
@@ -34,8 +78,22 @@ class ImportFragment : Fragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
 
+        // Reset format if user manually edits the text field
+        binding.etImportText.setOnFocusChangeListener { _, hasFocus ->
+            if (hasFocus) loadedFormat = FileImporter.Format.UNKNOWN
+        }
+
         binding.btnLoadFile.setOnClickListener {
-            openTextFile.launch(arrayOf("text/plain", "application/json", "*/*"))
+            // Accept all supported formats; system file picker shows matching files
+            openFile.launch(arrayOf(
+                "text/plain",
+                "text/markdown",
+                "application/json",
+                "text/csv",
+                "application/csv",
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                "*/*"
+            ))
         }
 
         binding.btnParseData.setOnClickListener {
@@ -46,41 +104,63 @@ class ImportFragment : Fragment() {
             }
             val graphName = binding.etGraphName.text.toString().trim()
                 .ifEmpty { getString(R.string.default_import_name) }
+
             val graph: MindGraph = try {
-                if (text.trimStart().startsWith("{") || text.trimStart().startsWith("[")) {
-                    DataMapper.fromJson(text, graphName)
-                } else {
-                    DataMapper.fromPlainText(text, graphName)
-                }
+                FileImporter.parseText(text, loadedFormat, graphName)
             } catch (e: Exception) {
-                Snackbar.make(binding.root, getString(R.string.import_parse_error, e.message), Snackbar.LENGTH_LONG).show()
+                Snackbar.make(
+                    binding.root,
+                    getString(R.string.import_parse_error, e.message),
+                    Snackbar.LENGTH_LONG
+                ).show()
                 return@setOnClickListener
             }
 
-            // Show section mapping preview
-            val sections = DataMapper.suggestMnxSections(graph)
-            val preview = sections.entries
-                .joinToString("\n") { (_, section) -> "→ $section" }
-                .let { if (it.length > 500) it.take(500) + "…" else it }
-            binding.tvMappingPreview.text = getString(R.string.section_mapping_preview, graph.nodes.size, preview)
-            binding.tvMappingPreview.visibility = View.VISIBLE
-
-            // Store graph for navigation back to mind map
             ImportDataHolder.pendingGraph = graph
+            showMappingPreview(graph)
 
-            Snackbar.make(binding.root,
+            Snackbar.make(
+                binding.root,
                 getString(R.string.import_ready, graph.nodes.size),
-                Snackbar.LENGTH_LONG)
-                .setAction(R.string.open_in_mind_map) {
-                    findNavController().navigate(R.id.action_importFragment_to_mindMapFragment)
-                }
-                .show()
+                Snackbar.LENGTH_LONG
+            ).setAction(R.string.open_in_mind_map) {
+                findNavController().navigate(R.id.action_importFragment_to_mindMapFragment)
+            }.show()
         }
     }
 
     override fun onDestroyView() {
         super.onDestroyView()
         _binding = null
+    }
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    private fun showMappingPreview(graph: MindGraph) {
+        val sections = DataMapper.suggestMnxSections(graph)
+
+        // Count nodes per section type for a compact summary
+        val counts = sections.values
+            .groupingBy { it }
+            .eachCount()
+            .entries
+            .sortedByDescending { it.value }
+            .joinToString("\n") { (section, count) -> "  $section × $count" }
+
+        val preview = "${graph.nodes.size} nodes mapped:\n$counts"
+            .let { if (it.length > 500) it.take(500) + "…" else it }
+
+        binding.tvMappingPreview.text = getString(R.string.section_mapping_preview, graph.nodes.size, preview)
+        binding.tvMappingPreview.visibility = View.VISIBLE
+    }
+
+    private fun formatDisplayName(format: FileImporter.Format): String = when (format) {
+        FileImporter.Format.MARKDOWN -> "Markdown (.md)"
+        FileImporter.Format.DOCX -> "Word document (.docx)"
+        FileImporter.Format.CSV -> "CSV (.csv)"
+        FileImporter.Format.JSON -> "JSON (.json)"
+        FileImporter.Format.PLAIN_TEXT -> "Plain text (.txt)"
+        FileImporter.Format.UNKNOWN -> "text"
     }
 }
 
