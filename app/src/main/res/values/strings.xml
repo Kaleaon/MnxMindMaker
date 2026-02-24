@@ -32,8 +32,16 @@
     <string name="section_mapping_preview">%1$d nodes mapped to MNX sections:\n%2$s</string>
     <string name="import_file_loaded">Loaded %1$s — tap Parse &amp; Map to import</string>
 
+    <!-- Ktheme -->
+    <string name="theme_section_title">App Theme</string>
+    <string name="theme_default">Default theme</string>
+    <string name="theme_active_label">Active: %1$s</string>
+    <string name="theme_applied">Theme applied: %1$s</string>
+    <string name="theme_reset">Reset to default</string>
+    <string name="theme_reset_done">Theme reset to default</string>
+
     <!-- Settings -->
-    <string name="settings_title">LLM API Settings</string>
+    <string name="settings_title">Settings</string>
     <string name="settings_saved">%1$s settings saved</string>
     <string name="hint_anthropic_key">Get your key at console.anthropic.com</string>
     <string name="hint_openai_key">Get your key at platform.openai.com</string>

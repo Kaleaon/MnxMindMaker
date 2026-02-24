@@ -7,9 +7,11 @@ import android.view.ViewGroup
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
 import androidx.fragment.app.Fragment
+import androidx.recyclerview.widget.LinearLayoutManager
 import com.google.android.material.snackbar.Snackbar
 import com.kaleaon.mnxmindmaker.R
 import com.kaleaon.mnxmindmaker.databinding.FragmentSettingsBinding
+import com.kaleaon.mnxmindmaker.ktheme.KthemeManager
 import com.kaleaon.mnxmindmaker.model.LlmProvider
 import com.kaleaon.mnxmindmaker.model.LlmSettings
 import com.kaleaon.mnxmindmaker.model.defaultModel
@@ -24,6 +26,8 @@ class SettingsFragment : Fragment() {
     private var currentProvider: LlmProvider = LlmProvider.ANTHROPIC
     private var currentSettings: MutableList<LlmSettings> = mutableListOf()
 
+    private var themeAdapter: ThemeAdapter? = null
+
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, saved: Bundle?): View {
         _binding = FragmentSettingsBinding.inflate(inflater, container, false)
         return binding.root
@@ -34,7 +38,10 @@ class SettingsFragment : Fragment() {
         repository = LlmSettingsRepository(requireContext())
         currentSettings = repository.loadAllSettings().toMutableList()
 
-        // Provider picker
+        // ---- Ktheme picker --------------------------------------------------
+        setupThemePicker()
+
+        // ---- LLM provider picker --------------------------------------------
         val providers = LlmProvider.entries.map { it.displayName }
         binding.spinnerProvider.adapter = ArrayAdapter(requireContext(),
             android.R.layout.simple_spinner_item, providers)
@@ -58,6 +65,50 @@ class SettingsFragment : Fragment() {
         binding.tvGeminiInfo.text = getString(R.string.gemini_api_info)
     }
 
+    // -- Ktheme theme picker --------------------------------------------------
+
+    private fun setupThemePicker() {
+        val allThemes = KthemeManager.getAllThemes().sortedBy { it.metadata.name }
+        val activeId = KthemeManager.getActiveThemeId()
+
+        themeAdapter = ThemeAdapter(allThemes, activeId) { theme ->
+            KthemeManager.setActiveTheme(theme.metadata.id)
+            themeAdapter?.setSelectedId(theme.metadata.id)
+            binding.tvActiveTheme.text = getString(R.string.theme_active_label, theme.metadata.name)
+            Snackbar.make(binding.root, getString(R.string.theme_applied, theme.metadata.name),
+                Snackbar.LENGTH_SHORT).show()
+        }
+
+        binding.rvThemes.layoutManager =
+            LinearLayoutManager(requireContext(), LinearLayoutManager.HORIZONTAL, false)
+        binding.rvThemes.adapter = themeAdapter
+
+        // Show current active theme name
+        val activeTheme = KthemeManager.getActiveThemeSync()
+        binding.tvActiveTheme.text = if (activeTheme != null)
+            getString(R.string.theme_active_label, activeTheme.metadata.name)
+        else
+            getString(R.string.theme_default)
+
+        // Scroll to the active theme card
+        if (activeId != null) {
+            val idx = allThemes.indexOfFirst { it.metadata.id == activeId }
+            if (idx >= 0) binding.rvThemes.scrollToPosition(idx)
+        }
+
+        binding.btnResetTheme.setOnClickListener {
+            // Clear persisted theme; fragments/activity observe LiveData and revert
+            val prefs = requireContext().getSharedPreferences("ktheme_prefs", 0)
+            prefs.edit().remove("active_theme_id").apply()
+            // Reset the LiveData to null (default theme)
+            themeAdapter?.setSelectedId(null)
+            binding.tvActiveTheme.text = getString(R.string.theme_default)
+            Snackbar.make(binding.root, getString(R.string.theme_reset_done), Snackbar.LENGTH_SHORT).show()
+        }
+    }
+
+    // -- LLM settings ---------------------------------------------------------
+
     private fun loadProviderSettings(provider: LlmProvider) {
         val settings = currentSettings.firstOrNull { it.provider == provider }
             ?: LlmSettings(provider)
@@ -67,7 +118,6 @@ class SettingsFragment : Fragment() {
         binding.etTemperature.setText(settings.temperature.toString())
         binding.switchEnabled.isChecked = settings.enabled
 
-        // Show provider-specific hint
         binding.tvApiKeyHint.text = when (provider) {
             LlmProvider.ANTHROPIC -> getString(R.string.hint_anthropic_key)
             LlmProvider.OPENAI -> getString(R.string.hint_openai_key)

@@ -11,6 +11,9 @@ import android.view.GestureDetector
 import android.view.MotionEvent
 import android.view.ScaleGestureDetector
 import android.view.View
+import com.kaleaon.mnxmindmaker.ktheme.ColorUtils
+import com.kaleaon.mnxmindmaker.ktheme.KthemeManager
+import com.kaleaon.mnxmindmaker.ktheme.Theme
 import com.kaleaon.mnxmindmaker.model.MindEdge
 import com.kaleaon.mnxmindmaker.model.MindGraph
 import com.kaleaon.mnxmindmaker.model.MindNode
@@ -25,6 +28,7 @@ import com.kaleaon.mnxmindmaker.model.NodeType
  *  - Long-press drag to move nodes
  *  - Visual rendering of nodes by [NodeType] with color coding
  *  - Edge drawing between connected nodes
+ *  - Dynamic theming via [KthemeManager]
  */
 class MindMapView @JvmOverloads constructor(
     context: Context,
@@ -56,9 +60,19 @@ class MindMapView @JvmOverloads constructor(
     // Node hit rect cache
     private val nodeRects = mutableMapOf<String, RectF>()
 
+    // -- Theme-aware colours (defaults match the original hardcoded values) ---
+
+    private var gridColor = Color.parseColor("#1E1E2E")
+    private var edgeColor = Color.parseColor("#BDBDBD")
+    private var nodeBorderColor = Color.WHITE
+    private var selectedBorderColor = Color.YELLOW
+    private var nodeTextColor = Color.WHITE
+    private var nodeSubtextColor = Color.parseColor("#E0E0E0")
+    private var canvasBackgroundColor = Color.parseColor("#12121C")
+
     // Paints
     private val edgePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#BDBDBD")
+        color = edgeColor
         strokeWidth = 3f
         style = Paint.Style.STROKE
     }
@@ -68,20 +82,20 @@ class MindMapView @JvmOverloads constructor(
     private val nodeBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
         strokeWidth = 3f
-        color = Color.WHITE
+        color = nodeBorderColor
     }
     private val selectedBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
         strokeWidth = 5f
-        color = Color.YELLOW
+        color = selectedBorderColor
     }
     private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.WHITE
+        color = nodeTextColor
         textSize = 28f
         textAlign = Paint.Align.CENTER
     }
     private val subtextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#E0E0E0")
+        color = nodeSubtextColor
         textSize = 20f
         textAlign = Paint.Align.CENTER
     }
@@ -152,6 +166,46 @@ class MindMapView @JvmOverloads constructor(
         return true
     }
 
+    // -- Ktheme integration ---------------------------------------------------
+
+    /**
+     * Apply a Ktheme [Theme] to this canvas. Pass `null` to revert to
+     * built-in defaults.
+     */
+    fun applyTheme(theme: Theme?) {
+        if (theme == null) {
+            // Revert to defaults
+            gridColor = Color.parseColor("#1E1E2E")
+            edgeColor = Color.parseColor("#BDBDBD")
+            nodeBorderColor = Color.WHITE
+            selectedBorderColor = Color.YELLOW
+            nodeTextColor = Color.WHITE
+            nodeSubtextColor = Color.parseColor("#E0E0E0")
+            canvasBackgroundColor = Color.parseColor("#12121C")
+        } else {
+            val cs = theme.colorScheme
+            canvasBackgroundColor = safeParseColor(cs.background, "#12121C")
+            gridColor = safeParseColor(cs.surfaceVariant, "#1E1E2E")
+            edgeColor = safeParseColor(cs.outline, "#BDBDBD")
+            nodeBorderColor = safeParseColor(cs.onSurface, "#FFFFFF")
+            nodeTextColor = safeParseColor(cs.onPrimary, "#FFFFFF")
+            nodeSubtextColor = safeParseColor(cs.onSurfaceVariant, "#E0E0E0")
+            // Accent colour for selected border
+            selectedBorderColor = safeParseColor(cs.primary, "#FFFF00")
+        }
+
+        // Push colours into paints
+        edgePaint.color = edgeColor
+        nodeBorderPaint.color = nodeBorderColor
+        selectedBorderPaint.color = selectedBorderColor
+        textPaint.color = nodeTextColor
+        subtextPaint.color = nodeSubtextColor
+        setBackgroundColor(canvasBackgroundColor)
+        invalidate()
+    }
+
+    // -- Drawing --------------------------------------------------------------
+
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         val g = graph ?: return
@@ -160,13 +214,8 @@ class MindMapView @JvmOverloads constructor(
         canvas.translate(translateX, translateY)
         canvas.scale(scaleX, scaleY)
 
-        // Draw background grid
         drawGrid(canvas)
-
-        // Draw edges first (behind nodes)
         g.edges.forEach { edge -> drawEdge(canvas, g, edge) }
-
-        // Draw nodes
         nodeRects.clear()
         g.nodes.forEach { node -> drawNode(canvas, node) }
 
@@ -175,7 +224,7 @@ class MindMapView @JvmOverloads constructor(
 
     private fun drawGrid(canvas: Canvas) {
         val gridPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor("#1E1E2E")
+            color = gridColor
             strokeWidth = 1f
             style = Paint.Style.STROKE
         }
@@ -216,7 +265,7 @@ class MindMapView @JvmOverloads constructor(
 
         // Label
         val maxChars = 18
-        val displayLabel = if (node.label.length > maxChars) node.label.take(maxChars) + "…" else node.label
+        val displayLabel = if (node.label.length > maxChars) node.label.take(maxChars) + "..." else node.label
         canvas.drawText(displayLabel, node.x, node.y + 6f, textPaint)
 
         // Type tag
@@ -224,7 +273,6 @@ class MindMapView @JvmOverloads constructor(
     }
 
     private fun hitTest(touchX: Float, touchY: Float): MindNode? {
-        // Convert touch coords to canvas coords
         val cx = (touchX - translateX) / scaleX
         val cy = (touchY - translateY) / scaleY
         return graph?.nodes?.firstOrNull { node ->
@@ -233,6 +281,14 @@ class MindMapView @JvmOverloads constructor(
     }
 
     private fun parseHexColor(hex: String): Int = Color.parseColor(hex)
+
+    private fun safeParseColor(hex: String, fallback: String): Int {
+        return try {
+            ColorUtils.hexToColorInt(hex)
+        } catch (_: Exception) {
+            Color.parseColor(fallback)
+        }
+    }
 
     /** Reset viewport to center */
     fun resetView() {

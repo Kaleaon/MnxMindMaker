@@ -1,5 +1,6 @@
 package com.kaleaon.mnxmindmaker.ui
 
+import android.content.res.ColorStateList
 import android.os.Bundle
 import androidx.appcompat.app.AppCompatActivity
 import androidx.navigation.fragment.NavHostFragment
@@ -9,6 +10,8 @@ import androidx.navigation.ui.setupActionBarWithNavController
 import androidx.navigation.ui.setupWithNavController
 import com.kaleaon.mnxmindmaker.R
 import com.kaleaon.mnxmindmaker.databinding.ActivityMainBinding
+import com.kaleaon.mnxmindmaker.ktheme.KthemeManager
+import com.kaleaon.mnxmindmaker.ktheme.Theme
 
 class MainActivity : AppCompatActivity() {
 
@@ -17,6 +20,10 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // Initialise Ktheme engine and load bundled themes
+        KthemeManager.init(this)
+
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
         setSupportActionBar(binding.toolbar)
@@ -30,6 +37,37 @@ class MainActivity : AppCompatActivity() {
         )
         setupActionBarWithNavController(navController, appBarConfiguration)
         binding.bottomNav.setupWithNavController(navController)
+
+        // Reactively apply theme colours when the active theme changes
+        KthemeManager.activeTheme.observe(this) { theme ->
+            applyThemeToChrome(theme)
+        }
+    }
+
+    private fun applyThemeToChrome(theme: Theme?) {
+        theme ?: return
+        val cs = theme.colorScheme
+        val surface = KthemeManager.parseColor(cs.surface)
+        val onSurface = KthemeManager.parseColor(cs.onSurface)
+        val background = KthemeManager.parseColor(cs.background)
+        val primary = KthemeManager.parseColor(cs.primary)
+
+        // Toolbar / AppBar
+        binding.toolbar.setBackgroundColor(surface)
+        binding.toolbar.setTitleTextColor(onSurface)
+        binding.appBar.setBackgroundColor(surface)
+
+        // Bottom navigation
+        binding.bottomNav.setBackgroundColor(surface)
+        binding.bottomNav.itemIconTintList = ColorStateList.valueOf(onSurface)
+        binding.bottomNav.itemTextColor = ColorStateList.valueOf(onSurface)
+        binding.bottomNav.itemActiveIndicatorColor = ColorStateList.valueOf(primary)
+
+        // Root background
+        binding.root.setBackgroundColor(background)
+
+        // Status bar colour
+        window.statusBarColor = KthemeManager.parseColor(cs.surfaceVariant)
     }
 
     override fun onSupportNavigateUp(): Boolean {
