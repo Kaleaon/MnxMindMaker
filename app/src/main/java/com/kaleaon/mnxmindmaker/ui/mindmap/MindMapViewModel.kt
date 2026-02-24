@@ -11,6 +11,7 @@ import com.kaleaon.mnxmindmaker.model.MindNode
 import com.kaleaon.mnxmindmaker.model.NodeType
 import com.kaleaon.mnxmindmaker.repository.LlmSettingsRepository
 import com.kaleaon.mnxmindmaker.repository.MnxRepository
+import com.kaleaon.mnxmindmaker.util.DimensionMapper
 import com.kaleaon.mnxmindmaker.util.LlmApiClient
 import com.kaleaon.mnxmindmaker.util.LlmApiException
 import kotlinx.coroutines.Dispatchers
@@ -54,7 +55,8 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
             description = description,
             x = (100..700).random().toFloat(),
             y = (100..600).random().toFloat(),
-            parentId = parentId
+            parentId = parentId,
+            dimensions = DimensionMapper.defaultDimensions(type)
         )
         val updatedNodes = current.nodes.toMutableList().also { it.add(node) }
         val updatedEdges = current.edges.toMutableList()

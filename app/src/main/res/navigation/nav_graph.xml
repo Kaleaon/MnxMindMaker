@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<navigation xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/nav_graph"
+    app:startDestination="@id/mindMapFragment">
+
+    <fragment
+        android:id="@+id/mindMapFragment"
+        android:name="com.kaleaon.mnxmindmaker.ui.mindmap.MindMapFragment"
+        android:label="@string/mind_map_title"
+        tools:layout="@layout/fragment_mind_map">
+        <action
+            android:id="@+id/action_mindMapFragment_to_importFragment"
+            app:destination="@id/importFragment" />
+        <action
+            android:id="@+id/action_mindMapFragment_to_settingsFragment"
+            app:destination="@id/settingsFragment" />
+    </fragment>
+
+    <fragment
+        android:id="@+id/importFragment"
+        android:name="com.kaleaon.mnxmindmaker.ui.importdata.ImportFragment"
+        android:label="@string/import_title"
+        tools:layout="@layout/fragment_import">
+        <action
+            android:id="@+id/action_importFragment_to_mindMapFragment"
+            app:destination="@id/mindMapFragment"
+            app:popUpTo="@id/mindMapFragment"
+            app:popUpToInclusive="true" />
+    </fragment>
+
+    <fragment
+        android:id="@+id/settingsFragment"
+        android:name="com.kaleaon.mnxmindmaker.ui.settings.SettingsFragment"
+        android:label="@string/settings_title"
+        tools:layout="@layout/fragment_settings" />
+
+</navigation>

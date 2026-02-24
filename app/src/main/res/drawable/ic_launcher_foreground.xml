@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Brain/mind icon representing MNX Mind Maker -->
+    <path
+        android:fillColor="#E94560"
+        android:pathData="M54,20 C38,20 26,32 26,48 C26,58 31,66 40,71 L40,84 C40,86 42,88 44,88 L64,88 C66,88 68,86 68,84 L68,71 C77,66 82,58 82,48 C82,32 70,20 54,20 Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M44,50 C44,47 46,45 49,45 C52,45 54,47 54,50 C54,53 52,55 49,55 C46,55 44,53 44,50 Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,50 C54,47 56,45 59,45 C62,45 64,47 64,50 C64,53 62,55 59,55 C56,55 54,53 54,50 Z" />
+</vector>

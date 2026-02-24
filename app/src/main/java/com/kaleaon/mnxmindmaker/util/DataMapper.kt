@@ -4,6 +4,7 @@ import com.kaleaon.mnxmindmaker.model.MindEdge
 import com.kaleaon.mnxmindmaker.model.MindGraph
 import com.kaleaon.mnxmindmaker.model.MindNode
 import com.kaleaon.mnxmindmaker.model.NodeType
+import com.kaleaon.mnxmindmaker.util.DimensionMapper
 import org.json.JSONObject
 
 /**
@@ -26,7 +27,8 @@ object DataMapper {
         val rootNode = MindNode(
             label = graphName,
             type = NodeType.IDENTITY,
-            x = 400f, y = 50f
+            x = 400f, y = 50f,
+            dimensions = DimensionMapper.defaultDimensions(NodeType.IDENTITY)
         )
         nodes.add(rootNode)
 
@@ -40,7 +42,8 @@ object DataMapper {
                 description = para,
                 x = 80f + col * 220f,
                 y = 200f + row * 160f,
-                parentId = rootNode.id
+                parentId = rootNode.id,
+                dimensions = DimensionMapper.defaultDimensions(NodeType.MEMORY)
             )
             nodes.add(node)
             edges.add(MindEdge(fromNodeId = rootNode.id, toNodeId = node.id))
@@ -60,7 +63,8 @@ object DataMapper {
         val rootNode = MindNode(
             label = graphName,
             type = NodeType.IDENTITY,
-            x = 400f, y = 50f
+            x = 400f, y = 50f,
+            dimensions = DimensionMapper.defaultDimensions(NodeType.IDENTITY)
         )
         nodes.add(rootNode)
 
@@ -75,7 +79,8 @@ object DataMapper {
                 description = value.toString().take(500),
                 x = 80f + colIdx * 220f,
                 y = 200f,
-                parentId = rootNode.id
+                parentId = rootNode.id,
+                dimensions = DimensionMapper.defaultDimensions(nodeType)
             )
             nodes.add(node)
             edges.add(MindEdge(fromNodeId = rootNode.id, toNodeId = node.id))

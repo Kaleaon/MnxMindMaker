@@ -345,6 +345,41 @@ object MnxCodec {
     fun serializeMeta(meta: MnxMeta): ByteArray = mnxSerialize { writeStringMap(meta.entries) }
     fun deserializeMeta(data: ByteArray): MnxMeta = mnxDeserialize(data) { MnxMeta(readStringMap()) }
 
+    /**
+     * Serialize an [MnxDimensionalRefs] to bytes.
+     *
+     * Each ref is stored as:
+     *   subject (string) + dimension (string) + target (string) +
+     *   targetType (string) + confidence (float) + metadata (string map)
+     *
+     * Because dimension names and target values are both open-ended strings,
+     * the format supports an unlimited number of named dimensions per subject.
+     */
+    fun serializeDimensionalRefs(refs: MnxDimensionalRefs): ByteArray = mnxSerialize {
+        writeList(refs.refs) { ref ->
+            writeString(ref.subject)
+            writeString(ref.dimension)
+            writeString(ref.target)
+            writeString(ref.targetType)
+            writeFloat(ref.confidence)
+            writeStringMap(ref.metadata)
+        }
+    }
+
+    fun deserializeDimensionalRefs(data: ByteArray): MnxDimensionalRefs = mnxDeserialize(data) {
+        val refs = readList {
+            MnxDimensionalRef(
+                subject = readString(),
+                dimension = readString(),
+                target = readString(),
+                targetType = readString(),
+                confidence = readFloat(),
+                metadata = readStringMap()
+            )
+        }
+        MnxDimensionalRefs(refs)
+    }
+
     // =========================================================================
     //  UTILITIES
     // =========================================================================

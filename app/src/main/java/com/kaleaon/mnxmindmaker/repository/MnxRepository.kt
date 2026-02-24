@@ -11,6 +11,7 @@ import com.kaleaon.mnxmindmaker.model.MindEdge
 import com.kaleaon.mnxmindmaker.model.MindGraph
 import com.kaleaon.mnxmindmaker.model.MindNode
 import com.kaleaon.mnxmindmaker.model.NodeType
+import com.kaleaon.mnxmindmaker.util.DimensionMapper
 import java.io.File
 import java.io.InputStream
 
@@ -57,6 +58,15 @@ class MnxRepository(private val context: Context) {
             put("modified_at", System.currentTimeMillis().toString())
         })
         sections[MnxFormat.MnxSectionType.META] = MnxCodec.serializeMeta(meta)
+
+        // Build DIMENSIONAL_REFS section — N-dimensional coordinates for every node.
+        // Each node contributes one ref per named dimension (e.g. VALUES nodes get
+        // ethical_weight, social_impact, personal_relevance, priority, universality,
+        // actionability, intrinsic_worth — 7 dims — all preserved here even though
+        // only x/y are visible on the canvas).
+        val dimRefs = DimensionMapper.buildDimensionalRefs(graph.nodes)
+        sections[MnxFormat.MnxSectionType.DIMENSIONAL_REFS] =
+            MnxCodec.serializeDimensionalRefs(dimRefs)
 
         val mnxFile = MnxFile(header = MnxHeader(), sections = sections)
 
@@ -113,7 +123,24 @@ class MnxRepository(private val context: Context) {
             }
         }
 
-        return MindGraph(name = graphName, nodes = nodes, edges = edges)
+        // Restore N-dimensional coordinates from DIMENSIONAL_REFS section.
+        // Each node's dimension map is rebuilt so callers can inspect or
+        // re-export the full multi-dimensional structure.
+        val restoredDims: Map<String, Map<String, Float>> =
+            if (mnxFile.hasSection(MnxFormat.MnxSectionType.DIMENSIONAL_REFS)) {
+                val dimRefs = MnxCodec.deserializeDimensionalRefs(
+                    mnxFile.sections[MnxFormat.MnxSectionType.DIMENSIONAL_REFS]!!
+                )
+                DimensionMapper.restoreDimensions(dimRefs)
+            } else emptyMap()
+
+        // Patch restored dimensions back onto nodes
+        val nodesWithDims = nodes.map { node ->
+            val dims = restoredDims[node.id]
+            if (dims != null) node.copy(dimensions = dims) else node
+        }.toMutableList()
+
+        return MindGraph(name = graphName, nodes = nodesWithDims, edges = edges)
     }
 
     fun getMnxExportsDir(): File = File(context.filesDir, "mnx_exports").also { it.mkdirs() }

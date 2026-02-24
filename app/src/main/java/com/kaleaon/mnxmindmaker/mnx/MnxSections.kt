@@ -125,3 +125,38 @@ data class MnxRelationshipWeb(val relationships: List<MnxRelationship>)
 
 // ---- META -------------------------------------------------------------------
 data class MnxMeta(val entries: Map<String, String>)
+
+// ---- DIMENSIONAL_REFS -------------------------------------------------------
+/**
+ * A dimensional reference: an N-dimensional association between any subject
+ * and any target through a named dimension.
+ *
+ * Ported from github.com/Kaleaon/TronProtocol (mindnexus/MnxSections.kt).
+ *
+ * The dimension is an open-ended string — "valence", "confidence",
+ * "ethical_weight", "social_impact", "arousal", "dominance", "recency",
+ * "evidence_strength", "emotional_loading", "priority", "specificity",
+ * "trust", "openness", "neuroticism", or any future semantic axis.
+ * This means the format is not limited to 3 spatial dimensions; a node
+ * may carry arbitrarily many named dimensions (N-dimensional space).
+ *
+ * @property subject    The source entity / concept / node ID.
+ * @property dimension  Named semantic dimension (open-ended string).
+ * @property target     The target value — a float encoded as string, an
+ *                      attachment UUID, literal value, or another entity ID.
+ * @property targetType What kind of target: "scalar", "attachment", "entity",
+ *                      "literal", or any future type.
+ * @property confidence How strong/certain this association is (0.0–1.0).
+ * @property metadata   Additional key-value context.
+ */
+data class MnxDimensionalRef(
+    val subject: String,
+    val dimension: String,
+    val target: String,
+    val targetType: String = "scalar",
+    val confidence: Float = 1.0f,
+    val metadata: Map<String, String> = emptyMap()
+)
+
+/** Complete dimensional-references section — all N-dimensional associations. */
+data class MnxDimensionalRefs(val refs: List<MnxDimensionalRef>)

@@ -16,7 +16,19 @@ data class MindNode(
     val y: Float = 0f,
     val parentId: String? = null,
     val attributes: MutableMap<String, String> = mutableMapOf(),
-    val isExpanded: Boolean = true
+    val isExpanded: Boolean = true,
+    /**
+     * N-dimensional coordinate map for this node.
+     *
+     * Keys are named semantic dimensions (e.g. "confidence", "valence",
+     * "ethical_weight", "social_impact"). The canvas only renders [x]/[y],
+     * but the full dimensionality is persisted in the .mnx DIMENSIONAL_REFS
+     * section so higher-order relationships remain intact.
+     *
+     * Values are normalised floats in [0.0, 1.0] unless the dimension is
+     * bipolar (e.g. "valence" in [-1.0, 1.0]).
+     */
+    val dimensions: Map<String, Float> = emptyMap()
 )
 
 enum class NodeType(val displayName: String, val colorHex: String) {
