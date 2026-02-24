@@ -1,0 +1,177 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/colorBackground">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="16dp">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/settings_title"
+            android:textSize="20sp"
+            android:textStyle="bold"
+            android:textColor="@color/colorOnPrimary"
+            android:layout_marginBottom="16dp" />
+
+        <!-- Provider picker -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/provider_label"
+            android:textColor="@color/colorOnSurface"
+            android:layout_marginBottom="4dp" />
+
+        <Spinner
+            android:id="@+id/spinner_provider"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@color/colorSurface"
+            android:layout_marginBottom="16dp" />
+
+        <!-- API Key -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/api_key_label"
+            android:textColor="@color/colorOnSurface"
+            android:layout_marginBottom="4dp" />
+
+        <TextView
+            android:id="@+id/tv_api_key_hint"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textSize="12sp"
+            android:textColor="@color/colorAccent"
+            android:layout_marginBottom="4dp" />
+
+        <com.google.android.material.textfield.TextInputLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="16dp"
+            app:passwordToggleEnabled="true"
+            style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox">
+
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/et_api_key"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:hint="sk-..."
+                android:inputType="textPassword"
+                android:textColor="@color/colorOnPrimary" />
+        </com.google.android.material.textfield.TextInputLayout>
+
+        <!-- Model -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/model_label"
+            android:textColor="@color/colorOnSurface"
+            android:layout_marginBottom="4dp" />
+
+        <com.google.android.material.textfield.TextInputLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="16dp"
+            style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox">
+
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/et_model"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textColor="@color/colorOnPrimary" />
+        </com.google.android.material.textfield.TextInputLayout>
+
+        <!-- Max Tokens -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/max_tokens_label"
+            android:textColor="@color/colorOnSurface"
+            android:layout_marginBottom="4dp" />
+
+        <com.google.android.material.textfield.TextInputLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="16dp"
+            style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox">
+
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/et_max_tokens"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:inputType="number"
+                android:textColor="@color/colorOnPrimary" />
+        </com.google.android.material.textfield.TextInputLayout>
+
+        <!-- Temperature -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/temperature_label"
+            android:textColor="@color/colorOnSurface"
+            android:layout_marginBottom="4dp" />
+
+        <com.google.android.material.textfield.TextInputLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="16dp"
+            style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox">
+
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/et_temperature"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:inputType="numberDecimal"
+                android:textColor="@color/colorOnPrimary" />
+        </com.google.android.material.textfield.TextInputLayout>
+
+        <!-- Enable toggle -->
+        <com.google.android.material.switchmaterial.SwitchMaterial
+            android:id="@+id/switch_enabled"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/enabled_label"
+            android:textColor="@color/colorOnPrimary"
+            android:layout_marginBottom="24dp" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_save_settings"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/save_settings"
+            android:layout_marginBottom="24dp" />
+
+        <!-- Provider info -->
+        <TextView
+            android:id="@+id/tv_anthropic_info"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textColor="@color/colorOnSurface"
+            android:textSize="12sp"
+            android:layout_marginBottom="4dp" />
+
+        <TextView
+            android:id="@+id/tv_open_ai_info"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textColor="@color/colorOnSurface"
+            android:textSize="12sp"
+            android:layout_marginBottom="4dp" />
+
+        <TextView
+            android:id="@+id/tv_gemini_info"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textColor="@color/colorOnSurface"
+            android:textSize="12sp" />
+
+    </LinearLayout>
+</ScrollView>
