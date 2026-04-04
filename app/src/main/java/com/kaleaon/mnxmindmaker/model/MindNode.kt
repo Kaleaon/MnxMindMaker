@@ -35,11 +35,13 @@ enum class NodeType(val displayName: String, val colorHex: String) {
     IDENTITY("Identity", "#E91E63"),
     MEMORY("Memory", "#2196F3"),
     KNOWLEDGE("Knowledge", "#4CAF50"),
+    STATE("State", "#FF7043"),
     AFFECT("Affect / Emotion", "#FF9800"),
     PERSONALITY("Personality", "#9C27B0"),
     BELIEF("Beliefs", "#00BCD4"),
     VALUE("Values", "#F44336"),
     RELATIONSHIP("Relationships", "#607D8B"),
+    DRIFT_RULE("Drift Rule", "#7E57C2"),
     CUSTOM("Custom", "#795548")
 }
 
