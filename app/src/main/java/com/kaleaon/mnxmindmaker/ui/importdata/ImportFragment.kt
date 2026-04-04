@@ -91,6 +91,7 @@ class ImportFragment : Fragment() {
                 "application/json",
                 "text/csv",
                 "application/csv",
+                "text/tab-separated-values",
                 "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                 "*/*"
             ))
@@ -158,6 +159,7 @@ class ImportFragment : Fragment() {
         FileImporter.Format.MARKDOWN -> "Markdown (.md)"
         FileImporter.Format.DOCX -> "Word document (.docx)"
         FileImporter.Format.CSV -> "CSV (.csv)"
+        FileImporter.Format.TSV -> "TSV (.tsv)"
         FileImporter.Format.JSON -> "JSON (.json)"
         FileImporter.Format.PLAIN_TEXT -> "Plain text (.txt)"
         FileImporter.Format.UNKNOWN -> "text"

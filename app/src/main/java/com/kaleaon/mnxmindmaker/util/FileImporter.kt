@@ -29,6 +29,7 @@ object FileImporter {
         MARKDOWN,
         DOCX,
         CSV,
+        TSV,
         JSON,
         PLAIN_TEXT,
         /** Format could not be determined from URI metadata; use content-based detection. */
@@ -49,6 +50,7 @@ object FileImporter {
                     ext == "docx" -> Format.DOCX
             mimeType == "text/csv" || mimeType == "application/csv" ||
                     mimeType == "text/comma-separated-values" || ext == "csv" -> Format.CSV
+            mimeType == "text/tab-separated-values" || ext == "tsv" -> Format.TSV
             mimeType == "application/json" || ext == "json" -> Format.JSON
             mimeType == "text/plain" || ext == "txt" -> Format.PLAIN_TEXT
             else -> Format.UNKNOWN
@@ -97,6 +99,7 @@ object FileImporter {
         return when (format) {
             Format.MARKDOWN -> MarkdownImporter.fromMarkdown(text, graphName)
             Format.CSV -> CsvImporter.fromCsv(text, graphName)
+            Format.TSV -> CsvImporter.fromTsv(text, graphName)
             Format.JSON -> DataMapper.fromJson(text, graphName)
             Format.PLAIN_TEXT -> DataMapper.fromPlainText(text, graphName)
             Format.UNKNOWN, Format.DOCX -> autoDetectAndParse(text, graphName)
@@ -111,8 +114,20 @@ object FileImporter {
                 DataMapper.fromJson(text, graphName)
             text.contains(Regex("(?m)^#{1,3} ")) ->
                 MarkdownImporter.fromMarkdown(text, graphName)
+            looksLikeDelimitedTable(text, '\t') ->
+                CsvImporter.fromTsv(text, graphName)
+            looksLikeDelimitedTable(text, ',') ->
+                CsvImporter.fromCsv(text, graphName)
             else ->
                 DataMapper.fromPlainText(text, graphName)
         }
+    }
+
+    private fun looksLikeDelimitedTable(text: String, delimiter: Char): Boolean {
+        val lines = text.lines().filter { it.isNotBlank() }
+        if (lines.size < 2) return false
+        val firstCols = CsvImporter.parseCsvRow(lines[0], delimiter).size
+        val secondCols = CsvImporter.parseCsvRow(lines[1], delimiter).size
+        return firstCols > 1 && secondCols > 1
     }
 }

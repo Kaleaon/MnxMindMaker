@@ -33,6 +33,18 @@ object CsvImporter {
     }
 
     fun fromCsv(csvText: String, graphName: String = "Imported Mind"): MindGraph {
+        return fromDelimitedTable(csvText, detectDelimiter(csvText), graphName)
+    }
+
+    fun fromTsv(tsvText: String, graphName: String = "Imported Mind"): MindGraph {
+        return fromDelimitedTable(tsvText, '\t', graphName)
+    }
+
+    private fun fromDelimitedTable(
+        tableText: String,
+        delimiter: Char,
+        graphName: String = "Imported Mind"
+    ): MindGraph {
         val nodes = mutableListOf<MindNode>()
         val edges = mutableListOf<MindEdge>()
 
@@ -44,10 +56,10 @@ object CsvImporter {
         )
         nodes.add(rootNode)
 
-        val lines = csvText.lines().filter { it.isNotBlank() }
+        val lines = tableText.lines().filter { it.isNotBlank() }
         if (lines.size < 2) return MindGraph(name = graphName, nodes = nodes, edges = edges)
 
-        val headers = parseCsvRow(lines[0]).map { it.trim().lowercase() }
+        val headers = parseCsvRow(lines[0], delimiter).map { it.trim().lowercase() }
         val labelIdx = headers.indexOfFirst { it == "label" || it == "name" }
         val typeIdx = headers.indexOfFirst { it == "type" }
         val descIdx = headers.indexOfFirst { it == "description" || it == "desc" }
@@ -56,7 +68,7 @@ object CsvImporter {
         var rowPos = 0
 
         for (lineIdx in 1 until lines.size) {
-            val values = parseCsvRow(lines[lineIdx])
+            val values = parseCsvRow(lines[lineIdx], delimiter)
             if (values.isEmpty()) continue
 
             val label = (if (labelIdx >= 0 && labelIdx < values.size) values[labelIdx]
@@ -113,13 +125,20 @@ object CsvImporter {
         return MindGraph(name = graphName, nodes = nodes, edges = edges)
     }
 
+    private fun detectDelimiter(tableText: String): Char {
+        val firstLine = tableText.lineSequence().firstOrNull { it.isNotBlank() } ?: return ','
+        val commaCount = firstLine.count { it == ',' }
+        val tabCount = firstLine.count { it == '\t' }
+        return if (tabCount > commaCount) '\t' else ','
+    }
+
     /**
      * Parse one CSV row following RFC 4180:
      * - Fields may be enclosed in double quotes.
      * - A double quote inside a quoted field is escaped as `""`.
      * - Unquoted fields are terminated by `,` or end-of-line.
      */
-    fun parseCsvRow(line: String): List<String> {
+    fun parseCsvRow(line: String, delimiter: Char = ','): List<String> {
         val result = mutableListOf<String>()
         val current = StringBuilder()
         var inQuotes = false
@@ -133,7 +152,7 @@ object CsvImporter {
                     i++ // skip second quote of escaped pair
                 }
                 ch == '"' && inQuotes -> inQuotes = false
-                ch == ',' && !inQuotes -> {
+                ch == delimiter && !inQuotes -> {
                     result.add(current.toString())
                     current.clear()
                 }

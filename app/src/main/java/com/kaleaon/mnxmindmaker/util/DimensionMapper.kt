@@ -63,6 +63,16 @@ object DimensionMapper {
             "verifiability",       // Can it be externally verified?
             "abstraction"          // Concrete ↔ abstract
         )
+        NodeType.STATE -> listOf(
+            "continuity_strain",
+            "overload_level",
+            "confabulation_risk",
+            "relational_security",
+            "affect_intensity",
+            "suppression_pressure",
+            "substrate_confidence",
+            "expression_clarity"
+        )
         NodeType.AFFECT -> listOf(
             "valence",             // Positive/negative (-1 … +1)
             "arousal",             // Calm ↔ excited (0 … 1)
@@ -106,6 +116,12 @@ object DimensionMapper {
             "affective_tone",      // Overall positive/negative (-1 … +1)
             "dependency",          // Reliance on the other
             "conflict_level"       // Degree of ongoing friction
+        )
+        NodeType.DRIFT_RULE -> listOf(
+            "severity",
+            "activation_threshold",
+            "correction_confidence",
+            "trigger_sensitivity"
         )
         NodeType.CUSTOM -> listOf(
             "salience",            // How attention-grabbing

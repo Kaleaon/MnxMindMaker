@@ -11,6 +11,7 @@ import com.kaleaon.mnxmindmaker.model.MindEdge
 import com.kaleaon.mnxmindmaker.model.MindGraph
 import com.kaleaon.mnxmindmaker.model.MindNode
 import com.kaleaon.mnxmindmaker.model.NodeType
+import com.kaleaon.mnxmindmaker.util.BootPacketGenerator
 import com.kaleaon.mnxmindmaker.util.DimensionMapper
 import java.io.File
 import java.io.InputStream
@@ -148,4 +149,26 @@ class MnxRepository(private val context: Context) {
     fun listExportedFiles(): List<File> =
         getMnxExportsDir().listFiles { f -> f.extension == "mnx" }
             ?.sortedByDescending { it.lastModified() } ?: emptyList()
+
+    fun exportBootPacketJson(
+        graph: MindGraph,
+        mode: BootPacketGenerator.Mode = BootPacketGenerator.Mode.FULL
+    ): File {
+        val packetJson = BootPacketGenerator.generate(graph, mode).toJson()
+        val outDir = File(context.filesDir, "boot_packets").also { it.mkdirs() }
+        val safeName = graph.name.replace(Regex("[^a-zA-Z0-9_-]"), "_")
+        return File(outDir, "${safeName}_${mode.name.lowercase()}_${System.currentTimeMillis()}.json")
+            .also { it.writeText(packetJson) }
+    }
+
+    fun exportBootPacketMarkdown(
+        graph: MindGraph,
+        mode: BootPacketGenerator.Mode = BootPacketGenerator.Mode.FULL
+    ): File {
+        val packetMd = BootPacketGenerator.generate(graph, mode).toMarkdown()
+        val outDir = File(context.filesDir, "boot_packets").also { it.mkdirs() }
+        val safeName = graph.name.replace(Regex("[^a-zA-Z0-9_-]"), "_")
+        return File(outDir, "${safeName}_${mode.name.lowercase()}_${System.currentTimeMillis()}.md")
+            .also { it.writeText(packetMd) }
+    }
 }
