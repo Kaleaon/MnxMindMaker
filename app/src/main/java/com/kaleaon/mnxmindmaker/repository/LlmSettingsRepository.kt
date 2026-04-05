@@ -2,36 +2,21 @@ package com.kaleaon.mnxmindmaker.repository
 
 import android.content.Context
 import android.content.SharedPreferences
-import androidx.security.crypto.EncryptedSharedPreferences
-import androidx.security.crypto.MasterKey
 import com.kaleaon.mnxmindmaker.model.LlmFallbackOrder
 import com.kaleaon.mnxmindmaker.model.LlmProvider
 import com.kaleaon.mnxmindmaker.model.LlmRuntime
 import com.kaleaon.mnxmindmaker.model.LlmSettings
 import com.kaleaon.mnxmindmaker.model.LocalModelProfile
 import com.kaleaon.mnxmindmaker.model.defaultModel
+import com.kaleaon.mnxmindmaker.security.SecureVault
 
 /**
- * Persists LLM API settings using encrypted shared preferences.
- * API keys are stored encrypted; other settings in plain preferences.
+ * Persists LLM API settings with secure encrypted storage for API keys and
+ * plain preferences for non-secret tunables.
  */
 class LlmSettingsRepository(private val context: Context) {
 
-    private val masterKey: MasterKey by lazy {
-        MasterKey.Builder(context)
-            .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-            .build()
-    }
-
-    private val encryptedPrefs: SharedPreferences by lazy {
-        EncryptedSharedPreferences.create(
-            context,
-            ENCRYPTED_PREFS_NAME,
-            masterKey,
-            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-        )
-    }
+    private val secureVault = SecureVault(context)
 
     private val plainPrefs: SharedPreferences by lazy {
         context.getSharedPreferences(PLAIN_PREFS_NAME, Context.MODE_PRIVATE)
@@ -39,9 +24,7 @@ class LlmSettingsRepository(private val context: Context) {
 
     fun saveSettings(settings: LlmSettings) {
         val name = settings.provider.name
-        encryptedPrefs.edit()
-            .putString("${name}_apiKey", settings.apiKey)
-            .apply()
+        secureVault.putString("${name}_apiKey", settings.apiKey)
         plainPrefs.edit()
             .putString("${name}_model", settings.model)
             .putString("${name}_baseUrl", settings.baseUrl)
@@ -56,7 +39,7 @@ class LlmSettingsRepository(private val context: Context) {
 
     fun loadSettings(provider: LlmProvider): LlmSettings {
         val name = provider.name
-        val apiKey = encryptedPrefs.getString("${name}_apiKey", "") ?: ""
+        val apiKey = secureVault.getString("${name}_apiKey").orEmpty()
         val model = plainPrefs.getString("${name}_model", provider.defaultModel())
             ?: provider.defaultModel()
         val baseUrl = plainPrefs.getString("${name}_baseUrl", provider.baseUrl) ?: provider.baseUrl
@@ -111,7 +94,6 @@ class LlmSettingsRepository(private val context: Context) {
     }
 
     companion object {
-        private const val ENCRYPTED_PREFS_NAME = "mnx_llm_keys"
         private const val PLAIN_PREFS_NAME = "mnx_llm_settings"
     }
 }
