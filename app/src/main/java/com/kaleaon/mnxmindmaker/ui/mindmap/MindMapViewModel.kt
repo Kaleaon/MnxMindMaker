@@ -319,7 +319,7 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
                         llmApiClient = llmClient,
                         settings = activeSettings,
                         registry = registry,
-                        policy = ToolPolicyEngine(registry),
+                        policy = ToolPolicyEngine(registry.specs().associateBy { it.name }),
                         requestApproval = { requestToolApproval(it) }
                     )
                     orchestrator.run(systemPrompt, prompt)
