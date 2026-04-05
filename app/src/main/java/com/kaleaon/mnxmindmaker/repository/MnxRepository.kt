@@ -7,6 +7,9 @@ import com.kaleaon.mnxmindmaker.mnx.MnxFormat
 import com.kaleaon.mnxmindmaker.mnx.MnxHeader
 import com.kaleaon.mnxmindmaker.mnx.MnxIdentity
 import com.kaleaon.mnxmindmaker.mnx.MnxMeta
+import com.kaleaon.mnxmindmaker.mnx.mnxDeserialize
+import com.kaleaon.mnxmindmaker.mnx.mnxSerialize
+import com.kaleaon.mnxmindmaker.model.MindEdge
 import com.kaleaon.mnxmindmaker.model.MindGraph
 import com.kaleaon.mnxmindmaker.model.MindNode
 import com.kaleaon.mnxmindmaker.model.NodeType
@@ -21,6 +24,87 @@ import java.io.InputStream
  */
 class MnxRepository(private val context: Context) {
 
+    companion object {
+        internal const val GRAPH_PAYLOAD_SECTION_TYPE: Short = (-1).toShort()
+
+        internal fun serializeGraphPayload(graph: MindGraph): ByteArray = mnxSerialize {
+            writeString(graph.id)
+            writeString(graph.name)
+            writeLong(graph.createdAt)
+            writeLong(graph.modifiedAt)
+
+            writeList(graph.nodes) { node ->
+                writeString(node.id)
+                writeString(node.label)
+                writeString(node.type.name)
+                writeString(node.description)
+                writeFloat(node.x)
+                writeFloat(node.y)
+                writeBoolean(node.parentId != null)
+                if (node.parentId != null) writeString(node.parentId)
+                writeStringMap(node.attributes)
+                writeBoolean(node.isExpanded)
+                writeStringFloatMap(node.dimensions)
+            }
+
+            writeList(graph.edges) { edge ->
+                writeString(edge.id)
+                writeString(edge.fromNodeId)
+                writeString(edge.toNodeId)
+                writeString(edge.label)
+                writeFloat(edge.strength)
+            }
+        }
+
+        internal fun deserializeGraphPayload(data: ByteArray): MindGraph = mnxDeserialize(data) {
+            val graphId = readString()
+            val graphName = readString()
+            val createdAt = readLong()
+            val modifiedAt = readLong()
+
+            val nodes = readList {
+                val nodeId = readString()
+                val nodeLabel = readString()
+                val typeName = readString()
+                val nodeType = NodeType.values().find { it.name == typeName } ?: NodeType.CUSTOM
+                val nodeDescription = readString()
+                val nodeX = readFloat()
+                val nodeY = readFloat()
+                val parentNodeExists = readBoolean()
+                MindNode(
+                    id = nodeId,
+                    label = nodeLabel,
+                    type = nodeType,
+                    description = nodeDescription,
+                    x = nodeX,
+                    y = nodeY,
+                    parentId = if (parentNodeExists) readString() else null,
+                    attributes = readStringMap().toMutableMap(),
+                    isExpanded = readBoolean(),
+                    dimensions = readStringFloatMap()
+                )
+            }.toMutableList()
+
+            val edges = readList {
+                MindEdge(
+                    id = readString(),
+                    fromNodeId = readString(),
+                    toNodeId = readString(),
+                    label = readString(),
+                    strength = readFloat()
+                )
+            }.toMutableList()
+
+            MindGraph(
+                id = graphId,
+                name = graphName,
+                nodes = nodes,
+                edges = edges,
+                createdAt = createdAt,
+                modifiedAt = modifiedAt
+            )
+        }
+    }
     data class ContinuityMetadata(
         val snapshotId: String,
         val parentSnapshotId: String?,
@@ -48,6 +132,7 @@ class MnxRepository(private val context: Context) {
 
     fun buildMnxFile(graph: MindGraph, continuityMetadata: ContinuityMetadata? = null): MnxFile {
         val sections = mutableMapOf<MnxFormat.MnxSectionType, ByteArray>()
+        val rawSections = mutableMapOf<Short, ByteArray>()
 
         // Build IDENTITY section from the root identity node (if present)
         val identityNode = graph.nodes.firstOrNull { it.type == NodeType.IDENTITY }
@@ -72,10 +157,12 @@ class MnxRepository(private val context: Context) {
         // Build META section
         val meta = MnxMeta(buildMap {
             put("app", "MnxMindMaker")
+            put("graph_id", graph.id)
             put("graph_name", graph.name)
             put("node_count", graph.nodes.size.toString())
             put("edge_count", graph.edges.size.toString())
             put("created_at", graph.createdAt.toString())
+            put("modified_at", graph.modifiedAt.toString())
             put("modified_at", System.currentTimeMillis().toString())
             continuityMetadata?.let {
                 put("snapshot_id", it.snapshotId)
@@ -92,6 +179,23 @@ class MnxRepository(private val context: Context) {
         sections[MnxFormat.MnxSectionType.DIMENSIONAL_REFS] =
             MnxCodec.serializeDimensionalRefs(dimRefs)
 
+        rawSections[GRAPH_PAYLOAD_SECTION_TYPE] = serializeGraphPayload(graph)
+
+        val mnxFile = MnxFile(
+            header = MnxHeader(
+                createdTimestamp = graph.createdAt,
+                modifiedTimestamp = graph.modifiedAt
+            ),
+            sections = sections,
+            rawSections = rawSections
+        )
+
+        val outDir = File(context.filesDir, "mnx_exports")
+        outDir.mkdirs()
+        val safeName = graph.name.replace(Regex("[^a-zA-Z0-9_-]"), "_")
+        val outFile = File(outDir, "${safeName}_${System.currentTimeMillis()}.mnx")
+        MnxCodec.encodeToFile(mnxFile, outFile)
+        return outFile
         return MnxFile(header = MnxHeader(), sections = sections)
     }
 
@@ -101,6 +205,12 @@ class MnxRepository(private val context: Context) {
      */
     fun importFromMnx(stream: InputStream): MindGraph {
         val mnxFile = MnxCodec.decode(stream)
+
+        // Preferred modern import path: fully serialized graph payload.
+        if (mnxFile.hasRawSection(GRAPH_PAYLOAD_SECTION_TYPE)) {
+            return deserializeGraphPayload(mnxFile.rawSections[GRAPH_PAYLOAD_SECTION_TYPE]!!)
+        }
+
         var graphName = "Untitled Mind"
         val nodes = mutableListOf<MindNode>()
         val edges = mutableListOf<com.kaleaon.mnxmindmaker.model.MindEdge>()
