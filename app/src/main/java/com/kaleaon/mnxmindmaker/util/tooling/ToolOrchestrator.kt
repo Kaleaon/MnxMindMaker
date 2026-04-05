@@ -4,6 +4,7 @@ import com.kaleaon.mnxmindmaker.model.LlmSettings
 import com.kaleaon.mnxmindmaker.util.LlmApiClient
 import org.json.JSONArray
 import org.json.JSONObject
+import com.kaleaon.mnxmindmaker.util.observability.RequestTracer
 
 class ToolOrchestrator(
     private val llmApiClient: LlmApiClient,
@@ -11,21 +12,26 @@ class ToolOrchestrator(
     private val registry: ToolRegistry,
     private val policy: ToolPolicyEngine,
     private val requestApproval: suspend (ToolApprovalRequest) -> Boolean,
-    private val maxToolRounds: Int = 6
+    private val maxToolRounds: Int = 6,
+    private val tracer: RequestTracer? = null,
+    private val nowMs: () -> Long = { System.currentTimeMillis() }
 ) {
 
     suspend fun run(systemPrompt: String, userPrompt: String): String {
         val transcript = mutableListOf<JSONObject>()
         transcript += JSONObject().put("role", "user").put("content", userPrompt)
+        tracer?.recordPromptPipeline("user_prompt", userPrompt)
 
         val textParts = mutableListOf<String>()
         repeat(maxToolRounds) {
+            val providerStart = nowMs()
             val turn = llmApiClient.completeAssistantTurn(
                 settings = settings,
                 systemPrompt = systemPrompt,
                 transcript = transcript,
                 tools = registry.specs()
             )
+            tracer?.recordProviderResponse(settings.provider.name, turn.text, nowMs() - providerStart)
             if (turn.text.isNotBlank()) {
                 textParts += turn.text.trim()
             }
@@ -36,7 +42,9 @@ class ToolOrchestrator(
 
             val toolResults = JSONArray()
             for (invocation in turn.toolInvocations) {
+                val toolStart = nowMs()
                 val result = executeInvocation(invocation)
+                tracer?.recordToolCall(invocation, result, nowMs() - toolStart)
                 toolResults.put(JSONObject()
                     .put("tool_call_id", result.toolCallId)
                     .put("name", result.toolName)
