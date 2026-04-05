@@ -36,6 +36,19 @@
             android:textColor="@color/colorOnSurface"
             android:textSize="12sp"
             android:text="@string/no_node_selected" />
+
+        <TextView
+            android:id="@+id/tv_llm_status_badge"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:paddingHorizontal="8dp"
+            android:paddingVertical="2dp"
+            android:text="@string/llm_status_remote_active"
+            android:textSize="11sp"
+            android:textStyle="bold"
+            android:textColor="@color/colorOnPrimary"
+            android:background="@color/colorAccent" />
     </LinearLayout>
 
     <!-- Mind Map Canvas -->

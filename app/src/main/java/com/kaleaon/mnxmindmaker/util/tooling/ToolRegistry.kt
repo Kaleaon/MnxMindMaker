@@ -17,33 +17,33 @@ class ToolRegistry(
         ToolSpec(
             name = "get_graph_summary",
             description = "Return graph-level summary with node/edge counts and name.",
-            mode = ToolMode.READ_ONLY
+            operationClass = ToolOperationClass.READ_ONLY
         ),
         ToolSpec(
             name = "list_nodes",
             description = "List nodes in the graph with id, label, type.",
-            mode = ToolMode.READ_ONLY
+            operationClass = ToolOperationClass.READ_ONLY
         ),
         ToolSpec(
             name = "get_node",
             description = "Get detailed node by id.",
-            mode = ToolMode.READ_ONLY,
+            operationClass = ToolOperationClass.READ_ONLY,
             inputSchema = JSONObject().put("type", "object").put("properties", JSONObject().put("node_id", JSONObject().put("type", "string")))
         ),
         ToolSpec(
             name = "add_node",
             description = "Create a node. Args: label, type, description(optional), parent_id(optional).",
-            mode = ToolMode.MUTATION
+            operationClass = ToolOperationClass.MUTATING
         ),
         ToolSpec(
             name = "link_nodes",
             description = "Create edge between source_node_id and target_node_id.",
-            mode = ToolMode.MUTATION
+            operationClass = ToolOperationClass.MUTATING
         ),
         ToolSpec(
             name = "set_node_attribute",
             description = "Set node attributes map key/value for a node id.",
-            mode = ToolMode.MUTATION
+            operationClass = ToolOperationClass.MUTATING
         )
     )
 
