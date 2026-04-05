@@ -9,6 +9,23 @@ enum class LlmRuntime {
 }
 
 /**
+ * Global privacy modes.
+ */
+enum class PrivacyMode {
+    STRICT_LOCAL_ONLY,
+    HYBRID
+}
+
+/**
+ * End-to-end classification tags used for outbound data governance.
+ */
+enum class DataClassification {
+    PUBLIC,
+    SENSITIVE,
+    RESTRICTED
+}
+
+/**
  * Preferred resolution order when local inference is enabled.
  */
 enum class LlmFallbackOrder {
@@ -65,7 +82,9 @@ data class LlmSettings(
     val temperature: Float = 0.7f,
     val localModelPath: String = "",
     val localProfile: LocalModelProfile = LocalModelProfile.BALANCED,
-    val fallbackOrder: LlmFallbackOrder = LlmFallbackOrder.REMOTE_ONLY
+    val fallbackOrder: LlmFallbackOrder = LlmFallbackOrder.REMOTE_ONLY,
+    val outboundClassification: DataClassification = DataClassification.SENSITIVE,
+    val tlsPinnedSpkiSha256: String = ""
 ) {
     val capabilities: LlmCapabilityFlags
         get() = provider.defaultCapabilities(localProfile)
