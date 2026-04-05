@@ -17,6 +17,7 @@ import com.kaleaon.mnxmindmaker.R
 import com.kaleaon.mnxmindmaker.databinding.FragmentMindMapBinding
 import com.kaleaon.mnxmindmaker.ktheme.KthemeManager
 import com.kaleaon.mnxmindmaker.model.NodeType
+import com.kaleaon.mnxmindmaker.util.tooling.ToolApprovalRequest
 
 class MindMapFragment : Fragment() {
 
@@ -79,6 +80,11 @@ class MindMapFragment : Fragment() {
             msg ?: return@observe
             Snackbar.make(binding.root, msg, Snackbar.LENGTH_LONG).show()
             viewModel.clearError()
+        }
+
+        viewModel.toolApprovalRequest.observe(viewLifecycleOwner) { request ->
+            request ?: return@observe
+            showToolApprovalDialog(request)
         }
 
         viewModel.isLoading.observe(viewLifecycleOwner) { loading ->
@@ -145,6 +151,27 @@ class MindMapFragment : Fragment() {
                 if (prompt.isNotEmpty()) viewModel.askLlmForMindDesign(prompt)
             }
             .setNegativeButton(R.string.cancel, null)
+            .show()
+    }
+
+
+    private fun showToolApprovalDialog(request: ToolApprovalRequest) {
+        val message = buildString {
+            append("Allow AI tool call?\n\n")
+            append("Tool: ${request.toolName}\n")
+            append("Reason: ${request.reason}\n\n")
+            append("Arguments:\n${request.arguments}")
+        }
+        AlertDialog.Builder(requireContext())
+            .setTitle("AI Tool Approval")
+            .setMessage(message)
+            .setCancelable(false)
+            .setPositiveButton("Allow") { _, _ ->
+                viewModel.resolveToolApproval(request.id, true)
+            }
+            .setNegativeButton("Deny") { _, _ ->
+                viewModel.resolveToolApproval(request.id, false)
+            }
             .show()
     }
 

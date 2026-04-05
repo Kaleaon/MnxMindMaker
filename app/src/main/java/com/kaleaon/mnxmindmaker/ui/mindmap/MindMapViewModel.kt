@@ -14,6 +14,11 @@ import com.kaleaon.mnxmindmaker.repository.MnxRepository
 import com.kaleaon.mnxmindmaker.util.DimensionMapper
 import com.kaleaon.mnxmindmaker.util.LlmApiClient
 import com.kaleaon.mnxmindmaker.util.LlmApiException
+import com.kaleaon.mnxmindmaker.util.tooling.ToolApprovalRequest
+import com.kaleaon.mnxmindmaker.util.tooling.ToolOrchestrator
+import com.kaleaon.mnxmindmaker.util.tooling.ToolPolicyEngine
+import com.kaleaon.mnxmindmaker.util.tooling.ToolRegistry
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -43,6 +48,11 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
 
     private val _isLoading = MutableLiveData(false)
     val isLoading: LiveData<Boolean> get() = _isLoading
+
+    private val _toolApprovalRequest = MutableLiveData<ToolApprovalRequest?>()
+    val toolApprovalRequest: LiveData<ToolApprovalRequest?> get() = _toolApprovalRequest
+
+    private val pendingApprovals = mutableMapOf<String, CompletableDeferred<Boolean>>()
 
     // ---- Graph editing -------------------------------------------------------
 
@@ -141,13 +151,26 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
                     _error.value = "No LLM API configured. Go to Settings to add an API key."
                     return@launch
                 }
-                val systemPrompt = """You are an AI mind design assistant helping the user build an AI mind graph 
-                    |in .mnx format. The mind graph represents an AI's identity, memories, knowledge, 
+                val systemPrompt = """You are an AI mind design assistant helping the user build an AI mind graph
+                    |in .mnx format. The mind graph represents an AI's identity, memories, knowledge,
                     |emotions, personality, beliefs, values, and relationships.
-                    |Provide concise, structured suggestions for mind nodes and connections.
+                    |Use tools whenever graph state inspection or mutation is needed.
+                    |When tool use is unnecessary, provide concise, structured suggestions.
                     |Format suggestions as: NodeType: label - description""".trimMargin()
+
                 val response = withContext(Dispatchers.IO) {
-                    llmClient.complete(activeSettings, systemPrompt, prompt)
+                    val registry = ToolRegistry(
+                        getGraph = { _graph.value ?: newDefaultGraph() },
+                        setGraph = { updated -> _graph.postValue(updated) }
+                    )
+                    val orchestrator = ToolOrchestrator(
+                        llmApiClient = llmClient,
+                        settings = activeSettings,
+                        registry = registry,
+                        policy = ToolPolicyEngine(registry),
+                        requestApproval = { requestToolApproval(it) }
+                    )
+                    orchestrator.run(systemPrompt, prompt)
                 }
                 _llmResponse.value = response
             } catch (e: LlmApiException) {
@@ -158,6 +181,18 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
                 _isLoading.value = false
             }
         }
+    }
+
+    fun resolveToolApproval(requestId: String, approved: Boolean) {
+        pendingApprovals.remove(requestId)?.complete(approved)
+        _toolApprovalRequest.value = null
+    }
+
+    private suspend fun requestToolApproval(request: ToolApprovalRequest): Boolean {
+        val deferred = CompletableDeferred<Boolean>()
+        pendingApprovals[request.id] = deferred
+        _toolApprovalRequest.postValue(request)
+        return deferred.await()
     }
 
     fun clearError() { _error.value = null }
