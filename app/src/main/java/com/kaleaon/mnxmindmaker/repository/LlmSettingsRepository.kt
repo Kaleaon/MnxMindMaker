@@ -9,6 +9,8 @@ import com.kaleaon.mnxmindmaker.model.LlmProvider
 import com.kaleaon.mnxmindmaker.model.LlmRuntime
 import com.kaleaon.mnxmindmaker.model.LlmSettings
 import com.kaleaon.mnxmindmaker.model.LocalModelProfile
+import com.kaleaon.mnxmindmaker.model.ComputeBackend
+import com.kaleaon.mnxmindmaker.model.LocalRuntimeControls
 import com.kaleaon.mnxmindmaker.model.defaultModel
 
 /**
@@ -51,6 +53,11 @@ class LlmSettingsRepository(private val context: Context) {
             .putString("${name}_localModelPath", settings.localModelPath)
             .putString("${name}_localProfile", settings.localProfile.name)
             .putString("${name}_fallbackOrder", settings.fallbackOrder.name)
+            .putString("${name}_computeBackend", settings.runtimeControls.computeBackend.name)
+            .putInt("${name}_contextWindow", settings.runtimeControls.contextWindowTokens)
+            .putString("${name}_quantProfile", settings.runtimeControls.quantizationProfile)
+            .putInt("${name}_maxRamMb", settings.runtimeControls.maxRamMb)
+            .putInt("${name}_maxVramMb", settings.runtimeControls.maxVramMb)
             .apply()
     }
 
@@ -70,6 +77,16 @@ class LlmSettingsRepository(private val context: Context) {
         val fallbackOrder = plainPrefs.getString("${name}_fallbackOrder", LlmFallbackOrder.REMOTE_ONLY.name)
             ?.let { runCatching { LlmFallbackOrder.valueOf(it) }.getOrNull() }
             ?: LlmFallbackOrder.REMOTE_ONLY
+        val computeBackend = plainPrefs.getString("${name}_computeBackend", ComputeBackend.AUTO.name)
+            ?.let { runCatching { ComputeBackend.valueOf(it) }.getOrNull() }
+            ?: ComputeBackend.AUTO
+        val runtimeControls = LocalRuntimeControls(
+            computeBackend = computeBackend,
+            contextWindowTokens = plainPrefs.getInt("${name}_contextWindow", localProfile.contextWindowTokens),
+            quantizationProfile = plainPrefs.getString("${name}_quantProfile", "Q4_K_M") ?: "Q4_K_M",
+            maxRamMb = plainPrefs.getInt("${name}_maxRamMb", 4096),
+            maxVramMb = plainPrefs.getInt("${name}_maxVramMb", 2048)
+        )
         return LlmSettings(
             provider = provider,
             apiKey = apiKey,
@@ -80,7 +97,8 @@ class LlmSettingsRepository(private val context: Context) {
             temperature = temperature,
             localModelPath = localModelPath,
             localProfile = localProfile,
-            fallbackOrder = fallbackOrder
+            fallbackOrder = fallbackOrder,
+            runtimeControls = runtimeControls
         )
     }
 
@@ -98,6 +116,11 @@ class LlmSettingsRepository(private val context: Context) {
             return listOf(local) + remote
         }
         return if (remote.isNotEmpty()) remote else listOfNotNull(local)
+    }
+
+    fun getLocalFallbackCandidate(): LlmSettings? {
+        val local = loadSettings(LlmProvider.LOCAL_ON_DEVICE)
+        return local.takeIf { it.enabled && it.isUsable() }
     }
 
     private fun LlmSettings.isUsable(): Boolean {

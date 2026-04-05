@@ -68,6 +68,9 @@ class MindMapFragment : Fragment() {
             else
                 getString(R.string.no_node_selected)
         }
+        viewModel.llmStatusBadge.observe(viewLifecycleOwner) { status ->
+            binding.tvLlmStatusBadge.text = status
+        }
 
         viewModel.exportedFile.observe(viewLifecycleOwner) { file ->
             file ?: return@observe

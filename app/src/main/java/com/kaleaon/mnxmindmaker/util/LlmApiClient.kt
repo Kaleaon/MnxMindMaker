@@ -12,8 +12,6 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.File
-import org.json.JSONArray
-import org.json.JSONObject
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 
@@ -181,15 +179,22 @@ class LlmApiClient(
         transcript: List<JSONObject>,
         tools: List<ToolSpec>
     ): AssistantTurn {
+        val userMessage = transcript.lastOrNull { it.optString("role", "user") == "user" }
+            ?.opt("content")
+            ?.toString()
+            ?: ""
         return when (settings.provider) {
-            LlmProvider.ANTHROPIC -> callAnthropic(settings, systemPrompt, userMessage)
-            LlmProvider.OPENAI -> callOpenAI(settings, systemPrompt, userMessage)
-            LlmProvider.GEMINI -> callGemini(settings, systemPrompt, userMessage)
-            LlmProvider.VLLM_GEMMA4 -> callOpenAICompatible(settings, systemPrompt, userMessage)
-            LlmProvider.LOCAL_ON_DEVICE -> resolveOnDeviceBackend(settings).streamCompletion(
-                settings = settings,
-                systemPrompt = systemPrompt,
-                userMessage = userMessage
+            LlmProvider.ANTHROPIC -> callAnthropicTurn(settings, systemPrompt, transcript, tools)
+            LlmProvider.OPENAI -> callOpenAITurn(settings, systemPrompt, transcript, tools)
+            LlmProvider.GEMINI -> callGeminiTurn(settings, systemPrompt, transcript, tools)
+            LlmProvider.VLLM_GEMMA4 -> callOpenAICompatibleTurn(settings, systemPrompt, transcript, tools)
+            LlmProvider.LOCAL_ON_DEVICE -> AssistantTurn(
+                text = resolveOnDeviceBackend(settings).streamCompletion(
+                    settings = settings,
+                    systemPrompt = systemPrompt,
+                    userMessage = userMessage
+                ),
+                raw = JSONObject()
             )
         }
     }
@@ -202,14 +207,6 @@ class LlmApiClient(
     private fun resolveOnDeviceBackend(settings: LlmSettings): LocalOnDeviceBackend {
         return onDeviceBackends.values.firstOrNull()
             ?: throw LlmApiException("No on-device backend is registered")
-    }
-
-    private fun callAnthropic(settings: LlmSettings, systemPrompt: String, userMessage: String): String {
-            LlmProvider.ANTHROPIC -> callAnthropicTurn(settings, systemPrompt, transcript, tools)
-            LlmProvider.OPENAI -> callOpenAITurn(settings, systemPrompt, transcript, tools)
-            LlmProvider.GEMINI -> callGeminiTurn(settings, systemPrompt, transcript, tools)
-            LlmProvider.VLLM_GEMMA4 -> callOpenAICompatibleTurn(settings, systemPrompt, transcript, tools)
-        }
     }
 
     private fun callAnthropicTurn(

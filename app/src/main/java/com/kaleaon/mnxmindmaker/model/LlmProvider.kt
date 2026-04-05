@@ -25,6 +25,20 @@ enum class LocalModelProfile(val displayName: String, val contextWindowTokens: I
     QUALITY("Quality (16k)", 16384)
 }
 
+enum class ComputeBackend(val label: String) {
+    CPU("CPU"),
+    GPU("GPU"),
+    AUTO("Auto")
+}
+
+data class LocalRuntimeControls(
+    val computeBackend: ComputeBackend = ComputeBackend.AUTO,
+    val contextWindowTokens: Int = 8192,
+    val quantizationProfile: String = "Q4_K_M",
+    val maxRamMb: Int = 4096,
+    val maxVramMb: Int = 2048
+)
+
 /**
  * Capability flags used by higher-level features (tool planning, packet generation).
  */
@@ -65,7 +79,8 @@ data class LlmSettings(
     val temperature: Float = 0.7f,
     val localModelPath: String = "",
     val localProfile: LocalModelProfile = LocalModelProfile.BALANCED,
-    val fallbackOrder: LlmFallbackOrder = LlmFallbackOrder.REMOTE_ONLY
+    val fallbackOrder: LlmFallbackOrder = LlmFallbackOrder.REMOTE_ONLY,
+    val runtimeControls: LocalRuntimeControls = LocalRuntimeControls()
 ) {
     val capabilities: LlmCapabilityFlags
         get() = provider.defaultCapabilities(localProfile)

@@ -10,15 +10,13 @@ import com.kaleaon.mnxmindmaker.model.MindEdge
 import com.kaleaon.mnxmindmaker.model.MindGraph
 import com.kaleaon.mnxmindmaker.model.MindNode
 import com.kaleaon.mnxmindmaker.model.NodeType
+import com.kaleaon.mnxmindmaker.model.LlmRuntime
 import com.kaleaon.mnxmindmaker.repository.LlmSettingsRepository
 import com.kaleaon.mnxmindmaker.repository.MnxRepository
 import com.kaleaon.mnxmindmaker.util.DimensionMapper
 import com.kaleaon.mnxmindmaker.util.LlmApiClient
 import com.kaleaon.mnxmindmaker.util.LlmApiException
 import com.kaleaon.mnxmindmaker.util.tooling.ToolApprovalRequest
-import com.kaleaon.mnxmindmaker.util.tooling.ToolOrchestrator
-import com.kaleaon.mnxmindmaker.util.tooling.ToolPolicyEngine
-import com.kaleaon.mnxmindmaker.util.tooling.ToolRegistry
 import kotlinx.coroutines.CompletableDeferred
 import com.kaleaon.mnxmindmaker.util.ContinuityAuditResult
 import com.kaleaon.mnxmindmaker.util.run_continuity_audit
@@ -50,6 +48,8 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
 
     private val _error = MutableLiveData<String?>()
     val error: LiveData<String?> get() = _error
+    private val _llmStatusBadge = MutableLiveData("REMOTE")
+    val llmStatusBadge: LiveData<String> get() = _llmStatusBadge
 
     private val _snapshotTimeline = MutableLiveData<List<ContinuityManager.SnapshotRecord>>(emptyList())
     val snapshotTimeline: LiveData<List<ContinuityManager.SnapshotRecord>> get() = _snapshotTimeline
@@ -275,6 +275,7 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
 
                 var response: String? = null
                 var lastError: String? = null
+                var remoteFailureType: String? = null
                 for (settings in invocationChain) {
                     val caps = settings.capabilities
                     val systemPrompt = buildString {
@@ -294,44 +295,60 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
                         response = withContext(Dispatchers.IO) {
                             llmClient.complete(settings, systemPrompt, prompt)
                         }
+                        _llmStatusBadge.value = if (settings.provider.runtime == LlmRuntime.LOCAL_ON_DEVICE) {
+                            "LOCAL FALLBACK"
+                        } else {
+                            "REMOTE"
+                        }
                         break
                     } catch (inner: LlmApiException) {
                         lastError = "${settings.provider.displayName}: ${inner.message}"
+                        if (settings.provider.runtime == LlmRuntime.REMOTE_API) {
+                            remoteFailureType = classifyRemoteFailure(inner.message.orEmpty())
+                        }
+                    }
+                }
+
+                if (response == null && remoteFailureType != null) {
+                    val localFallback = withContext(Dispatchers.IO) { llmRepository.getLocalFallbackCandidate() }
+                    if (localFallback != null) {
+                        val systemPrompt = "You are an AI mind design assistant. Provide concise node suggestions."
+                        response = withContext(Dispatchers.IO) {
+                            llmClient.complete(localFallback, systemPrompt, prompt)
+                        }
+                        _llmStatusBadge.value = "LOCAL FALLBACK"
+                        _error.value = "Remote provider unavailable ($remoteFailureType). Switched to local model."
                     }
                 }
 
                 if (response == null) {
+                    _llmStatusBadge.value = "REMOTE ERROR"
                     _error.value = "AI request failed across fallback chain. $lastError"
                     return@launch
-                val systemPrompt = """You are an AI mind design assistant helping the user build an AI mind graph
-                    |in .mnx format. The mind graph represents an AI's identity, memories, knowledge,
-                    |emotions, personality, beliefs, values, and relationships.
-                    |Use tools whenever graph state inspection or mutation is needed.
-                    |When tool use is unnecessary, provide concise, structured suggestions.
-                    |Format suggestions as: NodeType: label - description""".trimMargin()
-
-                val response = withContext(Dispatchers.IO) {
-                    val registry = ToolRegistry(
-                        getGraph = { _graph.value ?: newDefaultGraph() },
-                        setGraph = { updated -> _graph.postValue(updated) }
-                    )
-                    val orchestrator = ToolOrchestrator(
-                        llmApiClient = llmClient,
-                        settings = activeSettings,
-                        registry = registry,
-                        policy = ToolPolicyEngine(registry),
-                        requestApproval = { requestToolApproval(it) }
-                    )
-                    orchestrator.run(systemPrompt, prompt)
                 }
                 _llmResponse.value = response
             } catch (e: LlmApiException) {
+                _llmStatusBadge.value = "REMOTE ERROR"
                 _error.value = "AI error: ${e.message}"
             } catch (e: Exception) {
+                _llmStatusBadge.value = "REMOTE ERROR"
                 _error.value = "AI request failed: ${e.message}"
             } finally {
                 _isLoading.value = false
             }
+        }
+    }
+
+    private fun classifyRemoteFailure(message: String): String? {
+        val normalized = message.lowercase()
+        return when {
+            normalized.contains("401") || normalized.contains("403") || normalized.contains("api key") || normalized.contains("unauthorized") ->
+                "auth invalid"
+            normalized.contains("timeout") || normalized.contains("network") || normalized.contains("unable to resolve host") || normalized.contains("connection") ->
+                "network down"
+            normalized.contains("5") && normalized.contains("error") ->
+                "provider unavailable"
+            else -> null
         }
     }
 
