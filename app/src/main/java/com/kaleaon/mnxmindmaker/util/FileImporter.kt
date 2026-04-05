@@ -76,15 +76,14 @@ object FileImporter {
         graphName: String = "Imported Mind"
     ): Result<MindGraph> = runCatching {
         val format = detectFormat(uri, context)
-        val stream = context.contentResolver.openInputStream(uri)
-            ?: error("Cannot open input stream for $uri")
+        context.contentResolver.openInputStream(uri)?.use { stream ->
+            if (format == Format.DOCX) {
+                return@runCatching DocxImporter.fromDocx(stream, graphName)
+            }
 
-        if (format == Format.DOCX) {
-            return@runCatching DocxImporter.fromDocx(stream, graphName)
-        }
-
-        val text = stream.bufferedReader(Charsets.UTF_8).readText()
-        parseText(text, format, graphName)
+            val text = stream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+            parseText(text, format, graphName)
+        } ?: error("Cannot open input stream for $uri")
     }
 
     /**
