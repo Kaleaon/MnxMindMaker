@@ -117,6 +117,9 @@ class LocalOpenAiRuntimeBackend(
     }
 }
 
+class LlmApiClient(
+    localBackend: LocalOnDeviceBackend? = null
+) {
 class LlmApiClient(localBackend: LocalOnDeviceBackend? = null) {
 
     private val baseClient = OkHttpClient.Builder()
@@ -158,6 +161,16 @@ class LlmApiClient(localBackend: LocalOnDeviceBackend? = null) {
             LlmProvider.OPENAI -> callOpenAITurn(settings, systemPrompt, transcript, tools)
             LlmProvider.GEMINI -> callGeminiTurn(settings, systemPrompt, transcript, tools)
             LlmProvider.VLLM_GEMMA4 -> callOpenAICompatibleTurn(settings, systemPrompt, transcript, tools)
+            LlmProvider.LOCAL_ON_DEVICE -> {
+                val lastUser = transcript.lastOrNull { it.optString("role") == "user" }
+                    ?.optString("content")
+                    .orEmpty()
+                val text = resolveOnDeviceBackend(settings).streamCompletion(
+                    settings = settings,
+                    systemPrompt = systemPrompt,
+                    userMessage = lastUser
+                )
+                AssistantTurn(text = text, raw = JSONObject().put("provider", "local"))
             LlmProvider.LOCAL_ON_DEVICE -> AssistantTurn(
                 text = resolveOnDeviceBackend(settings).streamCompletion(
                     settings = settings,
@@ -182,6 +195,9 @@ class LlmApiClient(localBackend: LocalOnDeviceBackend? = null) {
         return resolveOnDeviceBackend().metadata(settings)
     }
 
+    private fun resolveOnDeviceBackend(settings: LlmSettings): LocalOnDeviceBackend {
+        return onDeviceBackends.values.firstOrNull()
+            ?: throw LlmApiException("No on-device backend is registered")
     private fun resolveOnDeviceBackend(): LocalOnDeviceBackend {
         return onDeviceBackends.values.firstOrNull() ?: throw LlmApiException("No on-device backend is registered")
     }

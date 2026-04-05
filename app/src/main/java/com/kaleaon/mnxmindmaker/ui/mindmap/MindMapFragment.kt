@@ -7,19 +7,25 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.ArrayAdapter
+import android.widget.BaseAdapter
 import android.widget.EditText
 import android.widget.LinearLayout
+import android.widget.ListView
 import android.widget.Spinner
+import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.viewModels
+import com.google.android.material.button.MaterialButton
 import com.google.android.material.snackbar.Snackbar
 import com.kaleaon.mnxmindmaker.R
 import com.kaleaon.mnxmindmaker.continuity.ContinuityManager
 import com.kaleaon.mnxmindmaker.databinding.FragmentMindMapBinding
 import com.kaleaon.mnxmindmaker.ktheme.KthemeManager
 import com.kaleaon.mnxmindmaker.model.NodeType
+import com.kaleaon.mnxmindmaker.util.ContinuityAuditResult
+import com.kaleaon.mnxmindmaker.util.tooling.ToolApprovalRequest
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -31,6 +37,9 @@ class MindMapFragment : Fragment() {
     private val binding get() = _binding!!
 
     private val viewModel: MindMapViewModel by viewModels()
+
+    private var chatDialog: AlertDialog? = null
+    private var chatAdapter: ChatMessageAdapter? = null
 
     private val openMnxFile = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri ?: return@registerForActivityResult
@@ -46,7 +55,6 @@ class MindMapFragment : Fragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
 
-        // Wire the canvas
         binding.mindMapCanvas.onNodeSelected = { node ->
             viewModel.selectNode(node)
             binding.btnRemoveNode.isEnabled = node != null
@@ -55,7 +63,6 @@ class MindMapFragment : Fragment() {
             viewModel.updateNodePosition(id, x, y)
         }
 
-        // Observe graph changes
         viewModel.graph.observe(viewLifecycleOwner) { graph ->
             binding.mindMapCanvas.graph = graph
             binding.tvGraphName.text = graph?.name ?: ""
@@ -85,12 +92,6 @@ class MindMapFragment : Fragment() {
             viewModel.clearSnapshotActionMessage()
         }
 
-        viewModel.llmResponse.observe(viewLifecycleOwner) { response ->
-            response ?: return@observe
-            showLlmResponseDialog(response)
-            viewModel.clearLlmResponse()
-        }
-
         viewModel.error.observe(viewLifecycleOwner) { msg ->
             msg ?: return@observe
             Snackbar.make(binding.root, msg, Snackbar.LENGTH_LONG).show()
@@ -107,10 +108,21 @@ class MindMapFragment : Fragment() {
             binding.btnReviewAudit.text = getString(R.string.review_audit_with_count, total)
         }
 
-        // Apply active Ktheme to the canvas (and react to future changes)
+        viewModel.chatMessages.observe(viewLifecycleOwner) { messages ->
+            chatAdapter?.submit(messages)
+        }
+
+        viewModel.compareCandidateMessageId.observe(viewLifecycleOwner) { messageId ->
+            val id = messageId ?: return@observe
+            val message = viewModel.chatMessages.value.orEmpty().firstOrNull { it.id == id } ?: return@observe
+            if (viewModel.isPremiumUser.value == true && message.compareCandidate != null) {
+                showCompareDialog(message)
+            }
+            viewModel.clearCompareCandidateMessage()
+        }
+
         KthemeManager.activeTheme.observe(viewLifecycleOwner) { theme ->
             binding.mindMapCanvas.applyTheme(theme)
-            // Also tint the status bar and action toolbar
             theme?.colorScheme?.let { cs ->
                 binding.statusBar.setBackgroundColor(KthemeManager.parseColor(cs.surfaceVariant))
                 binding.toolbarActions.setBackgroundColor(KthemeManager.parseColor(cs.surface))
@@ -119,7 +131,6 @@ class MindMapFragment : Fragment() {
             }
         }
 
-        // Button handlers
         binding.btnAddNode.setOnClickListener { showAddNodeDialog() }
         binding.btnRemoveNode.setOnClickListener {
             viewModel.selectedNode.value?.id?.let { viewModel.removeNode(it) }
@@ -129,12 +140,84 @@ class MindMapFragment : Fragment() {
         binding.btnRestoreSnapshot.setOnClickListener { showSnapshotPickerDialog(compareMode = false) }
         binding.btnExportMnx.setOnClickListener { viewModel.exportToMnx() }
         binding.btnImportMnx.setOnClickListener { openMnxFile.launch(arrayOf("*/*")) }
+        binding.btnAskAi.setOnClickListener { showChatDialog() }
         binding.btnAskAi.setOnClickListener { showAskAiDialogWithDataUsePanel() }
         binding.btnReviewAudit.setOnClickListener {
             viewModel.runContinuityAudit()
             showContinuityAuditDialog(viewModel.auditResult.value)
         }
         binding.btnResetView.setOnClickListener { binding.mindMapCanvas.resetView() }
+    }
+
+    private fun showChatDialog() {
+        val dialogView = LayoutInflater.from(requireContext()).inflate(R.layout.dialog_chat_assistant, null)
+        val list = dialogView.findViewById<ListView>(R.id.lv_chat_messages)
+        val providerSpinner = dialogView.findViewById<Spinner>(R.id.spinner_chat_provider)
+        val promptInput = dialogView.findViewById<EditText>(R.id.et_chat_prompt)
+        val sendButton = dialogView.findViewById<MaterialButton>(R.id.btn_send_chat)
+
+        val providerOptions = listOf(
+            ComposerProviderChoice.AUTO,
+            ComposerProviderChoice.LOCAL,
+            ComposerProviderChoice.CLAUDE,
+            ComposerProviderChoice.CHATGPT
+        )
+        providerSpinner.adapter = ArrayAdapter(
+            requireContext(),
+            android.R.layout.simple_spinner_dropdown_item,
+            providerOptions.map { it.label }
+        )
+
+        chatAdapter = ChatMessageAdapter(
+            inflater = LayoutInflater.from(requireContext()),
+            onRetry = { msg -> viewModel.retryWithAnotherProvider(msg.id) },
+            onCompare = { msg -> showCompareDialog(msg) },
+            isPremium = { viewModel.isPremiumUser.value == true }
+        ).also {
+            list.adapter = it
+            it.submit(viewModel.chatMessages.value.orEmpty())
+        }
+
+        sendButton.setOnClickListener {
+            val prompt = promptInput.text.toString().trim()
+            if (prompt.isBlank()) return@setOnClickListener
+            val selectedChoice = providerOptions[providerSpinner.selectedItemPosition]
+            viewModel.askLlmForMindDesign(prompt, selectedChoice)
+            promptInput.setText("")
+        }
+
+        chatDialog?.dismiss()
+        chatDialog = AlertDialog.Builder(requireContext())
+            .setTitle(R.string.chat_assistant_title)
+            .setView(dialogView)
+            .setNegativeButton(R.string.cancel, null)
+            .show()
+    }
+
+    private fun showCompareDialog(message: ChatMessage) {
+        val candidate = message.compareCandidate ?: run {
+            Snackbar.make(binding.root, "Retry this message first to compare responses.", Snackbar.LENGTH_SHORT).show()
+            return
+        }
+        val panel = LinearLayout(requireContext()).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(24, 12, 24, 12)
+            val left = TextView(context).apply {
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                text = "${message.provenance.provider.displayName} / ${message.provenance.model}\n\n${message.response}"
+            }
+            val right = TextView(context).apply {
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                text = "${candidate.provider.displayName} / ${candidate.model}\n\n${candidate.response}"
+            }
+            addView(left)
+            addView(right)
+        }
+        AlertDialog.Builder(requireContext())
+            .setTitle("Side-by-side provider compare")
+            .setView(panel)
+            .setPositiveButton(R.string.ok, null)
+            .show()
     }
 
     private fun showAddNodeDialog() {
@@ -152,7 +235,9 @@ class MindMapFragment : Fragment() {
             .setView(dialogView)
             .setPositiveButton(R.string.add) { _, _ ->
                 val label = etLabel.text.toString().trim()
-                if (label.isEmpty()) { Toast.makeText(requireContext(), R.string.label_required, Toast.LENGTH_SHORT).show(); return@setPositiveButton }
+                if (label.isEmpty()) {
+                    Toast.makeText(requireContext(), R.string.label_required, Toast.LENGTH_SHORT).show(); return@setPositiveButton
+                }
                 val type = NodeType.entries[spinnerType.selectedItemPosition]
                 viewModel.addNode(label, type, etDesc.text.toString().trim())
             }
@@ -279,14 +364,6 @@ class MindMapFragment : Fragment() {
             .show()
     }
 
-    private fun showLlmResponseDialog(response: String) {
-        AlertDialog.Builder(requireContext())
-            .setTitle(R.string.ai_response_title)
-            .setMessage(response)
-            .setPositiveButton(R.string.ok, null)
-            .show()
-    }
-
     private fun showContinuityAuditDialog(audit: ContinuityAuditResult?) {
         if (audit == null) {
             Snackbar.make(binding.root, R.string.audit_not_available, Snackbar.LENGTH_SHORT).show()
@@ -340,6 +417,60 @@ class MindMapFragment : Fragment() {
 
     override fun onDestroyView() {
         super.onDestroyView()
+        chatDialog?.dismiss()
         _binding = null
+    }
+}
+
+private class ChatMessageAdapter(
+    private val inflater: LayoutInflater,
+    private val onRetry: (ChatMessage) -> Unit,
+    private val onCompare: (ChatMessage) -> Unit,
+    private val isPremium: () -> Boolean
+) : BaseAdapter() {
+
+    private var messages: List<ChatMessage> = emptyList()
+
+    fun submit(newMessages: List<ChatMessage>) {
+        messages = newMessages
+        notifyDataSetChanged()
+    }
+
+    override fun getCount(): Int = messages.size
+
+    override fun getItem(position: Int): Any = messages[position]
+
+    override fun getItemId(position: Int): Long = position.toLong()
+
+    override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
+        val view = convertView ?: inflater.inflate(R.layout.item_chat_message, parent, false)
+        val message = messages[position]
+
+        view.findViewById<TextView>(R.id.tv_chat_prompt).text = "You: ${message.prompt}"
+        view.findViewById<TextView>(R.id.tv_chat_response).text = message.response
+        view.findViewById<TextView>(R.id.tv_chat_provenance).text = buildProvenance(message)
+        view.findViewById<MaterialButton>(R.id.btn_retry_provider).setOnClickListener {
+            onRetry(message)
+        }
+
+        val compareButton = view.findViewById<MaterialButton>(R.id.btn_compare_side_by_side)
+        compareButton.visibility = if (isPremium() && message.compareCandidate != null) View.VISIBLE else View.GONE
+        compareButton.setOnClickListener { onCompare(message) }
+
+        return view
+    }
+
+    private fun buildProvenance(message: ChatMessage): String {
+        val p = message.provenance
+        val tools = if (p.toolCalls.isEmpty()) "none" else p.toolCalls.joinToString()
+        val latency = p.latencyMs?.let { "${it}ms" } ?: "n/a"
+        val usage = if (p.totalTokens != null) {
+            "prompt=${p.promptTokens ?: "?"}, completion=${p.completionTokens ?: "?"}, total=${p.totalTokens}"
+        } else {
+            "n/a"
+        }
+        return "Provider: ${p.provider.displayName} | Model: ${p.model}\n" +
+            "Tools: $tools\n" +
+            "Latency: $latency | Tokens: $usage"
     }
 }
