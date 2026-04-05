@@ -29,6 +29,7 @@ import com.kaleaon.mnxmindmaker.util.tooling.ToolApprovalRequest
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import com.kaleaon.mnxmindmaker.util.ContinuityAuditResult
 
 class MindMapFragment : Fragment() {
 
@@ -73,6 +74,9 @@ class MindMapFragment : Fragment() {
             else
                 getString(R.string.no_node_selected)
         }
+        viewModel.llmStatusBadge.observe(viewLifecycleOwner) { status ->
+            binding.tvLlmStatusBadge.text = status
+        }
 
         viewModel.exportedFile.observe(viewLifecycleOwner) { file ->
             file ?: return@observe
@@ -94,10 +98,6 @@ class MindMapFragment : Fragment() {
             viewModel.clearError()
         }
 
-        viewModel.toolApprovalRequest.observe(viewLifecycleOwner) { request ->
-            request ?: return@observe
-            showToolApprovalDialog(request)
-        }
 
         viewModel.isLoading.observe(viewLifecycleOwner) { loading ->
             binding.progressBar.visibility = if (loading) View.VISIBLE else View.GONE
@@ -141,6 +141,7 @@ class MindMapFragment : Fragment() {
         binding.btnExportMnx.setOnClickListener { viewModel.exportToMnx() }
         binding.btnImportMnx.setOnClickListener { openMnxFile.launch(arrayOf("*/*")) }
         binding.btnAskAi.setOnClickListener { showChatDialog() }
+        binding.btnAskAi.setOnClickListener { showAskAiDialogWithDataUsePanel() }
         binding.btnReviewAudit.setOnClickListener {
             viewModel.runContinuityAudit()
             showContinuityAuditDialog(viewModel.auditResult.value)
@@ -310,18 +311,51 @@ class MindMapFragment : Fragment() {
             "${snapshot.reason} · drift:$drift"
     }
 
+    private fun showAskAiDialogWithDataUsePanel() {
+        val input = EditText(requireContext()).apply {
+            hint = getString(R.string.ai_prompt_hint)
+            minLines = 3
+            maxLines = 6
+        }
+        AlertDialog.Builder(requireContext())
+            .setTitle(R.string.ask_ai_title)
+            .setView(input)
+            .setPositiveButton(R.string.ask) { _, _ ->
+                val prompt = input.text.toString().trim()
+                if (prompt.isBlank()) return@setPositiveButton
+                val report = viewModel.buildDataUseReport(prompt)
+                AlertDialog.Builder(requireContext())
+                    .setTitle(R.string.data_use_panel_title)
+                    .setMessage(report)
+                    .setPositiveButton(R.string.continue_request) { _, _ ->
+                        viewModel.askLlmForMindDesign(prompt)
+                    }
+                    .setNegativeButton(R.string.cancel, null)
+                    .show()
+            }
+            .setNegativeButton(R.string.cancel, null)
+            .show()
+    }
+
+
     private fun showToolApprovalDialog(request: ToolApprovalRequest) {
+        val isHighRisk = request.riskLevel.name == "HIGH" || request.explicitActionType != null
         val message = buildString {
             append("Allow AI tool call?\n\n")
             append("Tool: ${request.toolName}\n")
+            append("Risk: ${request.riskLevel}\n")
+            request.explicitActionType?.let { append("High-risk action: $it\n") }
             append("Reason: ${request.reason}\n\n")
             append("Arguments:\n${request.arguments}")
+            if (isHighRisk) {
+                append("\n\n⚠️ This action may delete/send/execute data or commands.")
+            }
         }
         AlertDialog.Builder(requireContext())
-            .setTitle("AI Tool Approval")
+            .setTitle(if (isHighRisk) "High-Risk AI Tool Approval" else "AI Tool Approval")
             .setMessage(message)
             .setCancelable(false)
-            .setPositiveButton("Allow") { _, _ ->
+            .setPositiveButton(if (isHighRisk) "Approve High-Risk Action" else "Allow") { _, _ ->
                 viewModel.resolveToolApproval(request.id, true)
             }
             .setNegativeButton("Deny") { _, _ ->
