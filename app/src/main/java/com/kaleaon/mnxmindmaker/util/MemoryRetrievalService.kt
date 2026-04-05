@@ -5,10 +5,28 @@ import kotlin.math.abs
 
 object MemoryRetrievalService {
 
+    enum class SensitivityLevel {
+        LOW,
+        MEDIUM,
+        HIGH,
+        RESTRICTED
+    }
+
     data class RetrievalContext(
         val prompt: String = "",
         val task: String = "",
         val nowEpochMs: Long = System.currentTimeMillis()
+    )
+
+    data class RetrievalFilters(
+        val minRelevance: Float = 0f,
+        val allowedSensitivity: Set<SensitivityLevel> = setOf(
+            SensitivityLevel.LOW,
+            SensitivityLevel.MEDIUM,
+            SensitivityLevel.HIGH,
+            SensitivityLevel.RESTRICTED
+        ),
+        val allowSensitiveBoot: Boolean = false
     )
 
     private data class ScoredMemory(
@@ -20,14 +38,20 @@ object MemoryRetrievalService {
         val riskPenalty: Float
     )
 
-    fun retrieve(memories: List<MindNode>, context: RetrievalContext, limit: Int): List<MindNode> {
+    fun retrieve(
+        memories: List<MindNode>,
+        context: RetrievalContext,
+        limit: Int,
+        filters: RetrievalFilters = RetrievalFilters()
+    ): List<MindNode> {
         if (limit <= 0 || memories.isEmpty()) return emptyList()
 
         return memories
             .asSequence()
-            .filter(::passesProtectionConstraints)
-            .map { node ->
+            .mapNotNull { node ->
                 val relevance = relevanceScore(node, context)
+                if (!passesProtectionAndSensitivity(node, relevance, filters)) return@mapNotNull null
+
                 val confidence = node.attributeAsFloat("confidence", default = 0.55f)
                 val recency = recencyScore(node, context.nowEpochMs)
                 val riskPenalty = confabulationRiskPenalty(node)
@@ -57,14 +81,43 @@ object MemoryRetrievalService {
             .toList()
     }
 
-    private fun passesProtectionConstraints(node: MindNode): Boolean {
-        val sensitivity = node.attributes["sensitivity"]?.lowercase()
-        val protectionLevel = node.attributes["protection_level"]?.lowercase()
-        val allowSensitive = node.attributes["allow_sensitive_boot"]?.toBoolean() ?: false
+    /**
+     * Guardrail preset for context/prompt injection: enforce relevance and deny highly sensitive content.
+     */
+    fun retrieveForPromptInjection(
+        memories: List<MindNode>,
+        context: RetrievalContext,
+        limit: Int
+    ): List<MindNode> = retrieve(
+        memories = memories,
+        context = context,
+        limit = limit,
+        filters = RetrievalFilters(
+            minRelevance = 0.25f,
+            allowedSensitivity = setOf(SensitivityLevel.LOW, SensitivityLevel.MEDIUM),
+            allowSensitiveBoot = false
+        )
+    )
 
-        if (!allowSensitive && (sensitivity == "high" || sensitivity == "restricted")) return false
+    private fun passesProtectionAndSensitivity(
+        node: MindNode,
+        relevance: Float,
+        filters: RetrievalFilters
+    ): Boolean {
+        if (relevance < filters.minRelevance) return false
+
+        val protectionLevel = node.attributes["protection_level"]?.lowercase()
         if (protectionLevel == "sealed") return false
-        return true
+
+        val sensitivity = node.sensitivityLevel()
+        val allowSensitive = filters.allowSensitiveBoot ||
+            (node.attributes["allow_sensitive_boot"]?.toBoolean() ?: false)
+
+        if (!allowSensitive && sensitivity in setOf(SensitivityLevel.HIGH, SensitivityLevel.RESTRICTED)) {
+            return false
+        }
+
+        return sensitivity in filters.allowedSensitivity
     }
 
     private fun relevanceScore(node: MindNode, context: RetrievalContext): Float {
@@ -140,6 +193,15 @@ object MemoryRetrievalService {
         attributes[key]?.toFloatOrNull()?.coerceIn(0f, 1f) ?: default
 
     private fun MindNode.attributeAsLong(key: String): Long? = attributes[key]?.toLongOrNull()
+
+    private fun MindNode.sensitivityLevel(): SensitivityLevel {
+        return when (attributes["sensitivity"]?.lowercase()) {
+            "restricted" -> SensitivityLevel.RESTRICTED
+            "high" -> SensitivityLevel.HIGH
+            "medium" -> SensitivityLevel.MEDIUM
+            else -> SensitivityLevel.LOW
+        }
+    }
 
     private const val MILLIS_PER_DAY = 86_400_000L
 }
