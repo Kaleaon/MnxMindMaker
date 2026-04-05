@@ -249,6 +249,33 @@ class MindMapFragment : Fragment() {
             .show()
     }
 
+
+    private fun showToolApprovalDialog(request: ToolApprovalRequest) {
+        val isHighRisk = request.riskLevel.name == "HIGH" || request.explicitActionType != null
+        val message = buildString {
+            append("Allow AI tool call?\n\n")
+            append("Tool: ${request.toolName}\n")
+            append("Risk: ${request.riskLevel}\n")
+            request.explicitActionType?.let { append("High-risk action: $it\n") }
+            append("Reason: ${request.reason}\n\n")
+            append("Arguments:\n${request.arguments}")
+            if (isHighRisk) {
+                append("\n\n⚠️ This action may delete/send/execute data or commands.")
+            }
+        }
+        AlertDialog.Builder(requireContext())
+            .setTitle(if (isHighRisk) "High-Risk AI Tool Approval" else "AI Tool Approval")
+            .setMessage(message)
+            .setCancelable(false)
+            .setPositiveButton(if (isHighRisk) "Approve High-Risk Action" else "Allow") { _, _ ->
+                viewModel.resolveToolApproval(request.id, true)
+            }
+            .setNegativeButton("Deny") { _, _ ->
+                viewModel.resolveToolApproval(request.id, false)
+            }
+            .show()
+    }
+
     private fun showLlmResponseDialog(response: String) {
         AlertDialog.Builder(requireContext())
             .setTitle(R.string.ai_response_title)

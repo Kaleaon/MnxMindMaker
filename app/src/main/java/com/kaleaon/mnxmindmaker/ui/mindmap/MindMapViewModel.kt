@@ -286,6 +286,26 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
                 if (response == null) {
                     _error.value = "AI request failed across fallback chain. $lastError"
                     return@launch
+                val systemPrompt = """You are an AI mind design assistant helping the user build an AI mind graph
+                    |in .mnx format. The mind graph represents an AI's identity, memories, knowledge,
+                    |emotions, personality, beliefs, values, and relationships.
+                    |Use tools whenever graph state inspection or mutation is needed.
+                    |When tool use is unnecessary, provide concise, structured suggestions.
+                    |Format suggestions as: NodeType: label - description""".trimMargin()
+
+                val response = withContext(Dispatchers.IO) {
+                    val registry = ToolRegistry(
+                        getGraph = { _graph.value ?: newDefaultGraph() },
+                        setGraph = { updated -> _graph.postValue(updated) }
+                    )
+                    val orchestrator = ToolOrchestrator(
+                        llmApiClient = llmClient,
+                        settings = activeSettings,
+                        registry = registry,
+                        policy = ToolPolicyEngine(registry.specs().associateBy { it.name }),
+                        requestApproval = { requestToolApproval(it) }
+                    )
+                    orchestrator.run(systemPrompt, prompt)
                 }
 
                 _llmResponse.value = response
