@@ -17,6 +17,7 @@ data class RoutingPolicy(
 
 class ProviderRouter(
     private val providers: List<AssistantProvider> = listOf(
+        LlmEdgeProvider(),
         LocalProvider(),
         ClaudeProvider(),
         ChatGPTProvider()
