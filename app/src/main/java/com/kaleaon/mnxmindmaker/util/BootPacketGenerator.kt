@@ -24,7 +24,8 @@ object BootPacketGenerator {
         val warningSlice: List<MindNode>,
         val memorySlice: List<MindNode>,
         val projectSlice: List<MindNode>,
-        val driftRuleSlice: List<MindNode>
+        val driftRuleSlice: List<MindNode>,
+        val continuityAudit: ContinuityAuditResult
     ) {
         fun toJson(): String {
             val root = JSONObject()
@@ -36,6 +37,7 @@ object BootPacketGenerator {
                 .put("memory_slice", nodesToJson(memorySlice))
                 .put("project_slice", nodesToJson(projectSlice))
                 .put("drift_rule_slice", nodesToJson(driftRuleSlice))
+                .put("continuity_audit", auditToJson(continuityAudit))
             return root.toString(2)
         }
 
@@ -48,6 +50,7 @@ object BootPacketGenerator {
             appendSection("Memories", memorySlice)
             appendSection("Projects", projectSlice)
             appendSection("Drift Rules", driftRuleSlice)
+            appendAuditSection(continuityAudit)
         }
 
         private fun StringBuilder.appendSection(title: String, nodes: List<MindNode>) {
@@ -74,6 +77,55 @@ object BootPacketGenerator {
                         .put("attributes", JSONObject(node.attributes as Map<*, *>))
                         .put("dimensions", JSONObject(node.dimensions))
                 )
+            }
+        }
+
+        private fun auditToJson(audit: ContinuityAuditResult): JSONObject {
+            val findings = JSONArray().apply {
+                audit.findings.forEach { finding ->
+                    put(
+                        JSONObject()
+                            .put("id", finding.id)
+                            .put("category", finding.category)
+                            .put("title", finding.title)
+                            .put("description", finding.description)
+                            .put("severity", finding.severity.name.lowercase())
+                            .put("severity_score", finding.severityScore)
+                            .put("confidence_score", finding.confidenceScore)
+                            .put("node_ids", JSONArray(finding.nodeIds))
+                            .put("rule_ids", JSONArray(finding.ruleIds))
+                            .put("suggested_action", finding.suggestedAction)
+                            .put("accepted", finding.accepted)
+                    )
+                }
+            }
+            val summary = JSONObject()
+                .put("total_findings", audit.summary.totalFindings)
+                .put("critical_count", audit.summary.criticalCount)
+                .put("high_count", audit.summary.highCount)
+                .put("medium_count", audit.summary.mediumCount)
+                .put("low_count", audit.summary.lowCount)
+                .put("average_confidence", audit.summary.averageConfidence)
+            return JSONObject()
+                .put("summary", summary)
+                .put("findings", findings)
+        }
+
+        private fun StringBuilder.appendAuditSection(audit: ContinuityAuditResult) {
+            appendLine()
+            appendLine("## Continuity Audit")
+            appendLine("- Total findings: ${audit.summary.totalFindings}")
+            appendLine("- Critical: ${audit.summary.criticalCount}, High: ${audit.summary.highCount}, Medium: ${audit.summary.mediumCount}, Low: ${audit.summary.lowCount}")
+            appendLine("- Avg confidence: ${"%.2f".format(audit.summary.averageConfidence)}")
+            if (audit.findings.isEmpty()) {
+                appendLine("- _No continuity warnings detected._")
+                return
+            }
+            audit.findings.forEach { finding ->
+                appendLine("- **${finding.title}** [${finding.severity}] (sev=${"%.2f".format(finding.severityScore)}, conf=${"%.2f".format(finding.confidenceScore)})")
+                appendLine("  - Rule IDs: ${finding.ruleIds.joinToString().ifBlank { "none" }}")
+                appendLine("  - Node IDs: ${finding.nodeIds.joinToString().ifBlank { "none" }}")
+                appendLine("  - Action: ${finding.suggestedAction}")
             }
         }
     }
@@ -103,6 +155,7 @@ object BootPacketGenerator {
         val driftRules = graph.nodes.filter {
             it.type == NodeType.DRIFT_RULE || it.attributes["semantic_subtype"] == "drift_rule"
         }
+        val continuityAudit = run_continuity_audit(graph)
 
         val packet = BootPacket(
             mode = mode,
@@ -117,6 +170,14 @@ object BootPacketGenerator {
             memorySlice = MemoryRetrievalService.retrieve(memories, context, limitFor(mode).memory),
             projectSlice = targetedSlice(projects, limitFor(mode).project, context),
             driftRuleSlice = targetedSlice(driftRules, limitFor(mode).driftRule, context)
+            kernelSlice = (if (protectedKernel.isNotEmpty()) protectedKernel else kernelFallback).take(12),
+            stateSlice = state.take(8),
+            relationshipSlice = relationships.take(8),
+            warningSlice = warnings.take(10),
+            memorySlice = memories.sortedByDescending { it.attributes["current_relevance"]?.toFloatOrNull() ?: 0f }.take(12),
+            projectSlice = projects.take(8),
+            driftRuleSlice = driftRules.take(8),
+            continuityAudit = continuityAudit
         )
         return packet
     }

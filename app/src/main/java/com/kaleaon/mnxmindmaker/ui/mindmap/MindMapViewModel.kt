@@ -14,11 +14,14 @@ import com.kaleaon.mnxmindmaker.repository.MnxRepository
 import com.kaleaon.mnxmindmaker.util.DimensionMapper
 import com.kaleaon.mnxmindmaker.util.LlmApiClient
 import com.kaleaon.mnxmindmaker.util.LlmApiException
+import com.kaleaon.mnxmindmaker.util.ContinuityAuditResult
+import com.kaleaon.mnxmindmaker.util.run_continuity_audit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.InputStream
+import java.util.UUID
 
 class MindMapViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -43,6 +46,13 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
 
     private val _isLoading = MutableLiveData(false)
     val isLoading: LiveData<Boolean> get() = _isLoading
+    private val _auditResult = MutableLiveData<ContinuityAuditResult?>()
+    val auditResult: LiveData<ContinuityAuditResult?> get() = _auditResult
+    private val acceptedFindingIds = mutableSetOf<String>()
+
+    init {
+        refreshAudit()
+    }
 
     // ---- Graph editing -------------------------------------------------------
 
@@ -65,6 +75,7 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
         }
         _graph.value = current.copy(nodes = updatedNodes, edges = updatedEdges)
         _selectedNode.value = node
+        refreshAudit()
     }
 
     fun removeNode(nodeId: String) {
@@ -75,12 +86,14 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
             .toMutableList()
         _graph.value = current.copy(nodes = updatedNodes, edges = updatedEdges)
         if (_selectedNode.value?.id == nodeId) _selectedNode.value = null
+        refreshAudit()
     }
 
     fun updateNodePosition(nodeId: String, x: Float, y: Float) {
         val current = _graph.value ?: return
         val updatedNodes = current.nodes.map { if (it.id == nodeId) it.copy(x = x, y = y) else it }
         _graph.value = current.copy(nodes = updatedNodes.toMutableList())
+        refreshAudit()
     }
 
     fun selectNode(node: MindNode?) {
@@ -94,6 +107,53 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
     fun loadGraph(graph: MindGraph) {
         _graph.value = graph
         _selectedNode.value = null
+        acceptedFindingIds.clear()
+        refreshAudit()
+    }
+
+    fun runContinuityAudit() {
+        refreshAudit()
+    }
+
+    fun acceptAuditFinding(findingId: String) {
+        acceptedFindingIds += findingId
+        refreshAudit()
+    }
+
+    fun convertAuditFindingToCorrectiveNode(findingId: String) {
+        val current = _graph.value ?: return
+        val finding = _auditResult.value?.findings?.firstOrNull { it.id == findingId } ?: return
+        val anchorNode = current.nodes.firstOrNull { it.id == finding.nodeIds.firstOrNull() }
+        val correctiveNode = MindNode(
+            id = UUID.randomUUID().toString(),
+            label = "Corrective: ${finding.title}",
+            type = NodeType.MEMORY,
+            description = finding.suggestedAction,
+            x = (anchorNode?.x ?: 320f) + 90f,
+            y = (anchorNode?.y ?: 280f) + 90f,
+            attributes = mutableMapOf(
+                "memory_class" to "repair",
+                "semantic_subtype" to "continuity_corrective",
+                "source_finding_id" to finding.id,
+                "audit_category" to finding.category
+            ),
+            dimensions = DimensionMapper.defaultDimensions(NodeType.MEMORY)
+        )
+        val edges = current.edges.toMutableList()
+        finding.nodeIds.forEach { nodeId ->
+            if (current.nodes.any { it.id == nodeId }) {
+                edges += MindEdge(
+                    fromNodeId = nodeId,
+                    toNodeId = correctiveNode.id,
+                    label = "corrects",
+                    strength = 0.85f
+                )
+            }
+        }
+        val updatedNodes = current.nodes.toMutableList().also { it += correctiveNode }
+        _graph.value = current.copy(nodes = updatedNodes, edges = edges)
+        acceptedFindingIds += findingId
+        refreshAudit()
     }
 
     // ---- MNX Export / Import ------------------------------------------------
@@ -119,6 +179,8 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
             try {
                 val graph = withContext(Dispatchers.IO) { mnxRepository.importFromMnx(stream) }
                 _graph.value = graph
+                acceptedFindingIds.clear()
+                refreshAudit()
             } catch (e: Exception) {
                 _error.value = "Import failed: ${e.message}"
             } finally {
@@ -170,5 +232,10 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
             name = "My AI Mind",
             nodes = mutableListOf(identity)
         )
+    }
+
+    private fun refreshAudit() {
+        val current = _graph.value ?: return
+        _auditResult.value = run_continuity_audit(current, acceptedFindingIds)
     }
 }

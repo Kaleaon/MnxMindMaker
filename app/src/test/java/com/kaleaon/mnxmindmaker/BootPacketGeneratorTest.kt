@@ -4,8 +4,10 @@ import com.kaleaon.mnxmindmaker.model.MindGraph
 import com.kaleaon.mnxmindmaker.model.MindNode
 import com.kaleaon.mnxmindmaker.model.NodeType
 import com.kaleaon.mnxmindmaker.util.BootPacketGenerator
+import com.kaleaon.mnxmindmaker.util.run_continuity_audit
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class BootPacketGeneratorTest {
@@ -76,5 +78,35 @@ class BootPacketGeneratorTest {
         assertTrue(packet.memorySlice.none { it.id == restrictedMemory.id })
         assertTrue(safeMemory.attributes.containsKey("last_revalidated"))
         assertTrue(safeMemory.attributes.containsKey("confidence_drift"))
+    fun `continuity audit finds high risk drift and missing repair memory`() {
+        val riskyRule = MindNode(
+            id = "rule-1",
+            label = "Panic collapse risk",
+            type = NodeType.DRIFT_RULE,
+            attributes = mutableMapOf("semantic_subtype" to "drift_rule", "drift_signature" to "panic")
+        )
+        val graph = MindGraph(
+            nodes = mutableListOf(
+                MindNode(label = "Kernel", type = NodeType.IDENTITY),
+                riskyRule
+            )
+        )
+
+        val audit = run_continuity_audit(graph)
+        assertTrue(audit.findings.any { it.category == "high_risk_drift_signature" })
+        assertTrue(audit.findings.any { it.category == "missing_repair_memory" })
+    }
+
+    @Test
+    fun `boot packet exports continuity audit metadata`() {
+        val graph = MindGraph(
+            nodes = mutableListOf(
+                MindNode(label = "Kernel", type = NodeType.IDENTITY)
+            )
+        )
+        val packet = BootPacketGenerator.generate(graph)
+        val json = packet.toJson()
+        assertTrue(json.contains("continuity_audit"))
+        assertEquals(packet.continuityAudit.summary.totalFindings, packet.continuityAudit.findings.size)
     }
 }
