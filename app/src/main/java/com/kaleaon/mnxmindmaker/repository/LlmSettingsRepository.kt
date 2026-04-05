@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.SharedPreferences
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
+import com.kaleaon.mnxmindmaker.model.DataClassification
 import com.kaleaon.mnxmindmaker.model.LlmFallbackOrder
 import com.kaleaon.mnxmindmaker.model.LlmProvider
 import com.kaleaon.mnxmindmaker.model.LlmRuntime
@@ -11,11 +12,11 @@ import com.kaleaon.mnxmindmaker.model.LlmSettings
 import com.kaleaon.mnxmindmaker.model.LocalModelProfile
 import com.kaleaon.mnxmindmaker.model.ComputeBackend
 import com.kaleaon.mnxmindmaker.model.LocalRuntimeControls
+import com.kaleaon.mnxmindmaker.model.PrivacyMode
 import com.kaleaon.mnxmindmaker.model.defaultModel
 
 /**
- * Persists LLM API settings using encrypted shared preferences.
- * API keys are stored encrypted; other settings in plain preferences.
+ * Persists LLM + privacy settings in encrypted shared preferences.
  */
 class LlmSettingsRepository(private val context: Context) {
 
@@ -25,7 +26,7 @@ class LlmSettingsRepository(private val context: Context) {
             .build()
     }
 
-    private val encryptedPrefs: SharedPreferences by lazy {
+    private val prefs: SharedPreferences by lazy {
         EncryptedSharedPreferences.create(
             context,
             ENCRYPTED_PREFS_NAME,
@@ -35,16 +36,10 @@ class LlmSettingsRepository(private val context: Context) {
         )
     }
 
-    private val plainPrefs: SharedPreferences by lazy {
-        context.getSharedPreferences(PLAIN_PREFS_NAME, Context.MODE_PRIVATE)
-    }
-
     fun saveSettings(settings: LlmSettings) {
         val name = settings.provider.name
-        encryptedPrefs.edit()
+        prefs.edit()
             .putString("${name}_apiKey", settings.apiKey)
-            .apply()
-        plainPrefs.edit()
             .putString("${name}_model", settings.model)
             .putString("${name}_baseUrl", settings.baseUrl)
             .putBoolean("${name}_enabled", settings.enabled)
@@ -58,23 +53,24 @@ class LlmSettingsRepository(private val context: Context) {
             .putString("${name}_quantProfile", settings.runtimeControls.quantizationProfile)
             .putInt("${name}_maxRamMb", settings.runtimeControls.maxRamMb)
             .putInt("${name}_maxVramMb", settings.runtimeControls.maxVramMb)
+            .putString("${name}_classification", settings.outboundClassification.name)
+            .putString("${name}_tlsPin", settings.tlsPinnedSpkiSha256)
             .apply()
     }
 
     fun loadSettings(provider: LlmProvider): LlmSettings {
         val name = provider.name
-        val apiKey = encryptedPrefs.getString("${name}_apiKey", "") ?: ""
-        val model = plainPrefs.getString("${name}_model", provider.defaultModel())
-            ?: provider.defaultModel()
-        val baseUrl = plainPrefs.getString("${name}_baseUrl", provider.baseUrl) ?: provider.baseUrl
-        val enabled = plainPrefs.getBoolean("${name}_enabled", false)
-        val maxTokens = plainPrefs.getInt("${name}_maxTokens", 2048)
-        val temperature = plainPrefs.getFloat("${name}_temperature", 0.7f)
-        val localModelPath = plainPrefs.getString("${name}_localModelPath", "") ?: ""
-        val localProfile = plainPrefs.getString("${name}_localProfile", LocalModelProfile.BALANCED.name)
+        val apiKey = prefs.getString("${name}_apiKey", "") ?: ""
+        val model = prefs.getString("${name}_model", provider.defaultModel()) ?: provider.defaultModel()
+        val baseUrl = prefs.getString("${name}_baseUrl", provider.baseUrl) ?: provider.baseUrl
+        val enabled = prefs.getBoolean("${name}_enabled", false)
+        val maxTokens = prefs.getInt("${name}_maxTokens", 2048)
+        val temperature = prefs.getFloat("${name}_temperature", 0.7f)
+        val localModelPath = prefs.getString("${name}_localModelPath", "") ?: ""
+        val localProfile = prefs.getString("${name}_localProfile", LocalModelProfile.BALANCED.name)
             ?.let { runCatching { LocalModelProfile.valueOf(it) }.getOrNull() }
             ?: LocalModelProfile.BALANCED
-        val fallbackOrder = plainPrefs.getString("${name}_fallbackOrder", LlmFallbackOrder.REMOTE_ONLY.name)
+        val fallbackOrder = prefs.getString("${name}_fallbackOrder", LlmFallbackOrder.REMOTE_ONLY.name)
             ?.let { runCatching { LlmFallbackOrder.valueOf(it) }.getOrNull() }
             ?: LlmFallbackOrder.REMOTE_ONLY
         val computeBackend = plainPrefs.getString("${name}_computeBackend", ComputeBackend.AUTO.name)
@@ -87,6 +83,11 @@ class LlmSettingsRepository(private val context: Context) {
             maxRamMb = plainPrefs.getInt("${name}_maxRamMb", 4096),
             maxVramMb = plainPrefs.getInt("${name}_maxVramMb", 2048)
         )
+        val classification = prefs.getString("${name}_classification", DataClassification.SENSITIVE.name)
+            ?.let { runCatching { DataClassification.valueOf(it) }.getOrNull() }
+            ?: DataClassification.SENSITIVE
+        val tlsPin = prefs.getString("${name}_tlsPin", "") ?: ""
+
         return LlmSettings(
             provider = provider,
             apiKey = apiKey,
@@ -99,18 +100,31 @@ class LlmSettingsRepository(private val context: Context) {
             localProfile = localProfile,
             fallbackOrder = fallbackOrder,
             runtimeControls = runtimeControls
+            outboundClassification = classification,
+            tlsPinnedSpkiSha256 = tlsPin
         )
     }
 
-    fun loadAllSettings(): List<LlmSettings> = LlmProvider.entries.map { loadSettings(it) }
+    fun savePrivacyMode(mode: PrivacyMode) {
+        prefs.edit().putString(KEY_PRIVACY_MODE, mode.name).apply()
+    }
 
-    fun getActiveProvider(): LlmProvider? = getInvocationChain().firstOrNull()?.provider
+    fun loadPrivacyMode(): PrivacyMode {
+        val raw = prefs.getString(KEY_PRIVACY_MODE, PrivacyMode.HYBRID.name) ?: PrivacyMode.HYBRID.name
+        return runCatching { PrivacyMode.valueOf(raw) }.getOrDefault(PrivacyMode.HYBRID)
+    }
+
+    fun loadAllSettings(): List<LlmSettings> = LlmProvider.entries.map { loadSettings(it) }
 
     fun getInvocationChain(): List<LlmSettings> {
         val all = loadAllSettings()
         val usable = all.filter { it.enabled && it.isUsable() }
         val local = usable.firstOrNull { it.provider.runtime == LlmRuntime.LOCAL_ON_DEVICE }
         val remote = usable.filter { it.provider.runtime == LlmRuntime.REMOTE_API }
+
+        if (loadPrivacyMode() == PrivacyMode.STRICT_LOCAL_ONLY) {
+            return listOfNotNull(local)
+        }
 
         if (local != null && local.fallbackOrder == LlmFallbackOrder.LOCAL_FIRST_REMOTE_FALLBACK) {
             return listOf(local) + remote
@@ -134,7 +148,7 @@ class LlmSettingsRepository(private val context: Context) {
     }
 
     companion object {
-        private const val ENCRYPTED_PREFS_NAME = "mnx_llm_keys"
-        private const val PLAIN_PREFS_NAME = "mnx_llm_settings"
+        private const val ENCRYPTED_PREFS_NAME = "mnx_secure_llm_settings"
+        private const val KEY_PRIVACY_MODE = "global_privacy_mode"
     }
 }

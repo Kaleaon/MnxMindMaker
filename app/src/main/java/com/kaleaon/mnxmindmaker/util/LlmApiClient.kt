@@ -2,22 +2,21 @@ package com.kaleaon.mnxmindmaker.util
 
 import com.kaleaon.mnxmindmaker.model.LlmProvider
 import com.kaleaon.mnxmindmaker.model.LlmSettings
-import org.json.JSONArray
-import org.json.JSONObject
 import com.kaleaon.mnxmindmaker.util.tooling.AssistantTurn
 import com.kaleaon.mnxmindmaker.util.tooling.ToolInvocation
 import com.kaleaon.mnxmindmaker.util.tooling.ToolSpec
+import okhttp3.CertificatePinner
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONArray
+import org.json.JSONObject
 import java.io.File
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 
-/**
- * Cooperative cancellation token for local generation streams.
- */
 class LlmCancellationToken {
     @Volatile
     var isCancelled: Boolean = false
@@ -27,9 +26,6 @@ class LlmCancellationToken {
     }
 }
 
-/**
- * Runtime metadata for an on-device model backend.
- */
 data class LocalModelMetadata(
     val backendId: String,
     val modelName: String,
@@ -39,9 +35,6 @@ data class LocalModelMetadata(
     val supportsCancellation: Boolean
 )
 
-/**
- * Contract for pluggable local on-device backends.
- */
 interface LocalOnDeviceBackend {
     val backendId: String
     fun contextWindow(settings: LlmSettings): Int
@@ -55,11 +48,8 @@ interface LocalOnDeviceBackend {
     ): String
 }
 
-/**
- * First local adapter: OpenAI-compatible runtime addressed by a local runtime path/profile.
- */
 class LocalOpenAiRuntimeBackend(
-    private val httpClient: OkHttpClient,
+    private val baseClient: OkHttpClient,
     private val json: okhttp3.MediaType
 ) : LocalOnDeviceBackend {
 
@@ -68,11 +58,7 @@ class LocalOpenAiRuntimeBackend(
     override fun contextWindow(settings: LlmSettings): Int = settings.capabilities.contextWindowTokens
 
     override fun metadata(settings: LlmSettings): LocalModelMetadata {
-        val modelName = if (settings.localModelPath.isBlank()) {
-            settings.model
-        } else {
-            File(settings.localModelPath).name.ifBlank { settings.model }
-        }
+        val modelName = if (settings.localModelPath.isBlank()) settings.model else File(settings.localModelPath).name.ifBlank { settings.model }
         return LocalModelMetadata(
             backendId = backendId,
             modelName = modelName,
@@ -98,8 +84,8 @@ class LocalOpenAiRuntimeBackend(
             put("max_tokens", settings.maxTokens)
             put("temperature", settings.temperature.toDouble())
             put("messages", JSONArray().apply {
-                put(JSONObject().apply { put("role", "system"); put("content", systemPrompt) })
-                put(JSONObject().apply { put("role", "user"); put("content", userMessage) })
+                put(JSONObject().put("role", "system").put("content", systemPrompt))
+                put(JSONObject().put("role", "user").put("content", userMessage))
             })
             put("stream", false)
             put("extra_body", JSONObject().apply {
@@ -112,37 +98,28 @@ class LocalOpenAiRuntimeBackend(
             .url("${settings.baseUrl}/chat/completions")
             .post(body.toString().toRequestBody(json))
             .addHeader("Authorization", "Bearer $apiKey")
+            .addHeader("X-Data-Classification", settings.outboundClassification.name)
             .addHeader("content-type", "application/json")
             .build()
 
-        val fullResponse = httpClient.newCall(request).execute().use { response ->
+        val fullResponse = baseClient.newCall(request).execute().use { response ->
             val responseBody = response.body?.string() ?: throw LlmApiException("Empty response from local runtime")
             if (!response.isSuccessful) throw LlmApiException("Local runtime error ${response.code}: $responseBody")
             val jsonObj = JSONObject(responseBody)
-            jsonObj.getJSONArray("choices").getJSONObject(0)
-                .getJSONObject("message").getString("content")
+            jsonObj.getJSONArray("choices").getJSONObject(0).getJSONObject("message").getString("content")
         }
 
-        fullResponse.split(Regex("\\s+"))
-            .filter { it.isNotBlank() }
-            .forEach { token ->
-                if (cancellation.isCancelled) throw LlmApiException("Cancelled")
-                onToken("$token ")
-            }
-
+        fullResponse.split(Regex("\\s+")).filter { it.isNotBlank() }.forEach { token ->
+            if (cancellation.isCancelled) throw LlmApiException("Cancelled")
+            onToken("$token ")
+        }
         return fullResponse
     }
 }
 
-/**
- * HTTP client for external LLM APIs (Anthropic, OpenAI, Gemini).
- * Includes structured tool-call adapters with text fallback.
- */
-class LlmApiClient(
-    localBackend: LocalOnDeviceBackend? = null
-) {
+class LlmApiClient(localBackend: LocalOnDeviceBackend? = null) {
 
-    private val httpClient = OkHttpClient.Builder()
+    private val baseClient = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
         .readTimeout(60, TimeUnit.SECONDS)
         .writeTimeout(30, TimeUnit.SECONDS)
@@ -152,13 +129,10 @@ class LlmApiClient(
     private val onDeviceBackends: Map<String, LocalOnDeviceBackend>
 
     init {
-        val defaultBackend = localBackend ?: LocalOpenAiRuntimeBackend(httpClient, json)
+        val defaultBackend = localBackend ?: LocalOpenAiRuntimeBackend(baseClient, json)
         onDeviceBackends = mapOf(defaultBackend.backendId to defaultBackend)
     }
 
-    /**
-     * Backward-compatible plain text completion.
-     */
     fun complete(settings: LlmSettings, systemPrompt: String, userMessage: String): String {
         val turn = completeAssistantTurn(
             settings = settings,
@@ -169,10 +143,6 @@ class LlmApiClient(
         return turn.text
     }
 
-    /**
-     * Structured completion supporting provider-native tool call formats.
-     * Transcript format: [{"role":"user|assistant|tool", "content": ... }]
-     */
     fun completeAssistantTurn(
         settings: LlmSettings,
         systemPrompt: String,
@@ -196,17 +166,24 @@ class LlmApiClient(
                 ),
                 raw = JSONObject()
             )
+            LlmProvider.LOCAL_ON_DEVICE -> {
+                val localText = resolveOnDeviceBackend().streamCompletion(
+                    settings = settings,
+                    systemPrompt = systemPrompt,
+                    userMessage = transcript.lastOrNull()?.opt("content")?.toString().orEmpty()
+                )
+                AssistantTurn(text = localText)
+            }
         }
     }
 
     fun localMetadata(settings: LlmSettings): LocalModelMetadata? {
         if (settings.provider != LlmProvider.LOCAL_ON_DEVICE) return null
-        return resolveOnDeviceBackend(settings).metadata(settings)
+        return resolveOnDeviceBackend().metadata(settings)
     }
 
-    private fun resolveOnDeviceBackend(settings: LlmSettings): LocalOnDeviceBackend {
-        return onDeviceBackends.values.firstOrNull()
-            ?: throw LlmApiException("No on-device backend is registered")
+    private fun resolveOnDeviceBackend(): LocalOnDeviceBackend {
+        return onDeviceBackends.values.firstOrNull() ?: throw LlmApiException("No on-device backend is registered")
     }
 
     private fun callAnthropicTurn(
@@ -215,6 +192,23 @@ class LlmApiClient(
         transcript: List<JSONObject>,
         tools: List<ToolSpec>
     ): AssistantTurn {
+    private fun clientFor(settings: LlmSettings): OkHttpClient {
+        val url = settings.baseUrl.toHttpUrlOrNull() ?: return baseClient
+        val host = url.host
+        val pin = settings.tlsPinnedSpkiSha256.trim()
+        if (url.isHttps.not() || pin.isBlank()) return baseClient
+        val normalized = if (pin.startsWith("sha256/")) pin else "sha256/$pin"
+        val pinner = CertificatePinner.Builder().add(host, normalized).build()
+        return baseClient.newBuilder().certificatePinner(pinner).build()
+    }
+
+    private fun withCommonHeaders(request: Request.Builder, settings: LlmSettings): Request.Builder {
+        return request
+            .addHeader("content-type", "application/json")
+            .addHeader("X-Data-Classification", settings.outboundClassification.name)
+    }
+
+    private fun callAnthropicTurn(settings: LlmSettings, systemPrompt: String, transcript: List<JSONObject>, tools: List<ToolSpec>): AssistantTurn {
         val body = JSONObject().apply {
             put("model", settings.model)
             put("max_tokens", settings.maxTokens)
@@ -222,67 +216,55 @@ class LlmApiClient(
             put("messages", anthropicMessages(transcript))
             if (tools.isNotEmpty()) put("tools", anthropicTools(tools))
         }
-        val request = Request.Builder()
-            .url("${settings.baseUrl}/messages")
-            .post(body.toString().toRequestBody(json))
-            .addHeader("x-api-key", settings.apiKey)
-            .addHeader("anthropic-version", "2023-06-01")
-            .addHeader("content-type", "application/json")
-            .build()
-        return httpClient.newCall(request).execute().use { response ->
+        val request = withCommonHeaders(
+            Request.Builder()
+                .url("${settings.baseUrl}/messages")
+                .post(body.toString().toRequestBody(json))
+                .addHeader("x-api-key", settings.apiKey)
+                .addHeader("anthropic-version", "2023-06-01"),
+            settings
+        ).build()
+        return clientFor(settings).newCall(request).execute().use { response ->
             val responseBody = response.body?.string() ?: throw LlmApiException("Empty response from Anthropic")
             if (!response.isSuccessful) throw LlmApiException("Anthropic error ${response.code}: $responseBody")
             parseAnthropicTurn(JSONObject(responseBody))
         }
     }
 
-    private fun callOpenAITurn(
-        settings: LlmSettings,
-        systemPrompt: String,
-        transcript: List<JSONObject>,
-        tools: List<ToolSpec>
-    ): AssistantTurn {
+    private fun callOpenAITurn(settings: LlmSettings, systemPrompt: String, transcript: List<JSONObject>, tools: List<ToolSpec>): AssistantTurn {
         val body = openAiBody(settings, systemPrompt, transcript, tools)
-        val request = Request.Builder()
-            .url("${settings.baseUrl}/chat/completions")
-            .post(body.toString().toRequestBody(json))
-            .addHeader("Authorization", "Bearer ${settings.apiKey}")
-            .addHeader("content-type", "application/json")
-            .build()
-        return httpClient.newCall(request).execute().use { response ->
+        val request = withCommonHeaders(
+            Request.Builder()
+                .url("${settings.baseUrl}/chat/completions")
+                .post(body.toString().toRequestBody(json))
+                .addHeader("Authorization", "Bearer ${settings.apiKey}"),
+            settings
+        ).build()
+        return clientFor(settings).newCall(request).execute().use { response ->
             val responseBody = response.body?.string() ?: throw LlmApiException("Empty response from OpenAI")
             if (!response.isSuccessful) throw LlmApiException("OpenAI error ${response.code}: $responseBody")
             parseOpenAITurn(JSONObject(responseBody))
         }
     }
 
-    private fun callOpenAICompatibleTurn(
-        settings: LlmSettings,
-        systemPrompt: String,
-        transcript: List<JSONObject>,
-        tools: List<ToolSpec>
-    ): AssistantTurn {
+    private fun callOpenAICompatibleTurn(settings: LlmSettings, systemPrompt: String, transcript: List<JSONObject>, tools: List<ToolSpec>): AssistantTurn {
         val apiKey = settings.apiKey.ifBlank { "EMPTY" }
         val body = openAiBody(settings, systemPrompt, transcript, tools)
-        val request = Request.Builder()
-            .url("${settings.baseUrl}/chat/completions")
-            .post(body.toString().toRequestBody(json))
-            .addHeader("Authorization", "Bearer $apiKey")
-            .addHeader("content-type", "application/json")
-            .build()
-        return httpClient.newCall(request).execute().use { response ->
+        val request = withCommonHeaders(
+            Request.Builder()
+                .url("${settings.baseUrl}/chat/completions")
+                .post(body.toString().toRequestBody(json))
+                .addHeader("Authorization", "Bearer $apiKey"),
+            settings
+        ).build()
+        return clientFor(settings).newCall(request).execute().use { response ->
             val responseBody = response.body?.string() ?: throw LlmApiException("Empty response from vLLM Gemma 4")
             if (!response.isSuccessful) throw LlmApiException("vLLM Gemma 4 error ${response.code}: $responseBody")
             parseOpenAITurn(JSONObject(responseBody))
         }
     }
 
-    private fun callGeminiTurn(
-        settings: LlmSettings,
-        systemPrompt: String,
-        transcript: List<JSONObject>,
-        tools: List<ToolSpec>
-    ): AssistantTurn {
+    private fun callGeminiTurn(settings: LlmSettings, systemPrompt: String, transcript: List<JSONObject>, tools: List<ToolSpec>): AssistantTurn {
         val fullPrompt = buildString {
             append(systemPrompt)
             append("\n\n")
@@ -295,34 +277,24 @@ class LlmApiClient(
         }
         val body = JSONObject().apply {
             put("contents", JSONArray().put(JSONObject().put("parts", JSONArray().put(JSONObject().put("text", fullPrompt)))))
-            put("generationConfig", JSONObject().apply {
-                put("maxOutputTokens", settings.maxTokens)
-                put("temperature", settings.temperature.toDouble())
-            })
-            if (tools.isNotEmpty()) {
-                put("tools", JSONArray().put(JSONObject().put("functionDeclarations", geminiToolDeclarations(tools))))
-            }
+            put("generationConfig", JSONObject().put("maxOutputTokens", settings.maxTokens).put("temperature", settings.temperature.toDouble()))
+            if (tools.isNotEmpty()) put("tools", JSONArray().put(JSONObject().put("functionDeclarations", geminiToolDeclarations(tools))))
         }
 
-        val url = "${settings.baseUrl}/models/${settings.model}:generateContent?key=${settings.apiKey}"
-        val request = Request.Builder()
-            .url(url)
-            .post(body.toString().toRequestBody(json))
-            .addHeader("content-type", "application/json")
-            .build()
-        return httpClient.newCall(request).execute().use { response ->
+        val request = withCommonHeaders(
+            Request.Builder()
+                .url("${settings.baseUrl}/models/${settings.model}:generateContent?key=${settings.apiKey}")
+                .post(body.toString().toRequestBody(json)),
+            settings
+        ).build()
+        return clientFor(settings).newCall(request).execute().use { response ->
             val responseBody = response.body?.string() ?: throw LlmApiException("Empty response from Gemini")
             if (!response.isSuccessful) throw LlmApiException("Gemini error ${response.code}: $responseBody")
             parseGeminiTurn(JSONObject(responseBody))
         }
     }
 
-    private fun openAiBody(
-        settings: LlmSettings,
-        systemPrompt: String,
-        transcript: List<JSONObject>,
-        tools: List<ToolSpec>
-    ): JSONObject {
+    private fun openAiBody(settings: LlmSettings, systemPrompt: String, transcript: List<JSONObject>, tools: List<ToolSpec>): JSONObject {
         return JSONObject().apply {
             put("model", settings.model)
             put("max_tokens", settings.maxTokens)
@@ -335,12 +307,10 @@ class LlmApiClient(
                         val content = msg.optJSONArray("content") ?: JSONArray()
                         for (i in 0 until content.length()) {
                             val toolResult = content.optJSONObject(i) ?: continue
-                            put(
-                                JSONObject()
-                                    .put("role", "tool")
-                                    .put("tool_call_id", toolResult.optString("tool_call_id", UUID.randomUUID().toString()))
-                                    .put("content", toolResult.toString())
-                            )
+                            put(JSONObject()
+                                .put("role", "tool")
+                                .put("tool_call_id", toolResult.optString("tool_call_id", UUID.randomUUID().toString()))
+                                .put("content", toolResult.toString()))
                         }
                     } else {
                         put(JSONObject().put("role", role).put("content", msg.opt("content")?.toString() ?: ""))
@@ -361,11 +331,10 @@ class LlmApiClient(
                 val call = toolCalls.optJSONObject(i) ?: return@mapNotNull null
                 val functionObj = call.optJSONObject("function") ?: return@mapNotNull null
                 val argsRaw = functionObj.optString("arguments", "{}")
-                val args = safeJsonObject(argsRaw)
                 ToolInvocation(
                     id = call.optString("id", UUID.randomUUID().toString()),
                     name = functionObj.optString("name"),
-                    arguments = args,
+                    arguments = safeJsonObject(argsRaw),
                     raw = call
                 )
             },
@@ -395,15 +364,12 @@ class LlmApiClient(
     private fun parseGeminiTurn(response: JSONObject): AssistantTurn {
         val candidates = response.optJSONArray("candidates") ?: JSONArray()
         if (candidates.length() == 0) return AssistantTurn(text = "", raw = response)
-
         val parts = candidates.getJSONObject(0).optJSONObject("content")?.optJSONArray("parts") ?: JSONArray()
         val textParts = mutableListOf<String>()
         val invocations = mutableListOf<ToolInvocation>()
         for (i in 0 until parts.length()) {
             val part = parts.optJSONObject(i) ?: continue
-            if (part.has("text")) {
-                textParts += part.optString("text")
-            }
+            if (part.has("text")) textParts += part.optString("text")
             val functionCall = part.optJSONObject("functionCall")
             if (functionCall != null) {
                 invocations += ToolInvocation(
@@ -417,64 +383,37 @@ class LlmApiClient(
         return AssistantTurn(text = textParts.joinToString("\n").trim(), toolInvocations = invocations, raw = response)
     }
 
-    private fun openAiTools(tools: List<ToolSpec>): JSONArray {
-        return JSONArray().apply {
-            tools.forEach { spec ->
-                put(
-                    JSONObject()
-                        .put("type", "function")
-                        .put("function", JSONObject()
-                            .put("name", spec.name)
-                            .put("description", spec.description)
-                            .put("parameters", spec.inputSchema.takeIf { it.length() > 0 } ?: JSONObject().put("type", "object"))
-                        )
-                )
-            }
+    private fun openAiTools(tools: List<ToolSpec>): JSONArray = JSONArray().apply {
+        tools.forEach { spec ->
+            put(JSONObject().put("type", "function").put("function", JSONObject()
+                .put("name", spec.name)
+                .put("description", spec.description)
+                .put("parameters", spec.inputSchema.takeIf { it.length() > 0 } ?: JSONObject().put("type", "object"))))
         }
     }
 
-    private fun anthropicTools(tools: List<ToolSpec>): JSONArray {
-        return JSONArray().apply {
-            tools.forEach { spec ->
-                put(
-                    JSONObject()
-                        .put("name", spec.name)
-                        .put("description", spec.description)
-                        .put("input_schema", spec.inputSchema.takeIf { it.length() > 0 } ?: JSONObject().put("type", "object"))
-                )
-            }
+    private fun anthropicTools(tools: List<ToolSpec>): JSONArray = JSONArray().apply {
+        tools.forEach { spec ->
+            put(JSONObject().put("name", spec.name).put("description", spec.description)
+                .put("input_schema", spec.inputSchema.takeIf { it.length() > 0 } ?: JSONObject().put("type", "object")))
         }
     }
 
-    private fun anthropicMessages(transcript: List<JSONObject>): JSONArray {
-        return JSONArray().apply {
-            transcript.forEach { msg ->
-                put(
-                    JSONObject().put("role", msg.optString("role", "user")).put("content", msg.opt("content") ?: "")
-                )
-            }
+    private fun anthropicMessages(transcript: List<JSONObject>): JSONArray = JSONArray().apply {
+        transcript.forEach { msg -> put(JSONObject().put("role", msg.optString("role", "user")).put("content", msg.opt("content") ?: "")) }
+    }
+
+    private fun geminiToolDeclarations(tools: List<ToolSpec>): JSONArray = JSONArray().apply {
+        tools.forEach { spec ->
+            put(JSONObject().put("name", spec.name).put("description", spec.description)
+                .put("parameters", spec.inputSchema.takeIf { it.length() > 0 } ?: JSONObject().put("type", "object")))
         }
     }
 
-    private fun geminiToolDeclarations(tools: List<ToolSpec>): JSONArray {
-        return JSONArray().apply {
-            tools.forEach { spec ->
-                put(
-                    JSONObject()
-                        .put("name", spec.name)
-                        .put("description", spec.description)
-                        .put("parameters", spec.inputSchema.takeIf { it.length() > 0 } ?: JSONObject().put("type", "object"))
-                )
-            }
-        }
-    }
-
-    private fun safeJsonObject(raw: String): JSONObject {
-        return try {
-            JSONObject(raw)
-        } catch (_: Exception) {
-            JSONObject().put("raw", raw)
-        }
+    private fun safeJsonObject(raw: String): JSONObject = try {
+        JSONObject(raw)
+    } catch (_: Exception) {
+        JSONObject().put("raw", raw)
     }
 }
 
