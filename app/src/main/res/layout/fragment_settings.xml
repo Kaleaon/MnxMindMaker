@@ -21,7 +21,6 @@
             android:textColor="@color/colorOnPrimary"
             android:layout_marginBottom="16dp" />
 
-        <!-- ===== Ktheme: Theme Picker ===== -->
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -57,16 +56,12 @@
             android:textColor="@color/colorAccent"
             android:layout_marginBottom="24dp" />
 
-        <!-- Divider -->
         <View
             android:layout_width="match_parent"
             android:layout_height="1dp"
             android:background="@color/colorSurface"
             android:layout_marginBottom="16dp" />
 
-        <!-- ===== LLM API Settings ===== -->
-
-        <!-- Provider picker -->
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -81,39 +76,44 @@
             android:background="@color/colorSurface"
             android:layout_marginBottom="16dp" />
 
-        <!-- API Key -->
-        <TextView
+        <LinearLayout
+            android:id="@+id/group_api_key"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="@string/api_key_label"
-            android:textColor="@color/colorOnSurface"
-            android:layout_marginBottom="4dp" />
+            android:orientation="vertical">
 
-        <TextView
-            android:id="@+id/tv_api_key_hint"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:textSize="12sp"
-            android:textColor="@color/colorAccent"
-            android:layout_marginBottom="4dp" />
-
-        <com.google.android.material.textfield.TextInputLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginBottom="16dp"
-            app:passwordToggleEnabled="true"
-            style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox">
-
-            <com.google.android.material.textfield.TextInputEditText
-                android:id="@+id/et_api_key"
+            <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:hint="sk-..."
-                android:inputType="textPassword"
-                android:textColor="@color/colorOnPrimary" />
-        </com.google.android.material.textfield.TextInputLayout>
+                android:text="@string/api_key_label"
+                android:textColor="@color/colorOnSurface"
+                android:layout_marginBottom="4dp" />
 
-        <!-- Model -->
+            <TextView
+                android:id="@+id/tv_api_key_hint"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textSize="12sp"
+                android:textColor="@color/colorAccent"
+                android:layout_marginBottom="4dp" />
+
+            <com.google.android.material.textfield.TextInputLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="16dp"
+                app:passwordToggleEnabled="true"
+                style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox">
+
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/et_api_key"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:hint="sk-..."
+                    android:inputType="textPassword"
+                    android:textColor="@color/colorOnPrimary" />
+            </com.google.android.material.textfield.TextInputLayout>
+        </LinearLayout>
+
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -134,7 +134,6 @@
                 android:textColor="@color/colorOnPrimary" />
         </com.google.android.material.textfield.TextInputLayout>
 
-        <!-- Base URL -->
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -155,7 +154,71 @@
                 android:textColor="@color/colorOnPrimary" />
         </com.google.android.material.textfield.TextInputLayout>
 
-        <!-- Max Tokens -->
+        <LinearLayout
+            android:id="@+id/group_local_runtime"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:visibility="gone">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/local_model_path_label"
+                android:textColor="@color/colorOnSurface"
+                android:layout_marginBottom="4dp" />
+
+            <com.google.android.material.textfield.TextInputLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="16dp"
+                style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox">
+
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/et_local_model_path"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:hint="/data/local/tmp/model.gguf"
+                    android:textColor="@color/colorOnPrimary" />
+            </com.google.android.material.textfield.TextInputLayout>
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/local_profile_label"
+                android:textColor="@color/colorOnSurface"
+                android:layout_marginBottom="4dp" />
+
+            <Spinner
+                android:id="@+id/spinner_local_profile"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="16dp"
+                android:background="@color/colorSurface" />
+        </LinearLayout>
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/fallback_order_label"
+            android:textColor="@color/colorOnSurface"
+            android:layout_marginBottom="4dp" />
+
+        <Spinner
+            android:id="@+id/spinner_fallback_order"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="16dp"
+            android:background="@color/colorSurface" />
+
+        <TextView
+            android:id="@+id/tv_capability_summary"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textColor="@color/colorOnSurface"
+            android:textSize="12sp"
+            android:layout_marginBottom="16dp" />
+
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -177,7 +240,6 @@
                 android:textColor="@color/colorOnPrimary" />
         </com.google.android.material.textfield.TextInputLayout>
 
-        <!-- Temperature -->
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -199,7 +261,6 @@
                 android:textColor="@color/colorOnPrimary" />
         </com.google.android.material.textfield.TextInputLayout>
 
-        <!-- Enable toggle -->
         <com.google.android.material.switchmaterial.SwitchMaterial
             android:id="@+id/switch_enabled"
             android:layout_width="match_parent"
@@ -215,7 +276,6 @@
             android:text="@string/save_settings"
             android:layout_marginBottom="24dp" />
 
-        <!-- Provider info -->
         <TextView
             android:id="@+id/tv_anthropic_info"
             android:layout_width="match_parent"

@@ -4,8 +4,12 @@ import android.content.Context
 import android.content.SharedPreferences
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
+import com.kaleaon.mnxmindmaker.model.LlmFallbackOrder
 import com.kaleaon.mnxmindmaker.model.LlmProvider
+import com.kaleaon.mnxmindmaker.model.LlmRuntime
 import com.kaleaon.mnxmindmaker.model.LlmSettings
+import com.kaleaon.mnxmindmaker.model.LocalModelProfile
+import com.kaleaon.mnxmindmaker.model.defaultModel
 
 /**
  * Persists LLM API settings using encrypted shared preferences.
@@ -44,6 +48,9 @@ class LlmSettingsRepository(private val context: Context) {
             .putBoolean("${name}_enabled", settings.enabled)
             .putInt("${name}_maxTokens", settings.maxTokens)
             .putFloat("${name}_temperature", settings.temperature)
+            .putString("${name}_localModelPath", settings.localModelPath)
+            .putString("${name}_localProfile", settings.localProfile.name)
+            .putString("${name}_fallbackOrder", settings.fallbackOrder.name)
             .apply()
     }
 
@@ -56,23 +63,51 @@ class LlmSettingsRepository(private val context: Context) {
         val enabled = plainPrefs.getBoolean("${name}_enabled", false)
         val maxTokens = plainPrefs.getInt("${name}_maxTokens", 2048)
         val temperature = plainPrefs.getFloat("${name}_temperature", 0.7f)
-        return LlmSettings(provider, apiKey, model, baseUrl, enabled, maxTokens, temperature)
+        val localModelPath = plainPrefs.getString("${name}_localModelPath", "") ?: ""
+        val localProfile = plainPrefs.getString("${name}_localProfile", LocalModelProfile.BALANCED.name)
+            ?.let { runCatching { LocalModelProfile.valueOf(it) }.getOrNull() }
+            ?: LocalModelProfile.BALANCED
+        val fallbackOrder = plainPrefs.getString("${name}_fallbackOrder", LlmFallbackOrder.REMOTE_ONLY.name)
+            ?.let { runCatching { LlmFallbackOrder.valueOf(it) }.getOrNull() }
+            ?: LlmFallbackOrder.REMOTE_ONLY
+        return LlmSettings(
+            provider = provider,
+            apiKey = apiKey,
+            model = model,
+            baseUrl = baseUrl,
+            enabled = enabled,
+            maxTokens = maxTokens,
+            temperature = temperature,
+            localModelPath = localModelPath,
+            localProfile = localProfile,
+            fallbackOrder = fallbackOrder
+        )
     }
 
     fun loadAllSettings(): List<LlmSettings> = LlmProvider.entries.map { loadSettings(it) }
 
-    fun getActiveProvider(): LlmProvider? {
-        return LlmProvider.entries.firstOrNull { provider ->
-            val settings = loadSettings(provider)
-            settings.enabled && (!provider.requiresApiKey || settings.apiKey.isNotBlank())
+    fun getActiveProvider(): LlmProvider? = getInvocationChain().firstOrNull()?.provider
+
+    fun getInvocationChain(): List<LlmSettings> {
+        val all = loadAllSettings()
+        val usable = all.filter { it.enabled && it.isUsable() }
+        val local = usable.firstOrNull { it.provider.runtime == LlmRuntime.LOCAL_ON_DEVICE }
+        val remote = usable.filter { it.provider.runtime == LlmRuntime.REMOTE_API }
+
+        if (local != null && local.fallbackOrder == LlmFallbackOrder.LOCAL_FIRST_REMOTE_FALLBACK) {
+            return listOf(local) + remote
         }
+        return if (remote.isNotEmpty()) remote else listOfNotNull(local)
     }
 
-    private fun LlmProvider.defaultModel(): String = when (this) {
-        LlmProvider.ANTHROPIC -> "claude-3-5-sonnet-20241022"
-        LlmProvider.OPENAI -> "gpt-4o"
-        LlmProvider.GEMINI -> "gemini-1.5-pro"
-        LlmProvider.VLLM_GEMMA4 -> "google/gemma-4-E4B-it"
+    private fun LlmSettings.isUsable(): Boolean {
+        return when {
+            provider.runtime == LlmRuntime.LOCAL_ON_DEVICE -> {
+                localModelPath.isNotBlank() && baseUrl.isNotBlank()
+            }
+            provider.requiresApiKey -> apiKey.isNotBlank()
+            else -> true
+        }
     }
 
     companion object {

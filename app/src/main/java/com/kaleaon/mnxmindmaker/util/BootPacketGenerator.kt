@@ -3,6 +3,7 @@ package com.kaleaon.mnxmindmaker.util
 import com.kaleaon.mnxmindmaker.model.MindGraph
 import com.kaleaon.mnxmindmaker.model.MindNode
 import com.kaleaon.mnxmindmaker.model.NodeType
+import com.kaleaon.mnxmindmaker.model.LlmCapabilityFlags
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -78,7 +79,11 @@ object BootPacketGenerator {
         }
     }
 
-    fun generate(graph: MindGraph, mode: Mode = Mode.FULL): BootPacket {
+    fun generate(
+        graph: MindGraph,
+        mode: Mode = Mode.FULL,
+        capabilities: LlmCapabilityFlags? = null
+    ): BootPacket {
         val protectedKernel = graph.nodes.filter {
             it.type in setOf(NodeType.IDENTITY, NodeType.VALUE, NodeType.RELATIONSHIP) &&
                 it.attributes["protection_level"] == "protected"
@@ -107,7 +112,32 @@ object BootPacketGenerator {
             projectSlice = projects.take(8),
             driftRuleSlice = driftRules.take(8)
         )
-        return packetForMode(packet, mode)
+        val modePacket = packetForMode(packet, mode)
+        return adaptForCapabilities(modePacket, capabilities)
+    }
+
+    private fun adaptForCapabilities(packet: BootPacket, capabilities: LlmCapabilityFlags?): BootPacket {
+        if (capabilities == null) return packet
+
+        val contextScale = when {
+            capabilities.contextWindowTokens <= 4096 -> 0.4f
+            capabilities.contextWindowTokens <= 8192 -> 0.6f
+            capabilities.contextWindowTokens <= 16384 -> 0.8f
+            else -> 1.0f
+        }
+
+        fun <T> List<T>.scaled(): List<T> {
+            val target = (size * contextScale).toInt().coerceAtLeast(1)
+            return take(target)
+        }
+
+        return packet.copy(
+            relationshipSlice = packet.relationshipSlice.scaled(),
+            warningSlice = packet.warningSlice.scaled(),
+            memorySlice = packet.memorySlice.scaled(),
+            projectSlice = if (capabilities.supportsToolPlanning) packet.projectSlice.scaled() else emptyList(),
+            driftRuleSlice = if (capabilities.supportsPacketGeneration) packet.driftRuleSlice.scaled() else packet.driftRuleSlice.take(2)
+        )
     }
 
     private fun packetForMode(packet: BootPacket, mode: Mode): BootPacket = when (mode) {
