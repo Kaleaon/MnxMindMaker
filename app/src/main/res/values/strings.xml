@@ -9,6 +9,15 @@
     <string name="export_mnx">Export .mnx</string>
     <string name="import_mnx">Import .mnx</string>
     <string name="ask_ai">Ask AI</string>
+    <string name="review_audit">Review Audit</string>
+    <string name="review_audit_with_count">Audit (%1$d)</string>
+    <string name="review_audit_title">Continuity Audit — %1$d findings</string>
+    <string name="audit_not_available">Audit results are not available yet</string>
+    <string name="audit_no_findings">No continuity findings detected.</string>
+    <string name="accept_warning">Accept warning</string>
+    <string name="create_corrective_node">Create corrective node</string>
+    <string name="audit_warning_accepted">Warning accepted</string>
+    <string name="audit_corrective_created">Corrective node and links created</string>
     <string name="reset_view">Reset View</string>
     <string name="label_required">Label is required</string>
     <string name="add">Add</string>
@@ -66,4 +75,13 @@
     <string name="temperature_label">Temperature (0–2)</string>
     <string name="enabled_label">Enable this provider</string>
     <string name="save_settings">Save Settings</string>
+    <string name="hint_local_model_path">Set the on-device model file path and runtime endpoint; no API key required.</string>
+    <string name="local_model_path_label">Local Model Path</string>
+    <string name="local_profile_label">Local Profile</string>
+    <string name="fallback_order_label">Fallback Order</string>
+    <string name="fallback_remote_only">Remote only</string>
+    <string name="fallback_local_first">Local first, remote fallback</string>
+    <string name="capability_summary">Capabilities — Context: %1$d tokens, Tool planning: %2$s, Packet generation: %3$s</string>
+    <string name="capability_supported">supported</string>
+    <string name="capability_limited">limited</string>
 </resources>
