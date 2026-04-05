@@ -104,12 +104,32 @@ class MnxRepository(private val context: Context) {
             )
         }
     }
+    data class ContinuityMetadata(
+        val snapshotId: String,
+        val parentSnapshotId: String?,
+        val integrityHash: String,
+        val reason: String? = null,
+        val driftNotes: String? = null
+    )
 
     /**
      * Export a [MindGraph] to a .mnx file in the app's files directory.
      * Returns the output [File].
      */
-    fun exportToMnx(graph: MindGraph): File {
+    fun exportToMnx(graph: MindGraph, continuityMetadata: ContinuityMetadata? = null): File {
+        val outDir = File(context.filesDir, "mnx_exports")
+        outDir.mkdirs()
+        val safeName = graph.name.replace(Regex("[^a-zA-Z0-9_-]"), "_")
+        val outFile = File(outDir, "${safeName}_${System.currentTimeMillis()}.mnx")
+        writeGraphToFile(graph, outFile, continuityMetadata)
+        return outFile
+    }
+
+    fun writeGraphToFile(graph: MindGraph, outFile: File, continuityMetadata: ContinuityMetadata? = null) {
+        MnxCodec.encodeToFile(buildMnxFile(graph, continuityMetadata), outFile)
+    }
+
+    fun buildMnxFile(graph: MindGraph, continuityMetadata: ContinuityMetadata? = null): MnxFile {
         val sections = mutableMapOf<MnxFormat.MnxSectionType, ByteArray>()
         val rawSections = mutableMapOf<Short, ByteArray>()
 
@@ -142,14 +162,18 @@ class MnxRepository(private val context: Context) {
             put("edge_count", graph.edges.size.toString())
             put("created_at", graph.createdAt.toString())
             put("modified_at", graph.modifiedAt.toString())
+            put("modified_at", System.currentTimeMillis().toString())
+            continuityMetadata?.let {
+                put("snapshot_id", it.snapshotId)
+                put("parent_snapshot_id", it.parentSnapshotId ?: "")
+                put("integrity_hash", it.integrityHash)
+                it.reason?.let { reason -> put("snapshot_reason", reason) }
+                it.driftNotes?.let { notes -> put("snapshot_drift_notes", notes) }
+            }
         })
         sections[MnxFormat.MnxSectionType.META] = MnxCodec.serializeMeta(meta)
 
         // Build DIMENSIONAL_REFS section — N-dimensional coordinates for every node.
-        // Each node contributes one ref per named dimension (e.g. VALUES nodes get
-        // ethical_weight, social_impact, personal_relevance, priority, universality,
-        // actionability, intrinsic_worth — 7 dims — all preserved here even though
-        // only x/y are visible on the canvas).
         val dimRefs = DimensionMapper.buildDimensionalRefs(graph.nodes)
         sections[MnxFormat.MnxSectionType.DIMENSIONAL_REFS] =
             MnxCodec.serializeDimensionalRefs(dimRefs)
@@ -171,6 +195,7 @@ class MnxRepository(private val context: Context) {
         val outFile = File(outDir, "${safeName}_${System.currentTimeMillis()}.mnx")
         MnxCodec.encodeToFile(mnxFile, outFile)
         return outFile
+        return MnxFile(header = MnxHeader(), sections = sections)
     }
 
     /**
@@ -196,21 +221,27 @@ class MnxRepository(private val context: Context) {
             )
             graphName = identity.name
             val identityNodeId = identity.name + "_id"
-            nodes.add(MindNode(
-                id = identityNodeId,
-                label = identity.name,
-                type = NodeType.IDENTITY,
-                description = identity.biography,
-                x = 400f, y = 300f
-            ))
+            nodes.add(
+                MindNode(
+                    id = identityNodeId,
+                    label = identity.name,
+                    type = NodeType.IDENTITY,
+                    description = identity.biography,
+                    x = 400f,
+                    y = 300f
+                )
+            )
             // Restore personality traits as child nodes
             identity.coreTraits.forEachIndexed { i, trait ->
-                nodes.add(MindNode(
-                    label = trait,
-                    type = NodeType.PERSONALITY,
-                    x = 150f + i * 120f, y = 500f,
-                    parentId = identityNodeId
-                ))
+                nodes.add(
+                    MindNode(
+                        label = trait,
+                        type = NodeType.PERSONALITY,
+                        x = 150f + i * 120f,
+                        y = 500f,
+                        parentId = identityNodeId
+                    )
+                )
             }
         }
 
@@ -225,15 +256,15 @@ class MnxRepository(private val context: Context) {
         }
 
         // Restore N-dimensional coordinates from DIMENSIONAL_REFS section.
-        // Each node's dimension map is rebuilt so callers can inspect or
-        // re-export the full multi-dimensional structure.
         val restoredDims: Map<String, Map<String, Float>> =
             if (mnxFile.hasSection(MnxFormat.MnxSectionType.DIMENSIONAL_REFS)) {
                 val dimRefs = MnxCodec.deserializeDimensionalRefs(
                     mnxFile.sections[MnxFormat.MnxSectionType.DIMENSIONAL_REFS]!!
                 )
                 DimensionMapper.restoreDimensions(dimRefs)
-            } else emptyMap()
+            } else {
+                emptyMap()
+            }
 
         // Patch restored dimensions back onto nodes
         val nodesWithDims = nodes.map { node ->
