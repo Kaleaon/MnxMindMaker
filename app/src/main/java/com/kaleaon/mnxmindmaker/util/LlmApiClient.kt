@@ -2,8 +2,6 @@ package com.kaleaon.mnxmindmaker.util
 
 import com.kaleaon.mnxmindmaker.model.LlmProvider
 import com.kaleaon.mnxmindmaker.model.LlmSettings
-import org.json.JSONArray
-import org.json.JSONObject
 import com.kaleaon.mnxmindmaker.util.tooling.AssistantTurn
 import com.kaleaon.mnxmindmaker.util.tooling.ToolInvocation
 import com.kaleaon.mnxmindmaker.util.tooling.ToolSpec
@@ -11,15 +9,12 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
-import java.io.File
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.File
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 
-/**
- * Cooperative cancellation token for local generation streams.
- */
 class LlmCancellationToken {
     @Volatile
     var isCancelled: Boolean = false
@@ -29,9 +24,6 @@ class LlmCancellationToken {
     }
 }
 
-/**
- * Runtime metadata for an on-device model backend.
- */
 data class LocalModelMetadata(
     val backendId: String,
     val modelName: String,
@@ -41,9 +33,6 @@ data class LocalModelMetadata(
     val supportsCancellation: Boolean
 )
 
-/**
- * Contract for pluggable local on-device backends.
- */
 interface LocalOnDeviceBackend {
     val backendId: String
     fun contextWindow(settings: LlmSettings): Int
@@ -57,9 +46,6 @@ interface LocalOnDeviceBackend {
     ): String
 }
 
-/**
- * First local adapter: OpenAI-compatible runtime addressed by a local runtime path/profile.
- */
 class LocalOpenAiRuntimeBackend(
     private val httpClient: OkHttpClient,
     private val json: okhttp3.MediaType
@@ -136,10 +122,6 @@ class LocalOpenAiRuntimeBackend(
     }
 }
 
-/**
- * HTTP client for external LLM APIs (Anthropic, OpenAI, Gemini).
- * Includes structured tool-call adapters with text fallback.
- */
 class LlmApiClient(
     localBackend: LocalOnDeviceBackend? = null
 ) {
@@ -158,9 +140,6 @@ class LlmApiClient(
         onDeviceBackends = mapOf(defaultBackend.backendId to defaultBackend)
     }
 
-    /**
-     * Backward-compatible plain text completion.
-     */
     fun complete(settings: LlmSettings, systemPrompt: String, userMessage: String): String {
         val turn = completeAssistantTurn(
             settings = settings,
@@ -171,10 +150,6 @@ class LlmApiClient(
         return turn.text
     }
 
-    /**
-     * Structured completion supporting provider-native tool call formats.
-     * Transcript format: [{"role":"user|assistant|tool", "content": ... }]
-     */
     fun completeAssistantTurn(
         settings: LlmSettings,
         systemPrompt: String,
@@ -182,15 +157,21 @@ class LlmApiClient(
         tools: List<ToolSpec>
     ): AssistantTurn {
         return when (settings.provider) {
-            LlmProvider.ANTHROPIC -> callAnthropic(settings, systemPrompt, userMessage)
-            LlmProvider.OPENAI -> callOpenAI(settings, systemPrompt, userMessage)
-            LlmProvider.GEMINI -> callGemini(settings, systemPrompt, userMessage)
-            LlmProvider.VLLM_GEMMA4 -> callOpenAICompatible(settings, systemPrompt, userMessage)
-            LlmProvider.LOCAL_ON_DEVICE -> resolveOnDeviceBackend(settings).streamCompletion(
-                settings = settings,
-                systemPrompt = systemPrompt,
-                userMessage = userMessage
-            )
+            LlmProvider.ANTHROPIC -> callAnthropicTurn(settings, systemPrompt, transcript, tools)
+            LlmProvider.OPENAI -> callOpenAITurn(settings, systemPrompt, transcript, tools)
+            LlmProvider.GEMINI -> callGeminiTurn(settings, systemPrompt, transcript, tools)
+            LlmProvider.VLLM_GEMMA4 -> callOpenAICompatibleTurn(settings, systemPrompt, transcript, tools)
+            LlmProvider.LOCAL_ON_DEVICE -> {
+                val lastUser = transcript.lastOrNull { it.optString("role") == "user" }
+                    ?.optString("content")
+                    .orEmpty()
+                val text = resolveOnDeviceBackend(settings).streamCompletion(
+                    settings = settings,
+                    systemPrompt = systemPrompt,
+                    userMessage = lastUser
+                )
+                AssistantTurn(text = text, raw = JSONObject().put("provider", "local"))
+            }
         }
     }
 
@@ -202,14 +183,6 @@ class LlmApiClient(
     private fun resolveOnDeviceBackend(settings: LlmSettings): LocalOnDeviceBackend {
         return onDeviceBackends.values.firstOrNull()
             ?: throw LlmApiException("No on-device backend is registered")
-    }
-
-    private fun callAnthropic(settings: LlmSettings, systemPrompt: String, userMessage: String): String {
-            LlmProvider.ANTHROPIC -> callAnthropicTurn(settings, systemPrompt, transcript, tools)
-            LlmProvider.OPENAI -> callOpenAITurn(settings, systemPrompt, transcript, tools)
-            LlmProvider.GEMINI -> callGeminiTurn(settings, systemPrompt, transcript, tools)
-            LlmProvider.VLLM_GEMMA4 -> callOpenAICompatibleTurn(settings, systemPrompt, transcript, tools)
-        }
     }
 
     private fun callAnthropicTurn(

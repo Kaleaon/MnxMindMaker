@@ -6,25 +6,26 @@ import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.viewModelScope
 import com.kaleaon.mnxmindmaker.continuity.ContinuityManager
+import com.kaleaon.mnxmindmaker.model.LlmProvider
+import com.kaleaon.mnxmindmaker.model.LlmSettings
 import com.kaleaon.mnxmindmaker.model.MindEdge
 import com.kaleaon.mnxmindmaker.model.MindGraph
 import com.kaleaon.mnxmindmaker.model.MindNode
 import com.kaleaon.mnxmindmaker.model.NodeType
 import com.kaleaon.mnxmindmaker.repository.LlmSettingsRepository
 import com.kaleaon.mnxmindmaker.repository.MnxRepository
+import com.kaleaon.mnxmindmaker.util.ContinuityAuditResult
 import com.kaleaon.mnxmindmaker.util.DimensionMapper
 import com.kaleaon.mnxmindmaker.util.LlmApiClient
 import com.kaleaon.mnxmindmaker.util.LlmApiException
+import com.kaleaon.mnxmindmaker.util.run_continuity_audit
 import com.kaleaon.mnxmindmaker.util.tooling.ToolApprovalRequest
-import com.kaleaon.mnxmindmaker.util.tooling.ToolOrchestrator
-import com.kaleaon.mnxmindmaker.util.tooling.ToolPolicyEngine
 import com.kaleaon.mnxmindmaker.util.tooling.ToolRegistry
 import kotlinx.coroutines.CompletableDeferred
-import com.kaleaon.mnxmindmaker.util.ContinuityAuditResult
-import com.kaleaon.mnxmindmaker.util.run_continuity_audit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.json.JSONObject
 import java.io.File
 import java.io.InputStream
 import java.util.UUID
@@ -45,9 +46,6 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
     private val _exportedFile = MutableLiveData<File?>()
     val exportedFile: LiveData<File?> get() = _exportedFile
 
-    private val _llmResponse = MutableLiveData<String?>()
-    val llmResponse: LiveData<String?> get() = _llmResponse
-
     private val _error = MutableLiveData<String?>()
     val error: LiveData<String?> get() = _error
 
@@ -59,24 +57,30 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
 
     private val _isLoading = MutableLiveData(false)
     val isLoading: LiveData<Boolean> get() = _isLoading
+
     private val _auditResult = MutableLiveData<ContinuityAuditResult?>()
     val auditResult: LiveData<ContinuityAuditResult?> get() = _auditResult
-    private val acceptedFindingIds = mutableSetOf<String>()
 
-    init {
-        refreshAudit()
-    }
+    private val acceptedFindingIds = mutableSetOf<String>()
 
     private val _toolApprovalRequest = MutableLiveData<ToolApprovalRequest?>()
     val toolApprovalRequest: LiveData<ToolApprovalRequest?> get() = _toolApprovalRequest
 
     private val pendingApprovals = mutableMapOf<String, CompletableDeferred<Boolean>>()
 
+    private val _chatMessages = MutableLiveData<List<ChatMessage>>(emptyList())
+    val chatMessages: LiveData<List<ChatMessage>> get() = _chatMessages
+
+    private val _isPremiumUser = MutableLiveData(true)
+    val isPremiumUser: LiveData<Boolean> get() = _isPremiumUser
+
+    private val _compareCandidateMessageId = MutableLiveData<String?>()
+    val compareCandidateMessageId: LiveData<String?> get() = _compareCandidateMessageId
+
     init {
+        refreshAudit()
         refreshSnapshotTimeline()
     }
-
-    // ---- Graph editing -------------------------------------------------------
 
     fun addNode(label: String, type: NodeType, description: String = "") {
         val current = _graph.value ?: return
@@ -211,10 +215,9 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    fun clearSnapshotActionMessage() { _snapshotActionMessage.value = null }
-
-
-    // ---- MNX Export / Import ------------------------------------------------
+    fun clearSnapshotActionMessage() {
+        _snapshotActionMessage.value = null
+    }
 
     fun exportToMnx() {
         val graph = _graph.value ?: return
@@ -258,73 +261,14 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    // ---- LLM AI Assistance --------------------------------------------------
-
-    fun askLlmForMindDesign(prompt: String) {
+    fun askLlmForMindDesign(prompt: String, choice: ComposerProviderChoice = ComposerProviderChoice.AUTO) {
         viewModelScope.launch {
             _isLoading.value = true
-            _llmResponse.value = null
             try {
-                val invocationChain = withContext(Dispatchers.IO) {
-                    llmRepository.getInvocationChain()
-                }
-                if (invocationChain.isEmpty()) {
-                    _error.value = "No usable LLM configured. Add a provider in Settings."
-                    return@launch
-                }
-
-                var response: String? = null
-                var lastError: String? = null
-                for (settings in invocationChain) {
-                    val caps = settings.capabilities
-                    val systemPrompt = buildString {
-                        appendLine("You are an AI mind design assistant helping the user build an AI mind graph in .mnx format.")
-                        appendLine("The mind graph represents identity, memories, knowledge, emotions, personality, beliefs, values, and relationships.")
-                        appendLine("Provide concise, structured suggestions for mind nodes and connections.")
-                        appendLine("Format suggestions as: NodeType: label - description")
-                        if (!caps.supportsToolPlanning) {
-                            appendLine("Do not propose multi-step tool plans; provide direct node suggestions only.")
-                        }
-                        if (!caps.supportsPacketGeneration) {
-                            appendLine("Keep output short and avoid dense packet-style dumps.")
-                        }
-                        appendLine("Stay within approximately ${caps.contextWindowTokens / 8} output tokens.")
-                    }
-                    try {
-                        response = withContext(Dispatchers.IO) {
-                            llmClient.complete(settings, systemPrompt, prompt)
-                        }
-                        break
-                    } catch (inner: LlmApiException) {
-                        lastError = "${settings.provider.displayName}: ${inner.message}"
-                    }
-                }
-
-                if (response == null) {
-                    _error.value = "AI request failed across fallback chain. $lastError"
-                    return@launch
-                val systemPrompt = """You are an AI mind design assistant helping the user build an AI mind graph
-                    |in .mnx format. The mind graph represents an AI's identity, memories, knowledge,
-                    |emotions, personality, beliefs, values, and relationships.
-                    |Use tools whenever graph state inspection or mutation is needed.
-                    |When tool use is unnecessary, provide concise, structured suggestions.
-                    |Format suggestions as: NodeType: label - description""".trimMargin()
-
-                val response = withContext(Dispatchers.IO) {
-                    val registry = ToolRegistry(
-                        getGraph = { _graph.value ?: newDefaultGraph() },
-                        setGraph = { updated -> _graph.postValue(updated) }
-                    )
-                    val orchestrator = ToolOrchestrator(
-                        llmApiClient = llmClient,
-                        settings = activeSettings,
-                        registry = registry,
-                        policy = ToolPolicyEngine(registry),
-                        requestApproval = { requestToolApproval(it) }
-                    )
-                    orchestrator.run(systemPrompt, prompt)
-                }
-                _llmResponse.value = response
+                val result = withContext(Dispatchers.IO) { runSingleChat(prompt, choice) }
+                if (result == null) return@launch
+                val next = _chatMessages.value.orEmpty().toMutableList().apply { add(result) }
+                _chatMessages.value = next
             } catch (e: LlmApiException) {
                 _error.value = "AI error: ${e.message}"
             } catch (e: Exception) {
@@ -333,6 +277,176 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
                 _isLoading.value = false
             }
         }
+    }
+
+    fun retryWithAnotherProvider(messageId: String) {
+        val existing = _chatMessages.value.orEmpty().firstOrNull { it.id == messageId } ?: return
+        viewModelScope.launch {
+            _isLoading.value = true
+            try {
+                val nextProvider = withContext(Dispatchers.IO) { pickAlternativeProvider(existing.provenance.provider) }
+                if (nextProvider == null) {
+                    _error.value = "No alternate enabled provider available for retry."
+                    return@launch
+                }
+                val result = withContext(Dispatchers.IO) {
+                    runSingleChat(existing.prompt, providerToChoice(nextProvider), forcedProvider = nextProvider)
+                } ?: return@launch
+
+                val updated = _chatMessages.value.orEmpty().map { msg ->
+                    if (msg.id != messageId) {
+                        msg
+                    } else {
+                        msg.copy(
+                            compareCandidate = CompareCandidate(
+                                provider = result.provenance.provider,
+                                model = result.provenance.model,
+                                response = result.response,
+                                latencyMs = result.provenance.latencyMs,
+                                totalTokens = result.provenance.totalTokens
+                            )
+                        )
+                    }
+                }
+                _chatMessages.value = updated
+                if (_isPremiumUser.value == true) {
+                    _compareCandidateMessageId.value = messageId
+                }
+            } catch (e: Exception) {
+                _error.value = "Retry failed: ${e.message}"
+            } finally {
+                _isLoading.value = false
+            }
+        }
+    }
+
+    fun clearCompareCandidateMessage() {
+        _compareCandidateMessageId.value = null
+    }
+
+    private fun runSingleChat(
+        prompt: String,
+        choice: ComposerProviderChoice,
+        forcedProvider: LlmProvider? = null
+    ): ChatMessage? {
+        val chain = when {
+            forcedProvider != null -> listOfNotNull(loadUsableSettings(forcedProvider))
+            choice == ComposerProviderChoice.AUTO -> llmRepository.getInvocationChain()
+            else -> listOfNotNull(loadUsableSettings(choice.toProvider()))
+        }
+
+        if (chain.isEmpty()) {
+            _error.postValue("No usable LLM configured. Add a provider in Settings.")
+            return null
+        }
+
+        val registry = ToolRegistry(
+            getGraph = { _graph.value ?: newDefaultGraph() },
+            setGraph = { updated -> _graph.postValue(updated) }
+        )
+
+        var lastError: String? = null
+        for (settings in chain) {
+            val systemPrompt = buildSystemPrompt(settings)
+            val start = System.currentTimeMillis()
+            try {
+                val turn = llmClient.completeAssistantTurn(
+                    settings = settings,
+                    systemPrompt = systemPrompt,
+                    transcript = listOf(JSONObject().put("role", "user").put("content", prompt)),
+                    tools = registry.specs()
+                )
+                val latency = System.currentTimeMillis() - start
+                return ChatMessage(
+                    id = UUID.randomUUID().toString(),
+                    prompt = prompt,
+                    response = turn.text,
+                    providerChoice = choice,
+                    provenance = MessageProvenance(
+                        provider = settings.provider,
+                        model = turn.raw?.optString("model").takeUnless { it.isNullOrBlank() } ?: settings.model,
+                        toolCalls = turn.toolInvocations.map { it.name },
+                        latencyMs = latency,
+                        promptTokens = extractPromptTokens(turn.raw),
+                        completionTokens = extractCompletionTokens(turn.raw),
+                        totalTokens = extractTotalTokens(turn.raw)
+                    )
+                )
+            } catch (e: LlmApiException) {
+                lastError = "${settings.provider.displayName}: ${e.message}"
+            }
+        }
+
+        _error.postValue("AI request failed across provider chain. $lastError")
+        return null
+    }
+
+    private fun buildSystemPrompt(settings: LlmSettings): String {
+        val caps = settings.capabilities
+        return buildString {
+            appendLine("You are an AI mind design assistant helping the user build an AI mind graph in .mnx format.")
+            appendLine("The mind graph represents identity, memories, knowledge, emotions, personality, beliefs, values, and relationships.")
+            appendLine("Provide concise, structured suggestions for mind nodes and connections.")
+            appendLine("Format suggestions as: NodeType: label - description")
+            if (!caps.supportsToolPlanning) appendLine("Avoid multi-step tool plans.")
+            appendLine("Stay within approximately ${caps.contextWindowTokens / 8} output tokens.")
+        }
+    }
+
+    private fun loadUsableSettings(provider: LlmProvider): LlmSettings? {
+        val settings = llmRepository.loadSettings(provider)
+        if (!settings.enabled) return null
+        return when {
+            provider.requiresApiKey && settings.apiKey.isBlank() -> null
+            provider == LlmProvider.LOCAL_ON_DEVICE && settings.localModelPath.isBlank() -> null
+            else -> settings
+        }
+    }
+
+    private fun pickAlternativeProvider(current: LlmProvider): LlmProvider? {
+        val prioritized = listOf(LlmProvider.OPENAI, LlmProvider.ANTHROPIC, LlmProvider.LOCAL_ON_DEVICE)
+        return prioritized.firstOrNull { provider ->
+            provider != current && loadUsableSettings(provider) != null
+        }
+    }
+
+    private fun providerToChoice(provider: LlmProvider): ComposerProviderChoice = when (provider) {
+        LlmProvider.LOCAL_ON_DEVICE -> ComposerProviderChoice.LOCAL
+        LlmProvider.ANTHROPIC -> ComposerProviderChoice.CLAUDE
+        LlmProvider.OPENAI -> ComposerProviderChoice.CHATGPT
+        else -> ComposerProviderChoice.AUTO
+    }
+
+    private fun ComposerProviderChoice.toProvider(): LlmProvider = when (this) {
+        ComposerProviderChoice.AUTO -> LlmProvider.OPENAI
+        ComposerProviderChoice.LOCAL -> LlmProvider.LOCAL_ON_DEVICE
+        ComposerProviderChoice.CLAUDE -> LlmProvider.ANTHROPIC
+        ComposerProviderChoice.CHATGPT -> LlmProvider.OPENAI
+    }
+
+    private fun extractPromptTokens(raw: JSONObject?): Int? {
+        if (raw == null) return null
+        return raw.optJSONObject("usage")?.optInt("prompt_tokens").takeIf { it != null && it >= 0 }
+            ?: raw.optJSONObject("usage")?.optInt("input_tokens")
+            ?: raw.optJSONObject("usageMetadata")?.optInt("promptTokenCount")
+    }
+
+    private fun extractCompletionTokens(raw: JSONObject?): Int? {
+        if (raw == null) return null
+        return raw.optJSONObject("usage")?.optInt("completion_tokens").takeIf { it != null && it >= 0 }
+            ?: raw.optJSONObject("usage")?.optInt("output_tokens")
+            ?: raw.optJSONObject("usageMetadata")?.optInt("candidatesTokenCount")
+    }
+
+    private fun extractTotalTokens(raw: JSONObject?): Int? {
+        if (raw == null) return null
+        val openAiTotal = raw.optJSONObject("usage")?.optInt("total_tokens")
+        if (openAiTotal != null && openAiTotal >= 0) return openAiTotal
+        val usageMeta = raw.optJSONObject("usageMetadata")
+        if (usageMeta != null) return usageMeta.optInt("totalTokenCount").takeIf { it >= 0 }
+        val prompt = extractPromptTokens(raw)
+        val completion = extractCompletionTokens(raw)
+        return if (prompt != null && completion != null) prompt + completion else null
     }
 
     fun resolveToolApproval(requestId: String, approved: Boolean) {
@@ -347,9 +461,13 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
         return deferred.await()
     }
 
-    fun clearError() { _error.value = null }
-    fun clearExportedFile() { _exportedFile.value = null }
-    fun clearLlmResponse() { _llmResponse.value = null }
+    fun clearError() {
+        _error.value = null
+    }
+
+    fun clearExportedFile() {
+        _exportedFile.value = null
+    }
 
     private fun newDefaultGraph(): MindGraph {
         val identity = MindNode(label = "My AI Mind", type = NodeType.IDENTITY, x = 400f, y = 300f)
