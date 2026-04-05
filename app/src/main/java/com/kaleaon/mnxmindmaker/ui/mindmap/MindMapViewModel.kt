@@ -5,6 +5,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.viewModelScope
+import com.kaleaon.mnxmindmaker.continuity.ContinuityManager
 import com.kaleaon.mnxmindmaker.model.MindEdge
 import com.kaleaon.mnxmindmaker.model.MindGraph
 import com.kaleaon.mnxmindmaker.model.MindNode
@@ -24,6 +25,7 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
 
     private val mnxRepository = MnxRepository(application)
     private val llmRepository = LlmSettingsRepository(application)
+    private val continuityManager = ContinuityManager(application)
     private val llmClient = LlmApiClient()
 
     private val _graph = MutableLiveData(newDefaultGraph())
@@ -41,8 +43,18 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
     private val _error = MutableLiveData<String?>()
     val error: LiveData<String?> get() = _error
 
+    private val _snapshotTimeline = MutableLiveData<List<ContinuityManager.SnapshotRecord>>(emptyList())
+    val snapshotTimeline: LiveData<List<ContinuityManager.SnapshotRecord>> get() = _snapshotTimeline
+
+    private val _snapshotActionMessage = MutableLiveData<String?>()
+    val snapshotActionMessage: LiveData<String?> get() = _snapshotActionMessage
+
     private val _isLoading = MutableLiveData(false)
     val isLoading: LiveData<Boolean> get() = _isLoading
+
+    init {
+        refreshSnapshotTimeline()
+    }
 
     // ---- Graph editing -------------------------------------------------------
 
@@ -96,6 +108,42 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
         _selectedNode.value = null
     }
 
+    fun refreshSnapshotTimeline() {
+        _snapshotTimeline.value = continuityManager.listSnapshots()
+    }
+
+    fun createSnapshot(reason: String, driftNotes: String = "") {
+        val graph = _graph.value ?: return
+        val snapshot = continuityManager.createSnapshot(graph, reason, driftNotes)
+        refreshSnapshotTimeline()
+        _snapshotActionMessage.value = "Snapshot ${snapshot.snapshotId.take(8)} created (${snapshot.reason})"
+    }
+
+    fun compareWithSnapshot(snapshotId: String) {
+        val graph = _graph.value ?: return
+        val drift = continuityManager.compareSnapshotWithGraph(snapshotId, graph)
+        _snapshotActionMessage.value = "Drift: ${drift.indicator}"
+    }
+
+    fun restoreSnapshot(snapshotId: String) {
+        viewModelScope.launch {
+            _isLoading.value = true
+            try {
+                val restored = withContext(Dispatchers.IO) { continuityManager.restoreSnapshot(snapshotId) }
+                _graph.value = restored
+                _selectedNode.value = null
+                _snapshotActionMessage.value = "Snapshot restored: ${snapshotId.take(8)}"
+            } catch (e: Exception) {
+                _error.value = "Restore failed: ${e.message}"
+            } finally {
+                _isLoading.value = false
+            }
+        }
+    }
+
+    fun clearSnapshotActionMessage() { _snapshotActionMessage.value = null }
+
+
     // ---- MNX Export / Import ------------------------------------------------
 
     fun exportToMnx() {
@@ -103,8 +151,19 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch {
             _isLoading.value = true
             try {
-                val file = withContext(Dispatchers.IO) { mnxRepository.exportToMnx(graph) }
+                val file = withContext(Dispatchers.IO) {
+                    val snapshot = continuityManager.createSnapshot(graph, reason = "export_mnx")
+                    val metadata = MnxRepository.ContinuityMetadata(
+                        snapshotId = snapshot.snapshotId,
+                        parentSnapshotId = snapshot.parentSnapshotId,
+                        integrityHash = snapshot.integrityHash,
+                        reason = snapshot.reason,
+                        driftNotes = snapshot.driftNotes
+                    )
+                    mnxRepository.exportToMnx(graph, metadata)
+                }
                 _exportedFile.value = file
+                refreshSnapshotTimeline()
             } catch (e: Exception) {
                 _error.value = "Export failed: ${e.message}"
             } finally {

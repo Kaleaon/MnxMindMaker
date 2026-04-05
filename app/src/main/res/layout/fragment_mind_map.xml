@@ -106,6 +106,33 @@
                 android:text="@string/ask_ai"
                 android:textColor="@color/colorAccent" />
 
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btn_create_snapshot"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="8dp"
+                android:text="@string/create_snapshot"
+                android:textColor="@color/colorOnPrimary" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btn_compare_snapshot"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="8dp"
+                android:text="@string/compare_snapshot"
+                android:textColor="@color/colorOnPrimary" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btn_restore_snapshot"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="8dp"
+                android:text="@string/restore_snapshot"
+                android:textColor="@color/colorOnPrimary" />
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btn_export_mnx"
                 style="@style/Widget.MaterialComponents.Button.OutlinedButton"
