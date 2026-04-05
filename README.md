@@ -75,6 +75,7 @@ The APK will appear at `app/build/outputs/apk/release/app-release.apk`.
 The repository-specific expansion plan is documented in:
 
 - [`docs/MnxMindMaker-Pyn-Expansion-Plan-v1.md`](docs/MnxMindMaker-Pyn-Expansion-Plan-v1.md)
+- [`docs/MnxMindMaker-Tool-Use-Design-v1.md`](docs/MnxMindMaker-Tool-Use-Design-v1.md)
 
 ### LLM API keys
 
