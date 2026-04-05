@@ -14,8 +14,15 @@ import com.kaleaon.mnxmindmaker.model.ComputeBackend
 import com.kaleaon.mnxmindmaker.model.LocalRuntimeControls
 import com.kaleaon.mnxmindmaker.model.PrivacyMode
 import com.kaleaon.mnxmindmaker.model.defaultModel
+import com.kaleaon.mnxmindmaker.security.SecureVault
 
 /**
+ * Persists LLM API settings with secure encrypted storage for API keys and
+ * plain preferences for non-secret tunables.
+ */
+class LlmSettingsRepository(private val context: Context) {
+
+    private val secureVault = SecureVault(context)
  * Persists LLM + privacy settings in encrypted shared preferences.
  */
 class LlmSettingsRepository(private val context: Context) {
@@ -38,6 +45,8 @@ class LlmSettingsRepository(private val context: Context) {
 
     fun saveSettings(settings: LlmSettings) {
         val name = settings.provider.name
+        secureVault.putString("${name}_apiKey", settings.apiKey)
+        plainPrefs.edit()
         prefs.edit()
             .putString("${name}_apiKey", settings.apiKey)
             .putString("${name}_model", settings.model)
@@ -60,6 +69,15 @@ class LlmSettingsRepository(private val context: Context) {
 
     fun loadSettings(provider: LlmProvider): LlmSettings {
         val name = provider.name
+        val apiKey = secureVault.getString("${name}_apiKey").orEmpty()
+        val model = plainPrefs.getString("${name}_model", provider.defaultModel())
+            ?: provider.defaultModel()
+        val baseUrl = plainPrefs.getString("${name}_baseUrl", provider.baseUrl) ?: provider.baseUrl
+        val enabled = plainPrefs.getBoolean("${name}_enabled", false)
+        val maxTokens = plainPrefs.getInt("${name}_maxTokens", 2048)
+        val temperature = plainPrefs.getFloat("${name}_temperature", 0.7f)
+        val localModelPath = plainPrefs.getString("${name}_localModelPath", "") ?: ""
+        val localProfile = plainPrefs.getString("${name}_localProfile", LocalModelProfile.BALANCED.name)
         val apiKey = prefs.getString("${name}_apiKey", "") ?: ""
         val model = prefs.getString("${name}_model", provider.defaultModel()) ?: provider.defaultModel()
         val baseUrl = prefs.getString("${name}_baseUrl", provider.baseUrl) ?: provider.baseUrl
@@ -148,6 +166,7 @@ class LlmSettingsRepository(private val context: Context) {
     }
 
     companion object {
+        private const val PLAIN_PREFS_NAME = "mnx_llm_settings"
         private const val ENCRYPTED_PREFS_NAME = "mnx_secure_llm_settings"
         private const val KEY_PRIVACY_MODE = "global_privacy_mode"
     }

@@ -4,8 +4,11 @@ import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.EditText
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
+import android.widget.LinearLayout
+import androidx.appcompat.app.AlertDialog
 import androidx.fragment.app.Fragment
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.google.android.material.snackbar.Snackbar
@@ -19,12 +22,17 @@ import com.kaleaon.mnxmindmaker.model.LlmProvider
 import com.kaleaon.mnxmindmaker.model.LlmRuntime
 import com.kaleaon.mnxmindmaker.model.LlmSettings
 import com.kaleaon.mnxmindmaker.model.LocalModelProfile
+import com.kaleaon.mnxmindmaker.model.ExternalProvider
 import com.kaleaon.mnxmindmaker.model.LocalRuntimeControls
 import com.kaleaon.mnxmindmaker.model.ModelManager
 import com.kaleaon.mnxmindmaker.model.ModelInstallState
 import com.kaleaon.mnxmindmaker.model.PrivacyMode
 import com.kaleaon.mnxmindmaker.model.defaultModel
+import com.kaleaon.mnxmindmaker.repository.AuthRepository
+import com.kaleaon.mnxmindmaker.repository.ExternalAccountRepository
 import com.kaleaon.mnxmindmaker.repository.LlmSettingsRepository
+import java.text.DateFormat
+import java.util.Date
 
 class SettingsFragment : Fragment() {
 
@@ -32,6 +40,8 @@ class SettingsFragment : Fragment() {
     private val binding get() = _binding!!
 
     private lateinit var repository: LlmSettingsRepository
+    private lateinit var authRepository: AuthRepository
+    private lateinit var externalAccountRepository: ExternalAccountRepository
     private lateinit var modelManager: ModelManager
     private var currentProvider: LlmProvider = LlmProvider.ANTHROPIC
     private var currentSettings: MutableList<LlmSettings> = mutableListOf()
@@ -46,6 +56,8 @@ class SettingsFragment : Fragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
         repository = LlmSettingsRepository(requireContext())
+        authRepository = AuthRepository(requireContext())
+        externalAccountRepository = ExternalAccountRepository(requireContext())
         modelManager = ModelManager(requireContext())
         currentSettings = repository.loadAllSettings().toMutableList()
 
@@ -109,6 +121,9 @@ class SettingsFragment : Fragment() {
 
         loadProviderSettings(currentProvider)
 
+        setupLocalAuthSection()
+        setupAccountLinkingSection()
+
         binding.btnSaveSettings.setOnClickListener { saveCurrentProvider() }
         binding.btnDiscoverModels.setOnClickListener {
             val models = modelManager.discoverModels()
@@ -144,6 +159,152 @@ class SettingsFragment : Fragment() {
         binding.tvOpenAiInfo.text = getString(R.string.openai_api_info)
         binding.tvGeminiInfo.text = getString(R.string.gemini_api_info)
         binding.tvVllmInfo.text = getString(R.string.vllm_gemma4_info)
+    }
+
+    private fun setupLocalAuthSection() {
+        binding.etLocalAuthEmail.setText(authRepository.getStoredEmail())
+        binding.switchPasskeyEnabled.isChecked = authRepository.getPasskeyStatus()
+        updateLocalAuthStatus()
+
+        binding.btnSaveLocalAuth.setOnClickListener {
+            val email = binding.etLocalAuthEmail.text.toString().trim()
+            val password = binding.etLocalAuthPassword.text.toString()
+            if (email.isBlank() || password.isBlank()) {
+                Snackbar.make(binding.root, getString(R.string.local_auth_missing_fields), Snackbar.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+            authRepository.saveLocalCredentials(email, password, binding.switchPasskeyEnabled.isChecked)
+            binding.etLocalAuthPassword.setText("")
+            updateLocalAuthStatus()
+            Snackbar.make(binding.root, getString(R.string.local_auth_saved), Snackbar.LENGTH_SHORT).show()
+        }
+
+        binding.btnCreateSession.setOnClickListener {
+            val email = binding.etLocalAuthEmail.text.toString().trim()
+            val password = binding.etLocalAuthPassword.text.toString()
+            val session = when {
+                password.isNotBlank() -> authRepository.signInWithPassword(email, password)
+                else -> authRepository.signInWithPasskey()
+            }
+            if (session == null) {
+                Snackbar.make(binding.root, getString(R.string.local_auth_signin_failed), Snackbar.LENGTH_SHORT).show()
+            } else {
+                binding.etLocalAuthPassword.setText("")
+                updateLocalAuthStatus()
+                Snackbar.make(binding.root, getString(R.string.local_auth_session_created), Snackbar.LENGTH_SHORT).show()
+            }
+        }
+
+        binding.btnRevokeSession.setOnClickListener {
+            authRepository.revokeSession()
+            updateLocalAuthStatus()
+            Snackbar.make(binding.root, getString(R.string.local_auth_session_revoked), Snackbar.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun setupAccountLinkingSection() {
+        binding.btnLinkClaude.setOnClickListener { promptLinkAccount(ExternalProvider.CLAUDE) }
+        binding.btnLinkChatgpt.setOnClickListener { promptLinkAccount(ExternalProvider.CHATGPT) }
+        binding.btnRefreshClaude.setOnClickListener { refreshLinkedAccount(ExternalProvider.CLAUDE) }
+        binding.btnRefreshChatgpt.setOnClickListener { refreshLinkedAccount(ExternalProvider.CHATGPT) }
+        binding.btnRevokeClaude.setOnClickListener { revokeLinkedAccount(ExternalProvider.CLAUDE) }
+        binding.btnRevokeChatgpt.setOnClickListener { revokeLinkedAccount(ExternalProvider.CHATGPT) }
+        updateLinkedAccountsStatus()
+    }
+
+    private fun promptLinkAccount(provider: ExternalProvider) {
+        val context = requireContext()
+        val layout = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(48, 24, 48, 0)
+        }
+        val accessInput = EditText(context).apply {
+            hint = getString(R.string.link_access_token_hint)
+        }
+        val refreshInput = EditText(context).apply {
+            hint = getString(R.string.link_refresh_token_hint)
+        }
+        val expiresInput = EditText(context).apply {
+            hint = getString(R.string.link_expiry_hint)
+            inputType = android.text.InputType.TYPE_CLASS_NUMBER
+        }
+        layout.addView(accessInput)
+        layout.addView(refreshInput)
+        layout.addView(expiresInput)
+
+        AlertDialog.Builder(context)
+            .setTitle(getString(R.string.link_provider_title, provider.displayName))
+            .setView(layout)
+            .setPositiveButton(R.string.link_account_action) { _, _ ->
+                val access = accessInput.text.toString().trim()
+                val refresh = refreshInput.text.toString().trim()
+                val expires = expiresInput.text.toString().trim().toLongOrNull()
+                if (access.isBlank()) {
+                    Snackbar.make(binding.root, getString(R.string.link_access_required), Snackbar.LENGTH_SHORT).show()
+                } else {
+                    externalAccountRepository.linkAccount(provider, access, refresh, expires)
+                    updateLinkedAccountsStatus()
+                    Snackbar.make(binding.root, getString(R.string.link_success, provider.displayName), Snackbar.LENGTH_SHORT).show()
+                }
+            }
+            .setNegativeButton(R.string.cancel, null)
+            .show()
+    }
+
+    private fun refreshLinkedAccount(provider: ExternalProvider) {
+        val refreshed = externalAccountRepository.refreshAccessToken(provider)
+        updateLinkedAccountsStatus()
+        val message = if (refreshed) {
+            getString(R.string.link_refresh_success, provider.displayName)
+        } else {
+            getString(R.string.link_refresh_failed, provider.displayName)
+        }
+        Snackbar.make(binding.root, message, Snackbar.LENGTH_SHORT).show()
+    }
+
+    private fun revokeLinkedAccount(provider: ExternalProvider) {
+        externalAccountRepository.revoke(provider)
+        updateLinkedAccountsStatus()
+        Snackbar.make(binding.root, getString(R.string.link_revoke_success, provider.displayName), Snackbar.LENGTH_SHORT).show()
+    }
+
+    private fun updateLocalAuthStatus() {
+        val session = authRepository.getSession()
+        val message = if (session == null) {
+            getString(R.string.local_auth_status_no_session)
+        } else {
+            val expiry = DateFormat.getDateTimeInstance().format(Date(session.expiresAtEpochMs))
+            getString(R.string.local_auth_status_active, session.email, expiry)
+        }
+        binding.tvLocalAuthStatus.text = message
+    }
+
+    private fun updateLinkedAccountsStatus() {
+        val lines = externalAccountRepository.allLinkStates().map { link ->
+            if (!link.linked) {
+                getString(R.string.link_status_not_linked, link.provider.displayName)
+            } else {
+                val expiryText = link.expiresAtEpochMs?.let {
+                    DateFormat.getDateTimeInstance().format(Date(it))
+                } ?: getString(R.string.link_expiry_unknown)
+                val caps = link.capabilities
+                val modelCount = caps?.models?.size ?: 0
+                val tools = if (caps?.supportsToolUse == true) {
+                    getString(R.string.capability_supported)
+                } else {
+                    getString(R.string.capability_limited)
+                }
+                getString(
+                    R.string.link_status_linked,
+                    link.provider.displayName,
+                    expiryText,
+                    modelCount,
+                    tools,
+                    caps?.rateLimitInfo ?: getString(R.string.link_expiry_unknown)
+                )
+            }
+        }
+        binding.tvLinkedAccountsStatus.text = lines.joinToString(separator = "\n")
     }
 
     // -- Ktheme theme picker --------------------------------------------------
