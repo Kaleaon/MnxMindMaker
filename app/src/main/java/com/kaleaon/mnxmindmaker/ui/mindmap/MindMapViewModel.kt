@@ -7,25 +7,20 @@ import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.viewModelScope
 import com.kaleaon.mnxmindmaker.continuity.ContinuityManager
 import com.kaleaon.mnxmindmaker.model.LlmProvider
+import com.kaleaon.mnxmindmaker.model.LlmRuntime
 import com.kaleaon.mnxmindmaker.model.LlmSettings
 import com.kaleaon.mnxmindmaker.model.MindEdge
 import com.kaleaon.mnxmindmaker.model.MindGraph
 import com.kaleaon.mnxmindmaker.model.MindNode
 import com.kaleaon.mnxmindmaker.model.NodeType
-import com.kaleaon.mnxmindmaker.model.LlmRuntime
 import com.kaleaon.mnxmindmaker.model.PrivacyMode
 import com.kaleaon.mnxmindmaker.repository.LlmSettingsRepository
 import com.kaleaon.mnxmindmaker.repository.MnxRepository
 import com.kaleaon.mnxmindmaker.util.ContinuityAuditResult
 import com.kaleaon.mnxmindmaker.util.DimensionMapper
+import com.kaleaon.mnxmindmaker.util.LlmApiClient
 import com.kaleaon.mnxmindmaker.util.LlmApiException
 import com.kaleaon.mnxmindmaker.util.run_continuity_audit
-import com.kaleaon.mnxmindmaker.util.tooling.ToolApprovalRequest
-import com.kaleaon.mnxmindmaker.util.tooling.ToolRegistry
-import com.kaleaon.mnxmindmaker.util.provider.ProviderRouter
-import com.kaleaon.mnxmindmaker.util.provider.RoutingPolicy
-import com.kaleaon.mnxmindmaker.util.tooling.ToolApprovalRequest
-import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -39,7 +34,7 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
     private val mnxRepository = MnxRepository(application)
     private val llmRepository = LlmSettingsRepository(application)
     private val continuityManager = ContinuityManager(application)
-    private val providerRouter = ProviderRouter()
+    private val llmClient = LlmApiClient()
 
     private val _graph = MutableLiveData(newDefaultGraph())
     val graph: LiveData<MindGraph> get() = _graph
@@ -52,6 +47,7 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
 
     private val _error = MutableLiveData<String?>()
     val error: LiveData<String?> get() = _error
+
     private val _llmStatusBadge = MutableLiveData("REMOTE")
     val llmStatusBadge: LiveData<String> get() = _llmStatusBadge
 
@@ -67,13 +63,6 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
     private val _auditResult = MutableLiveData<ContinuityAuditResult?>()
     val auditResult: LiveData<ContinuityAuditResult?> get() = _auditResult
 
-    private val acceptedFindingIds = mutableSetOf<String>()
-
-    private val _toolApprovalRequest = MutableLiveData<ToolApprovalRequest?>()
-    val toolApprovalRequest: LiveData<ToolApprovalRequest?> get() = _toolApprovalRequest
-
-    private val pendingApprovals = mutableMapOf<String, CompletableDeferred<Boolean>>()
-
     private val _chatMessages = MutableLiveData<List<ChatMessage>>(emptyList())
     val chatMessages: LiveData<List<ChatMessage>> get() = _chatMessages
 
@@ -82,7 +71,6 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
 
     private val _compareCandidateMessageId = MutableLiveData<String?>()
     val compareCandidateMessageId: LiveData<String?> get() = _compareCandidateMessageId
-
 
     private val acceptedFindingIds = mutableSetOf<String>()
 
@@ -124,7 +112,6 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
         val current = _graph.value ?: return
         val updatedNodes = current.nodes.map { if (it.id == nodeId) it.copy(x = x, y = y) else it }
         _graph.value = current.copy(nodes = updatedNodes.toMutableList())
-        refreshAudit()
     }
 
     fun selectNode(node: MindNode?) {
@@ -164,6 +151,7 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
             ),
             dimensions = DimensionMapper.defaultDimensions(NodeType.MEMORY)
         )
+
         val edges = current.edges.toMutableList()
         finding.nodeIds.forEach { nodeId ->
             if (current.nodes.any { it.id == nodeId }) {
@@ -180,15 +168,15 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun createSnapshot(reason: String, driftNotes: String = "") {
-        val graph = _graph.value ?: return
-        val snapshot = continuityManager.createSnapshot(graph, reason, driftNotes)
+        val current = _graph.value ?: return
+        val snapshot = continuityManager.createSnapshot(current, reason, driftNotes)
         refreshSnapshotTimeline()
         _snapshotActionMessage.value = "Snapshot ${snapshot.snapshotId.take(8)} created (${snapshot.reason})"
     }
 
     fun compareWithSnapshot(snapshotId: String) {
-        val graph = _graph.value ?: return
-        val drift = continuityManager.compareSnapshotWithGraph(snapshotId, graph)
+        val current = _graph.value ?: return
+        val drift = continuityManager.compareSnapshotWithGraph(snapshotId, current)
         _snapshotActionMessage.value = "Drift: ${drift.indicator}"
     }
 
@@ -200,6 +188,7 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
                 _graph.value = restored
                 _selectedNode.value = null
                 _snapshotActionMessage.value = "Snapshot restored: ${snapshotId.take(8)}"
+                refreshAudit()
             } catch (e: Exception) {
                 _error.value = "Restore failed: ${e.message}"
             } finally {
@@ -211,15 +200,14 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
     fun clearSnapshotActionMessage() {
         _snapshotActionMessage.value = null
     }
-    fun clearSnapshotActionMessage() { _snapshotActionMessage.value = null }
 
     fun exportToMnx() {
-        val graph = _graph.value ?: return
+        val current = _graph.value ?: return
         viewModelScope.launch {
             _isLoading.value = true
             try {
                 val file = withContext(Dispatchers.IO) {
-                    val snapshot = continuityManager.createSnapshot(graph, reason = "export_mnx")
+                    val snapshot = continuityManager.createSnapshot(current, reason = "export_mnx")
                     val metadata = MnxRepository.ContinuityMetadata(
                         snapshotId = snapshot.snapshotId,
                         parentSnapshotId = snapshot.parentSnapshotId,
@@ -227,7 +215,7 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
                         reason = snapshot.reason,
                         driftNotes = snapshot.driftNotes
                     )
-                    mnxRepository.exportToMnx(graph, metadata)
+                    mnxRepository.exportToMnx(current, metadata)
                 }
                 _exportedFile.value = file
                 refreshSnapshotTimeline()
@@ -243,14 +231,16 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch {
             _isLoading.value = true
             try {
-                val graph = withContext(Dispatchers.IO) { mnxRepository.importFromMnx(stream) }
-                _graph.value = graph
+                val imported = withContext(Dispatchers.IO) { mnxRepository.importFromMnx(stream) }
+                _graph.value = imported
+                _selectedNode.value = null
                 acceptedFindingIds.clear()
                 refreshAudit()
             } catch (e: Exception) {
                 _error.value = "Import failed: ${e.message}"
             } finally {
                 _isLoading.value = false
+                runCatching { stream.close() }
             }
         }
     }
@@ -260,15 +250,21 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
             _isLoading.value = true
             try {
                 val result = withContext(Dispatchers.IO) { runSingleChat(prompt, choice) }
-                if (result == null) return@launch
-                val next = _chatMessages.value.orEmpty().toMutableList().apply { add(result) }
-                _chatMessages.value = next
+                if (result != null) {
+                    _chatMessages.value = _chatMessages.value.orEmpty() + result
+                }
             } catch (e: LlmApiException) {
+                _llmStatusBadge.value = "REMOTE ERROR"
                 _error.value = "AI error: ${e.message}"
             } catch (e: Exception) {
+                _llmStatusBadge.value = "REMOTE ERROR"
                 _error.value = "AI request failed: ${e.message}"
             } finally {
                 _isLoading.value = false
+            }
+        }
+    }
+
     fun buildDataUseReport(prompt: String): String {
         val mode = llmRepository.loadPrivacyMode()
         val chain = llmRepository.getInvocationChain()
@@ -282,12 +278,10 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
                 append("No usable provider configured.")
             } else {
                 chain.forEachIndexed { idx, settings ->
-                    val external = settings.provider.baseUrl.startsWith("https://") && settings.provider != com.kaleaon.mnxmindmaker.model.LlmProvider.LOCAL_ON_DEVICE
                     appendLine("${idx + 1}. ${settings.provider.displayName}")
                     appendLine("   classification: ${settings.outboundClassification}")
                     appendLine("   destination: ${settings.baseUrl}")
                     appendLine("   data leaving device: system prompt + user prompt")
-                    appendLine("   tls pinning: ${if (settings.tlsPinnedSpkiSha256.isNotBlank() && external) "enabled" else "not pinned"}")
                 }
             }
         }
@@ -307,7 +301,7 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
                     runSingleChat(existing.prompt, providerToChoice(nextProvider), forcedProvider = nextProvider)
                 } ?: return@launch
 
-                val updated = _chatMessages.value.orEmpty().map { msg ->
+                _chatMessages.value = _chatMessages.value.orEmpty().map { msg ->
                     if (msg.id != messageId) {
                         msg
                     } else {
@@ -322,112 +316,12 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
                         )
                     }
                 }
-                _chatMessages.value = updated
+
                 if (_isPremiumUser.value == true) {
                     _compareCandidateMessageId.value = messageId
                 }
             } catch (e: Exception) {
                 _error.value = "Retry failed: ${e.message}"
-                val invocationChain = withContext(Dispatchers.IO) { llmRepository.getInvocationChain() }
-                if (invocationChain.isEmpty()) {
-                    _error.value = "No usable provider configured under current privacy mode."
-                    return@launch
-                }
-
-                val systemPrompt = buildString {
-                    appendLine("You are an AI mind design assistant helping the user build an AI mind graph in .mnx format.")
-                    appendLine("The mind graph represents identity, memories, knowledge, emotions, personality, beliefs, values, and relationships.")
-                    appendLine("Use tools when graph inspection or mutation is needed.")
-                    appendLine("When tool use is unnecessary, provide concise, structured suggestions.")
-                    appendLine("Format suggestions as: NodeType: label - description")
-                }
-
-                var response: String? = null
-                var lastError: String? = null
-                var remoteFailureType: String? = null
-                for (settings in invocationChain) {
-                    val caps = settings.capabilities
-                    val systemPrompt = buildString {
-                        appendLine("You are an AI mind design assistant helping the user build an AI mind graph in .mnx format.")
-                        appendLine("The mind graph represents identity, memories, knowledge, emotions, personality, beliefs, values, and relationships.")
-                        appendLine("Provide concise, structured suggestions for mind nodes and connections.")
-                        appendLine("Format suggestions as: NodeType: label - description")
-                        if (!caps.supportsToolPlanning) appendLine("Do not propose multi-step tool plans; provide direct node suggestions only.")
-                        if (!caps.supportsPacketGeneration) appendLine("Keep output short and avoid dense packet-style dumps.")
-                        appendLine("Stay within approximately ${caps.contextWindowTokens / 8} output tokens.")
-                    }
-                    try {
-                        response = withContext(Dispatchers.IO) {
-                            llmClient.complete(settings, systemPrompt, prompt)
-                        }
-                        _llmStatusBadge.value = if (settings.provider.runtime == LlmRuntime.LOCAL_ON_DEVICE) {
-                            "LOCAL FALLBACK"
-                        } else {
-                            "REMOTE"
-                        }
-                        response = withContext(Dispatchers.IO) { llmClient.complete(settings, systemPrompt, prompt) }
-                        break
-                    } catch (inner: LlmApiException) {
-                        lastError = "${settings.provider.displayName}: ${inner.message}"
-                        if (settings.provider.runtime == LlmRuntime.REMOTE_API) {
-                            remoteFailureType = classifyRemoteFailure(inner.message.orEmpty())
-                        }
-                    }
-                }
-
-                if (response == null && remoteFailureType != null) {
-                    val localFallback = withContext(Dispatchers.IO) { llmRepository.getLocalFallbackCandidate() }
-                    if (localFallback != null) {
-                        val systemPrompt = "You are an AI mind design assistant. Provide concise node suggestions."
-                        response = withContext(Dispatchers.IO) {
-                            llmClient.complete(localFallback, systemPrompt, prompt)
-                        }
-                        _llmStatusBadge.value = "LOCAL FALLBACK"
-                        _error.value = "Remote provider unavailable ($remoteFailureType). Switched to local model."
-                    }
-                }
-
-                if (response == null) {
-                    _llmStatusBadge.value = "REMOTE ERROR"
-                    _error.value = "AI request failed across fallback chain. $lastError"
-                    return@launch
-                val systemPrompt = """You are an AI mind design assistant helping the user build an AI mind graph
-                    |in .mnx format. The mind graph represents an AI's identity, memories, knowledge,
-                    |emotions, personality, beliefs, values, and relationships.
-                    |Use tools whenever graph state inspection or mutation is needed.
-                    |When tool use is unnecessary, provide concise, structured suggestions.
-                    |Format suggestions as: NodeType: label - description""".trimMargin()
-
-                val response = withContext(Dispatchers.IO) {
-                    val registry = ToolRegistry(
-                        getGraph = { _graph.value ?: newDefaultGraph() },
-                        setGraph = { updated -> _graph.postValue(updated) }
-                    )
-                    val orchestrator = ToolOrchestrator(
-                        providerRouter = providerRouter,
-                        settingsChain = invocationChain,
-                        registry = registry,
-                        policy = ToolPolicyEngine(registry),
-                        requestApproval = { requestToolApproval(it) },
-                        routingPolicy = RoutingPolicy(
-                            userPreference = llmRepository.getActiveProvider(),
-                            prioritizeCost = false,
-                            prioritizeLatency = true,
-                            allowOfflineFallback = true
-                        )
-                        policy = ToolPolicyEngine(registry.specs().associateBy { it.name }),
-                        requestApproval = { requestToolApproval(it) }
-                    )
-                    orchestrator.run(systemPrompt, prompt)
-                }
-
-                _llmResponse.value = response
-            } catch (e: LlmApiException) {
-                _llmStatusBadge.value = "REMOTE ERROR"
-                _error.value = "AI error: ${e.message}"
-            } catch (e: Exception) {
-                _llmStatusBadge.value = "REMOTE ERROR"
-                _error.value = "AI request failed: ${e.message}"
             } finally {
                 _isLoading.value = false
             }
@@ -454,11 +348,6 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
             return null
         }
 
-        val registry = ToolRegistry(
-            getGraph = { _graph.value ?: newDefaultGraph() },
-            setGraph = { updated -> _graph.postValue(updated) }
-        )
-
         var lastError: String? = null
         for (settings in chain) {
             val systemPrompt = buildSystemPrompt(settings)
@@ -468,9 +357,12 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
                     settings = settings,
                     systemPrompt = systemPrompt,
                     transcript = listOf(JSONObject().put("role", "user").put("content", prompt)),
-                    tools = registry.specs()
+                    tools = emptyList()
                 )
                 val latency = System.currentTimeMillis() - start
+                _llmStatusBadge.postValue(
+                    if (settings.provider.runtime == LlmRuntime.LOCAL_ON_DEVICE) "LOCAL FALLBACK" else "REMOTE"
+                )
                 return ChatMessage(
                     id = UUID.randomUUID().toString(),
                     prompt = prompt,
@@ -479,7 +371,7 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
                     provenance = MessageProvenance(
                         provider = settings.provider,
                         model = turn.raw?.optString("model").takeUnless { it.isNullOrBlank() } ?: settings.model,
-                        toolCalls = turn.toolInvocations.map { it.name },
+                        toolCalls = turn.toolInvocations.map { it.toolName },
                         latencyMs = latency,
                         promptTokens = extractPromptTokens(turn.raw),
                         completionTokens = extractCompletionTokens(turn.raw),
@@ -491,6 +383,7 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
             }
         }
 
+        _llmStatusBadge.postValue("REMOTE ERROR")
         _error.postValue("AI request failed across provider chain. $lastError")
         return null
     }
@@ -540,52 +433,27 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
 
     private fun extractPromptTokens(raw: JSONObject?): Int? {
         if (raw == null) return null
-        return raw.optJSONObject("usage")?.optInt("prompt_tokens").takeIf { it != null && it >= 0 }
-            ?: raw.optJSONObject("usage")?.optInt("input_tokens")
-            ?: raw.optJSONObject("usageMetadata")?.optInt("promptTokenCount")
+        return raw.optJSONObject("usage")?.optInt("prompt_tokens")?.takeIf { it >= 0 }
+            ?: raw.optJSONObject("usage")?.optInt("input_tokens")?.takeIf { it >= 0 }
+            ?: raw.optJSONObject("usageMetadata")?.optInt("promptTokenCount")?.takeIf { it >= 0 }
     }
 
     private fun extractCompletionTokens(raw: JSONObject?): Int? {
         if (raw == null) return null
-        return raw.optJSONObject("usage")?.optInt("completion_tokens").takeIf { it != null && it >= 0 }
-            ?: raw.optJSONObject("usage")?.optInt("output_tokens")
-            ?: raw.optJSONObject("usageMetadata")?.optInt("candidatesTokenCount")
+        return raw.optJSONObject("usage")?.optInt("completion_tokens")?.takeIf { it >= 0 }
+            ?: raw.optJSONObject("usage")?.optInt("output_tokens")?.takeIf { it >= 0 }
+            ?: raw.optJSONObject("usageMetadata")?.optInt("candidatesTokenCount")?.takeIf { it >= 0 }
     }
 
     private fun extractTotalTokens(raw: JSONObject?): Int? {
         if (raw == null) return null
-        val openAiTotal = raw.optJSONObject("usage")?.optInt("total_tokens")
-        if (openAiTotal != null && openAiTotal >= 0) return openAiTotal
-        val usageMeta = raw.optJSONObject("usageMetadata")
-        if (usageMeta != null) return usageMeta.optInt("totalTokenCount").takeIf { it >= 0 }
-        val prompt = extractPromptTokens(raw)
-        val completion = extractCompletionTokens(raw)
-        return if (prompt != null && completion != null) prompt + completion else null
+        return raw.optJSONObject("usage")?.optInt("total_tokens")?.takeIf { it >= 0 }
+            ?: raw.optJSONObject("usageMetadata")?.optInt("totalTokenCount")?.takeIf { it >= 0 }
     }
 
-    private fun classifyRemoteFailure(message: String): String? {
-        val normalized = message.lowercase()
-        return when {
-            normalized.contains("401") || normalized.contains("403") || normalized.contains("api key") || normalized.contains("unauthorized") ->
-                "auth invalid"
-            normalized.contains("timeout") || normalized.contains("network") || normalized.contains("unable to resolve host") || normalized.contains("connection") ->
-                "network down"
-            normalized.contains("5") && normalized.contains("error") ->
-                "provider unavailable"
-            else -> null
-        }
-    }
-
-    fun resolveToolApproval(requestId: String, approved: Boolean) {
-        pendingApprovals.remove(requestId)?.complete(approved)
-        _toolApprovalRequest.value = null
-    }
-
-    private suspend fun requestToolApproval(request: ToolApprovalRequest): Boolean {
-        val deferred = CompletableDeferred<Boolean>()
-        pendingApprovals[request.id] = deferred
-        _toolApprovalRequest.postValue(request)
-        return deferred.await()
+    private fun refreshAudit() {
+        val current = _graph.value ?: return
+        _auditResult.value = run_continuity_audit(current, acceptedFindingIds)
     }
 
     fun clearError() {
@@ -597,12 +465,14 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
     }
 
     private fun newDefaultGraph(): MindGraph {
-        val identity = MindNode(label = "My AI Mind", type = NodeType.IDENTITY, x = 400f, y = 300f)
-        return MindGraph(name = "My AI Mind", nodes = mutableListOf(identity))
-    }
-
-    private fun refreshAudit() {
-        val current = _graph.value ?: return
-        _auditResult.value = run_continuity_audit(current, acceptedFindingIds)
+        val identity = MindNode(
+            label = "Core Identity",
+            type = NodeType.IDENTITY,
+            description = "Central identity anchor for this mind.",
+            x = 360f,
+            y = 220f,
+            dimensions = DimensionMapper.defaultDimensions(NodeType.IDENTITY)
+        )
+        return MindGraph(name = "New Mind", nodes = mutableListOf(identity), edges = mutableListOf())
     }
 }

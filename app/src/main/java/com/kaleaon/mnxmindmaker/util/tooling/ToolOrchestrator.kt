@@ -5,7 +5,6 @@ import com.kaleaon.mnxmindmaker.util.provider.ProviderRouter
 import com.kaleaon.mnxmindmaker.util.provider.RoutingPolicy
 import org.json.JSONArray
 import org.json.JSONObject
-import com.kaleaon.mnxmindmaker.util.observability.RequestTracer
 
 class ToolOrchestrator(
     private val providerRouter: ProviderRouter,
@@ -17,16 +16,16 @@ class ToolOrchestrator(
     private val tracer: RequestTracer? = null,
     private val nowMs: () -> Long = { System.currentTimeMillis() },
     private val routingPolicy: RoutingPolicy = RoutingPolicy()
+    private val routingPolicy: RoutingPolicy = RoutingPolicy(),
+    private val maxToolRounds: Int = 6
 ) {
 
     suspend fun run(systemPrompt: String, userPrompt: String): String {
         val transcript = mutableListOf<JSONObject>()
         transcript += JSONObject().put("role", "user").put("content", userPrompt)
-        tracer?.recordPromptPipeline("user_prompt", userPrompt)
 
         val textParts = mutableListOf<String>()
         repeat(maxToolRounds) {
-            val providerStart = nowMs()
             val turn = providerRouter.chat(
                 settingsChain = settingsChain,
                 systemPrompt = systemPrompt,
@@ -40,13 +39,13 @@ class ToolOrchestrator(
                 textParts += turn.text.trim()
             }
 
+            if (turn.text.isNotBlank()) textParts += turn.text.trim()
             if (turn.toolInvocations.isEmpty()) {
                 return textParts.joinToString("\n\n").ifBlank { "Done." }
             }
 
             val toolResults = JSONArray()
             for (invocation in turn.toolInvocations) {
-                val toolStart = nowMs()
                 val result = executeInvocation(invocation)
                 tracer?.recordToolCall(invocation, result, nowMs() - toolStart)
                 toolResults.put(JSONObject()
@@ -55,12 +54,21 @@ class ToolOrchestrator(
                     .put("success", result.success)
                     .put("output_text", result.outputText)
                     .put("output_json", result.outputJson)
+                toolResults.put(
+                    JSONObject()
+                        .put("tool_call_id", result.toolCallId)
+                        .put("name", invocation.toolName)
+                        .put("success", result.success)
+                        .put("output_text", result.outputText)
+                        .put("output_json", result.outputJson)
                 )
             }
+
             transcript += JSONObject()
                 .put("role", "tool")
                 .put("content", toolResults)
         }
+
         return textParts.joinToString("\n\n").ifBlank { "Tool loop reached limit with no textual response." }
     }
 
@@ -80,7 +88,10 @@ class ToolOrchestrator(
                         explicitActionType = decision.explicitActionType
                     )
                 )
-                if (!approved) {
+
+                if (approved) {
+                    registry.invoke(invocation)
+                } else {
                     ToolResult(
                         toolUseId = invocation.id,
                         isError = true,
@@ -89,8 +100,6 @@ class ToolOrchestrator(
                             .put("error", "approval_rejected")
                             .put("message", "User denied tool invocation")
                     )
-                } else {
-                    registry.invoke(invocation)
                 }
             }
 
