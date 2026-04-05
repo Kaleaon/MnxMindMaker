@@ -12,6 +12,10 @@ class ToolOrchestrator(
     private val registry: ToolRegistry,
     private val policy: ToolPolicyEngine,
     private val requestApproval: suspend (ToolApprovalRequest) -> Boolean,
+    private val maxToolRounds: Int = 6,
+    private val tracer: RequestTracer? = null,
+    private val nowMs: () -> Long = { System.currentTimeMillis() },
+    private val routingPolicy: RoutingPolicy = RoutingPolicy()
     private val routingPolicy: RoutingPolicy = RoutingPolicy(),
     private val maxToolRounds: Int = 6
 ) {
@@ -29,6 +33,11 @@ class ToolOrchestrator(
                 tools = registry.specs(),
                 policy = routingPolicy
             )
+            val routedProvider = settingsChain.firstOrNull()?.provider?.name ?: "UNKNOWN"
+            tracer?.recordProviderResponse(routedProvider, turn.text, nowMs() - providerStart)
+            if (turn.text.isNotBlank()) {
+                textParts += turn.text.trim()
+            }
 
             if (turn.text.isNotBlank()) textParts += turn.text.trim()
             if (turn.toolInvocations.isEmpty()) {
@@ -38,6 +47,13 @@ class ToolOrchestrator(
             val toolResults = JSONArray()
             for (invocation in turn.toolInvocations) {
                 val result = executeInvocation(invocation)
+                tracer?.recordToolCall(invocation, result, nowMs() - toolStart)
+                toolResults.put(JSONObject()
+                    .put("tool_call_id", result.toolCallId)
+                    .put("name", result.toolName)
+                    .put("success", result.success)
+                    .put("output_text", result.outputText)
+                    .put("output_json", result.outputJson)
                 toolResults.put(
                     JSONObject()
                         .put("tool_call_id", result.toolCallId)
