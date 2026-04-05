@@ -130,7 +130,14 @@ object BootPacketGenerator {
         }
     }
 
-    fun generate(graph: MindGraph, mode: Mode = Mode.FULL): BootPacket {
+    fun generate(
+        graph: MindGraph,
+        mode: Mode = Mode.FULL,
+        prompt: String = "",
+        task: String = ""
+    ): BootPacket {
+        val context = MemoryRetrievalService.RetrievalContext(prompt = prompt, task = task)
+
         val protectedKernel = graph.nodes.filter {
             it.type in setOf(NodeType.IDENTITY, NodeType.VALUE, NodeType.RELATIONSHIP) &&
                 it.attributes["protection_level"] == "protected"
@@ -152,6 +159,17 @@ object BootPacketGenerator {
 
         val packet = BootPacket(
             mode = mode,
+            kernelSlice = targetedSlice(
+                if (protectedKernel.isNotEmpty()) protectedKernel else kernelFallback,
+                limitFor(mode).kernel,
+                context
+            ),
+            stateSlice = targetedSlice(state, limitFor(mode).state, context),
+            relationshipSlice = targetedSlice(relationships, limitFor(mode).relationship, context),
+            warningSlice = targetedSlice(warnings, limitFor(mode).warning, context),
+            memorySlice = MemoryRetrievalService.retrieve(memories, context, limitFor(mode).memory),
+            projectSlice = targetedSlice(projects, limitFor(mode).project, context),
+            driftRuleSlice = targetedSlice(driftRules, limitFor(mode).driftRule, context)
             kernelSlice = (if (protectedKernel.isNotEmpty()) protectedKernel else kernelFallback).take(12),
             stateSlice = state.take(8),
             relationshipSlice = relationships.take(8),
@@ -161,29 +179,49 @@ object BootPacketGenerator {
             driftRuleSlice = driftRules.take(8),
             continuityAudit = continuityAudit
         )
-        return packetForMode(packet, mode)
+        return packet
     }
 
-    private fun packetForMode(packet: BootPacket, mode: Mode): BootPacket = when (mode) {
-        Mode.FULL -> packet
-        Mode.EMERGENCY_WARNING -> packet.copy(
-            memorySlice = packet.memorySlice.take(4),
-            relationshipSlice = packet.relationshipSlice.take(3),
-            projectSlice = emptyList()
-        )
-        Mode.RELATIONSHIP -> packet.copy(
-            warningSlice = packet.warningSlice.take(4),
-            memorySlice = packet.memorySlice.take(4),
-            projectSlice = emptyList()
-        )
-        Mode.PROJECT -> packet.copy(
-            relationshipSlice = packet.relationshipSlice.take(3),
-            warningSlice = packet.warningSlice.take(3)
-        )
-        Mode.PUBLIC_PERSONA -> packet.copy(
-            warningSlice = emptyList(),
-            memorySlice = packet.memorySlice.filterNot { it.attributes["memory_class"] == "wound" }.take(6),
-            driftRuleSlice = packet.driftRuleSlice.take(3)
-        )
+    private data class SliceLimits(
+        val kernel: Int,
+        val state: Int,
+        val relationship: Int,
+        val warning: Int,
+        val memory: Int,
+        val project: Int,
+        val driftRule: Int
+    )
+
+    private fun limitFor(mode: Mode): SliceLimits = when (mode) {
+        Mode.FULL -> SliceLimits(12, 8, 8, 10, 12, 8, 8)
+        Mode.EMERGENCY_WARNING -> SliceLimits(12, 8, 3, 10, 4, 0, 8)
+        Mode.RELATIONSHIP -> SliceLimits(12, 8, 8, 4, 4, 0, 8)
+        Mode.PROJECT -> SliceLimits(12, 8, 3, 3, 12, 8, 8)
+        Mode.PUBLIC_PERSONA -> SliceLimits(12, 8, 8, 0, 6, 8, 3)
+    }
+
+    private fun targetedSlice(nodes: List<MindNode>, limit: Int, context: MemoryRetrievalService.RetrievalContext): List<MindNode> {
+        if (limit <= 0) return emptyList()
+        val query = "${context.prompt} ${context.task}".trim().lowercase()
+        val queryTokens = query.split(Regex("[^a-z0-9_]+"))
+            .filter { it.length > 2 }
+            .toSet()
+
+        return nodes
+            .asSequence()
+            .filterNot { it.attributes["protection_level"]?.lowercase() == "sealed" }
+            .sortedByDescending { scoreNodeForQuery(it, queryTokens) }
+            .take(limit)
+            .toList()
+    }
+
+    private fun scoreNodeForQuery(node: MindNode, queryTokens: Set<String>): Float {
+        val relevance = node.attributes["current_relevance"]?.toFloatOrNull()?.coerceIn(0f, 1f) ?: 0.45f
+        if (queryTokens.isEmpty()) return relevance
+
+        val haystack = "${node.label} ${node.description} ${node.attributes["semantic_subtype"] ?: ""}".lowercase()
+        val tokenHits = queryTokens.count { haystack.contains(it) }
+        val lexical = (tokenHits.toFloat() / queryTokens.size.toFloat()).coerceIn(0f, 1f)
+        return (lexical * 0.7f + relevance * 0.3f).coerceIn(0f, 1f)
     }
 }
