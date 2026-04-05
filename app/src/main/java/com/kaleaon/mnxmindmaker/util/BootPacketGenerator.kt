@@ -1,9 +1,9 @@
 package com.kaleaon.mnxmindmaker.util
 
+import com.kaleaon.mnxmindmaker.model.LlmCapabilityFlags
 import com.kaleaon.mnxmindmaker.model.MindGraph
 import com.kaleaon.mnxmindmaker.model.MindNode
 import com.kaleaon.mnxmindmaker.model.NodeType
-import com.kaleaon.mnxmindmaker.model.LlmCapabilityFlags
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -134,8 +134,7 @@ object BootPacketGenerator {
     fun generate(
         graph: MindGraph,
         mode: Mode = Mode.FULL,
-        capabilities: LlmCapabilityFlags? = null
-    ): BootPacket {
+        capabilities: LlmCapabilityFlags? = null,
         prompt: String = "",
         task: String = ""
     ): BootPacket {
@@ -170,16 +169,9 @@ object BootPacketGenerator {
             stateSlice = targetedSlice(state, limitFor(mode).state, context),
             relationshipSlice = targetedSlice(relationships, limitFor(mode).relationship, context),
             warningSlice = targetedSlice(warnings, limitFor(mode).warning, context),
-            memorySlice = MemoryRetrievalService.retrieve(memories, context, limitFor(mode).memory),
+            memorySlice = MemoryRetrievalService.retrieveForPromptInjection(memories, context, limitFor(mode).memory),
             projectSlice = targetedSlice(projects, limitFor(mode).project, context),
-            driftRuleSlice = targetedSlice(driftRules, limitFor(mode).driftRule, context)
-            kernelSlice = (if (protectedKernel.isNotEmpty()) protectedKernel else kernelFallback).take(12),
-            stateSlice = state.take(8),
-            relationshipSlice = relationships.take(8),
-            warningSlice = warnings.take(10),
-            memorySlice = memories.sortedByDescending { it.attributes["current_relevance"]?.toFloatOrNull() ?: 0f }.take(12),
-            projectSlice = projects.take(8),
-            driftRuleSlice = driftRules.take(8),
+            driftRuleSlice = targetedSlice(driftRules, limitFor(mode).driftRule, context),
             continuityAudit = continuityAudit
         )
         val modePacket = packetForMode(packet, mode)
@@ -197,6 +189,7 @@ object BootPacketGenerator {
         }
 
         fun <T> List<T>.scaled(): List<T> {
+            if (isEmpty()) return emptyList()
             val target = (size * contextScale).toInt().coerceAtLeast(1)
             return take(target)
         }
@@ -208,7 +201,6 @@ object BootPacketGenerator {
             projectSlice = if (capabilities.supportsToolPlanning) packet.projectSlice.scaled() else emptyList(),
             driftRuleSlice = if (capabilities.supportsPacketGeneration) packet.driftRuleSlice.scaled() else packet.driftRuleSlice.take(2)
         )
-        return packet
     }
 
     private data class SliceLimits(
@@ -229,7 +221,11 @@ object BootPacketGenerator {
         Mode.PUBLIC_PERSONA -> SliceLimits(12, 8, 8, 0, 6, 8, 3)
     }
 
-    private fun targetedSlice(nodes: List<MindNode>, limit: Int, context: MemoryRetrievalService.RetrievalContext): List<MindNode> {
+    private fun targetedSlice(
+        nodes: List<MindNode>,
+        limit: Int,
+        context: MemoryRetrievalService.RetrievalContext
+    ): List<MindNode> {
         if (limit <= 0) return emptyList()
         val query = "${context.prompt} ${context.task}".trim().lowercase()
         val queryTokens = query.split(Regex("[^a-z0-9_]+"))
@@ -252,5 +248,13 @@ object BootPacketGenerator {
         val tokenHits = queryTokens.count { haystack.contains(it) }
         val lexical = (tokenHits.toFloat() / queryTokens.size.toFloat()).coerceIn(0f, 1f)
         return (lexical * 0.7f + relevance * 0.3f).coerceIn(0f, 1f)
+    }
+
+    private fun packetForMode(packet: BootPacket, mode: Mode): BootPacket = when (mode) {
+        Mode.FULL -> packet
+        Mode.EMERGENCY_WARNING -> packet.copy(projectSlice = emptyList())
+        Mode.RELATIONSHIP -> packet.copy(projectSlice = emptyList())
+        Mode.PROJECT -> packet
+        Mode.PUBLIC_PERSONA -> packet.copy(warningSlice = emptyList())
     }
 }
