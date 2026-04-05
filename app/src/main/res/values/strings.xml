@@ -68,9 +68,16 @@
     <string name="gemini_api_info">Google Gemini — multimodal, large context window</string>
     <string name="vllm_gemma4_info">vLLM Gemma 4 — self-hosted OpenAI-compatible endpoint (recipe default: http://localhost:8000/v1)</string>
     <string name="provider_label">LLM Provider</string>
+    <string name="privacy_mode_label">Privacy Mode</string>
+    <string name="privacy_mode_strict">Strict local-only (no external calls)</string>
+    <string name="privacy_mode_hybrid">Hybrid (allow linked providers)</string>
     <string name="api_key_label">API Key</string>
     <string name="model_label">Model</string>
     <string name="base_url_label">Base URL</string>
+    <string name="classification_label">Outbound Classification</string>
+    <string name="tls_pin_label">TLS Pin (SPKI sha256)</string>
+    <string name="data_use_panel_title">Data Use Transparency</string>
+    <string name="continue_request">Continue Request</string>
     <string name="max_tokens_label">Max Tokens</string>
     <string name="temperature_label">Temperature (0–2)</string>
     <string name="enabled_label">Enable this provider</string>
@@ -84,4 +91,19 @@
     <string name="capability_summary">Capabilities — Context: %1$d tokens, Tool planning: %2$s, Packet generation: %3$s</string>
     <string name="capability_supported">supported</string>
     <string name="capability_limited">limited</string>
+    <string name="compute_backend_label">Runtime Device</string>
+    <string name="context_window_label">Context Window</string>
+    <string name="quantization_profile_label">Quantization Profile</string>
+    <string name="max_ram_label">Max RAM (MB)</string>
+    <string name="max_vram_label">Max VRAM (MB)</string>
+    <string name="discover_models">Discover Models</string>
+    <string name="install_recommended_model">Install Recommended Model</string>
+    <string name="model_manager_summary_default">Model manager idle.</string>
+    <string name="model_discovery_summary">Discovered %1$d models (%2$d installed).</string>
+    <string name="model_install_success">Installed %1$s (%2$s) and pinned this version.</string>
+    <string name="model_install_error">Install failed: %1$s</string>
+
+    <string name="llm_status_remote_active">REMOTE</string>
+    <string name="llm_status_local_fallback">LOCAL FALLBACK</string>
+    <string name="llm_status_remote_error">REMOTE ERROR</string>
 </resources>

@@ -44,6 +44,7 @@ class ToolOrchestrator(
                     JSONObject()
                         .put("tool_call_id", result.toolCallId)
                         .put("name", result.toolName)
+                        .put("name", invocation.toolName)
                         .put("success", result.success)
                         .put("output_text", result.outputText)
                         .put("output_json", result.outputJson)
@@ -57,24 +58,44 @@ class ToolOrchestrator(
     }
 
     private suspend fun executeInvocation(invocation: ToolInvocation): ToolResult {
-        return when (val decision = policy.evaluate(invocation)) {
-            ToolPolicyDecision.Allow -> registry.invoke(invocation)
-            ToolPolicyDecision.RequireApproval -> {
+        val decision = policy.evaluate(invocation)
+        return when (decision.type) {
+            PolicyDecisionType.ALLOW -> registry.invoke(invocation)
+            PolicyDecisionType.REQUIRE_USER_APPROVAL -> {
                 val approved = requestApproval(
                     ToolApprovalRequest(
                         id = invocation.id,
-                        toolName = invocation.name,
-                        arguments = invocation.arguments.toString(2)
+                        toolName = invocation.toolName,
+                        arguments = invocation.argumentsJson.toString(2),
+                        reason = decision.reason,
+                        riskLevel = decision.riskLevel,
+                        requiresConfirmation = decision.requiresConfirmation,
+                        explicitActionType = decision.explicitActionType
                     )
                 )
                 if (!approved) {
-                    ToolResult(invocation.id, invocation.name, false, "User denied tool invocation")
+                    ToolResult(
+                        toolUseId = invocation.id,
+                        isError = true,
+                        contentJson = JSONObject()
+                            .put("tool_name", invocation.toolName)
+                            .put("error", "approval_rejected")
+                            .put("message", "User denied tool invocation")
+                    )
                 } else {
                     registry.invoke(invocation)
                 }
             }
 
             is ToolPolicyDecision.Deny -> ToolResult(invocation.id, invocation.name, false, decision.reason)
+            PolicyDecisionType.DENY -> ToolResult(
+                toolUseId = invocation.id,
+                isError = true,
+                contentJson = JSONObject()
+                    .put("tool_name", invocation.toolName)
+                    .put("error", "policy_denied")
+                    .put("message", decision.reason)
+            )
         }
     }
 }

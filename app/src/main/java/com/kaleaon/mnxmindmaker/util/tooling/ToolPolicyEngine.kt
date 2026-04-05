@@ -1,44 +1,25 @@
 package com.kaleaon.mnxmindmaker.util.tooling
 
-class ToolPolicyEngine(
-    private val registry: ToolRegistry
-) {
-
-    fun evaluate(invocation: ToolInvocation): ToolPolicyDecision {
-        val spec = registry.findSpec(invocation.name)
-            ?: return ToolPolicyDecision.Deny("Tool is not registered: ${invocation.name}")
-        return when (spec.mode) {
-            ToolMode.READ_ONLY -> ToolPolicyDecision.Allow
-            ToolMode.MUTATION -> ToolPolicyDecision.RequireApproval
-        }
-    }
-}
-
-sealed interface ToolPolicyDecision {
-    data object Allow : ToolPolicyDecision
-    data object RequireApproval : ToolPolicyDecision
-    data class Deny(val reason: String) : ToolPolicyDecision
 import com.kaleaon.mnxmindmaker.model.MindGraph
 
 /**
  * Evaluates whether a tool call can run, requires user approval, or must be denied.
- *
- * Security defaults:
- * - deny unknown tools
- * - mandatory approval for mutating/high-risk tools
- * - protected node writes require user approval
- * - invariant node writes are denied
  */
 class ToolPolicyEngine(
     private val specsByName: Map<String, ToolSpec>
 ) {
 
+    fun evaluate(invocation: ToolInvocation): PolicyDecision = evaluate(invocation, MindGraph())
+
     fun evaluate(invocation: ToolInvocation, graph: MindGraph): PolicyDecision {
         val spec = specsByName[invocation.toolName]
             ?: return PolicyDecision(
                 type = PolicyDecisionType.DENY,
-                reason = "Unknown tool '${invocation.toolName}' denied by default"
+                reason = "Unknown tool '${invocation.toolName}' denied by default",
+                riskLevel = ToolRiskLevel.HIGH
             )
+
+        val explicitAction = inferExplicitActionType(invocation.toolName)
 
         val targetedNodes = extractTargetNodeIds(invocation)
             .mapNotNull { id -> graph.nodes.firstOrNull { it.id == id } }
@@ -49,7 +30,9 @@ class ToolPolicyEngine(
         if (hasInvariantTarget && spec.operationClass != ToolOperationClass.READ_ONLY) {
             return PolicyDecision(
                 type = PolicyDecisionType.DENY,
-                reason = "Writes to invariant nodes are denied"
+                reason = "Writes to invariant nodes are denied",
+                riskLevel = ToolRiskLevel.HIGH,
+                explicitActionType = explicitAction
             )
         }
 
@@ -57,28 +40,44 @@ class ToolPolicyEngine(
             it.attributes[PROTECTION_LEVEL_KEY].equals(PROTECTION_PROTECTED, ignoreCase = true)
         }
 
-        return when (spec.operationClass) {
-            ToolOperationClass.READ_ONLY -> PolicyDecision(
+        val requiresApprovalByRisk = spec.requiresConfirmation || explicitAction != null
+
+        return when {
+            spec.operationClass == ToolOperationClass.READ_ONLY && !requiresApprovalByRisk -> PolicyDecision(
                 type = PolicyDecisionType.ALLOW,
-                reason = "Read-only tool"
+                reason = "Read-only tool",
+                riskLevel = spec.riskLevel
             )
-            ToolOperationClass.MUTATING -> {
-                if (hasProtectedTarget) {
-                    PolicyDecision(
-                        type = PolicyDecisionType.REQUIRE_USER_APPROVAL,
-                        reason = "Mutating protected nodes requires explicit user approval"
-                    )
-                } else {
-                    PolicyDecision(
-                        type = PolicyDecisionType.REQUIRE_USER_APPROVAL,
-                        reason = "Mutating tool requires explicit user approval"
-                    )
-                }
-            }
-            ToolOperationClass.HIGH_RISK -> PolicyDecision(
+
+            hasProtectedTarget && spec.operationClass != ToolOperationClass.READ_ONLY -> PolicyDecision(
                 type = PolicyDecisionType.REQUIRE_USER_APPROVAL,
-                reason = "High-risk tool requires explicit user approval"
+                reason = "Mutating protected nodes requires explicit user approval",
+                riskLevel = spec.riskLevel,
+                requiresConfirmation = true,
+                explicitActionType = explicitAction
             )
+
+            else -> PolicyDecision(
+                type = PolicyDecisionType.REQUIRE_USER_APPROVAL,
+                reason = when {
+                    explicitAction != null -> "High-risk '${explicitAction}' action requires explicit user approval"
+                    spec.operationClass == ToolOperationClass.HIGH_RISK -> "High-risk tool requires explicit user approval"
+                    else -> "Mutating tool requires explicit user approval"
+                },
+                riskLevel = spec.riskLevel,
+                requiresConfirmation = true,
+                explicitActionType = explicitAction
+            )
+        }
+    }
+
+    private fun inferExplicitActionType(toolName: String): String? {
+        val name = toolName.lowercase()
+        return when {
+            "delete" in name || "remove" in name -> "delete"
+            "send" in name || "post" in name -> "send"
+            "execute" in name || "command" in name || "terminal" in name -> "execute"
+            else -> null
         }
     }
 
@@ -87,9 +86,6 @@ class ToolPolicyEngine(
         const val PROTECTION_PROTECTED = "protected"
         const val PROTECTION_INVARIANT = "invariant"
 
-        /**
-         * Heuristic extraction of node IDs from common mutation argument keys.
-         */
         fun extractTargetNodeIds(invocation: ToolInvocation): List<String> {
             val args = invocation.argumentsJson
             val keys = listOf("node_id", "from_id", "to_id", "parent_id")

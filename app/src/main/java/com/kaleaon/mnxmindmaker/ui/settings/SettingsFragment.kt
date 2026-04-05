@@ -12,11 +12,17 @@ import com.google.android.material.snackbar.Snackbar
 import com.kaleaon.mnxmindmaker.R
 import com.kaleaon.mnxmindmaker.databinding.FragmentSettingsBinding
 import com.kaleaon.mnxmindmaker.ktheme.KthemeManager
+import com.kaleaon.mnxmindmaker.model.ComputeBackend
+import com.kaleaon.mnxmindmaker.model.DataClassification
 import com.kaleaon.mnxmindmaker.model.LlmFallbackOrder
 import com.kaleaon.mnxmindmaker.model.LlmProvider
 import com.kaleaon.mnxmindmaker.model.LlmRuntime
 import com.kaleaon.mnxmindmaker.model.LlmSettings
 import com.kaleaon.mnxmindmaker.model.LocalModelProfile
+import com.kaleaon.mnxmindmaker.model.LocalRuntimeControls
+import com.kaleaon.mnxmindmaker.model.ModelManager
+import com.kaleaon.mnxmindmaker.model.ModelInstallState
+import com.kaleaon.mnxmindmaker.model.PrivacyMode
 import com.kaleaon.mnxmindmaker.model.defaultModel
 import com.kaleaon.mnxmindmaker.repository.LlmSettingsRepository
 
@@ -26,6 +32,7 @@ class SettingsFragment : Fragment() {
     private val binding get() = _binding!!
 
     private lateinit var repository: LlmSettingsRepository
+    private lateinit var modelManager: ModelManager
     private var currentProvider: LlmProvider = LlmProvider.ANTHROPIC
     private var currentSettings: MutableList<LlmSettings> = mutableListOf()
 
@@ -39,6 +46,7 @@ class SettingsFragment : Fragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
         repository = LlmSettingsRepository(requireContext())
+        modelManager = ModelManager(requireContext())
         currentSettings = repository.loadAllSettings().toMutableList()
 
         // ---- Ktheme picker --------------------------------------------------
@@ -51,6 +59,24 @@ class SettingsFragment : Fragment() {
             android.R.layout.simple_spinner_item,
             providers
         ).also { it.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item) }
+
+        binding.spinnerPrivacyMode.adapter = ArrayAdapter(
+            requireContext(),
+            android.R.layout.simple_spinner_item,
+            listOf(
+                getString(R.string.privacy_mode_strict),
+                getString(R.string.privacy_mode_hybrid)
+            )
+        ).also { it.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item) }
+
+        binding.spinnerClassification.adapter = ArrayAdapter(
+            requireContext(),
+            android.R.layout.simple_spinner_item,
+            DataClassification.entries.map { it.name.lowercase().replaceFirstChar(Char::uppercase) }
+        ).also { it.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item) }
+
+        val privacyMode = repository.loadPrivacyMode()
+        binding.spinnerPrivacyMode.setSelection(if (privacyMode == PrivacyMode.STRICT_LOCAL_ONLY) 0 else 1)
 
         binding.spinnerLocalProfile.adapter = ArrayAdapter(
             requireContext(),
@@ -66,6 +92,11 @@ class SettingsFragment : Fragment() {
                 getString(R.string.fallback_local_first)
             )
         ).also { it.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item) }
+        binding.spinnerComputeBackend.adapter = ArrayAdapter(
+            requireContext(),
+            android.R.layout.simple_spinner_item,
+            ComputeBackend.entries.map { it.label }
+        ).also { it.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item) }
 
         binding.spinnerProvider.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: AdapterView<*>?, v: View?, pos: Int, id: Long) {
@@ -79,6 +110,34 @@ class SettingsFragment : Fragment() {
         loadProviderSettings(currentProvider)
 
         binding.btnSaveSettings.setOnClickListener { saveCurrentProvider() }
+        binding.btnDiscoverModels.setOnClickListener {
+            val models = modelManager.discoverModels()
+            binding.tvModelManagerSummary.text = getString(
+                R.string.model_discovery_summary,
+                models.size,
+                models.count { it.state == ModelInstallState.INSTALLED }
+            )
+        }
+        binding.btnInstallRecommended.setOnClickListener {
+            val result = modelManager.installModelOneClick("qwen2_5_7b")
+            if (result.isSuccess) {
+                val model = result.getOrThrow()
+                modelManager.pinVersion(model.id, model.version, true)
+                binding.tvModelManagerSummary.text = getString(
+                    R.string.model_install_success,
+                    model.displayName,
+                    model.version
+                )
+                binding.etLocalModelPath.setText(model.localPath)
+                binding.etModel.setText(model.id)
+                binding.etQuantizationProfile.setText(model.quantizationProfile)
+            } else {
+                binding.tvModelManagerSummary.text = getString(
+                    R.string.model_install_error,
+                    result.exceptionOrNull()?.message ?: "unknown error"
+                )
+            }
+        }
 
         // Show documentation links
         binding.tvAnthropicInfo.text = getString(R.string.anthropic_api_info)
@@ -141,13 +200,22 @@ class SettingsFragment : Fragment() {
         binding.etMaxTokens.setText(settings.maxTokens.toString())
         binding.etTemperature.setText(settings.temperature.toString())
         binding.etLocalModelPath.setText(settings.localModelPath)
+        binding.etContextWindow.setText(settings.runtimeControls.contextWindowTokens.toString())
+        binding.etQuantizationProfile.setText(settings.runtimeControls.quantizationProfile)
+        binding.etMaxRamMb.setText(settings.runtimeControls.maxRamMb.toString())
+        binding.etMaxVramMb.setText(settings.runtimeControls.maxVramMb.toString())
         binding.switchEnabled.isChecked = settings.enabled
+        binding.etTlsPin.setText(settings.tlsPinnedSpkiSha256)
+        binding.spinnerClassification.setSelection(DataClassification.entries.indexOf(settings.outboundClassification).coerceAtLeast(0))
 
         binding.spinnerLocalProfile.setSelection(
             LocalModelProfile.entries.indexOf(settings.localProfile).coerceAtLeast(0)
         )
         binding.spinnerFallbackOrder.setSelection(
             if (settings.fallbackOrder == LlmFallbackOrder.LOCAL_FIRST_REMOTE_FALLBACK) 1 else 0
+        )
+        binding.spinnerComputeBackend.setSelection(
+            ComputeBackend.entries.indexOf(settings.runtimeControls.computeBackend).coerceAtLeast(0)
         )
 
         val isLocalRuntime = provider.runtime == LlmRuntime.LOCAL_ON_DEVICE
@@ -178,6 +246,8 @@ class SettingsFragment : Fragment() {
         val maxTokens = binding.etMaxTokens.text.toString().toIntOrNull() ?: 2048
         val temperature = binding.etTemperature.text.toString().toFloatOrNull() ?: 0.7f
         val enabled = binding.switchEnabled.isChecked
+        val tlsPin = binding.etTlsPin.text.toString().trim()
+        val classification = DataClassification.entries.getOrElse(binding.spinnerClassification.selectedItemPosition) { DataClassification.SENSITIVE }
         val localModelPath = binding.etLocalModelPath.text.toString().trim()
         val localProfile = LocalModelProfile.entries.getOrElse(binding.spinnerLocalProfile.selectedItemPosition) {
             LocalModelProfile.BALANCED
@@ -187,6 +257,11 @@ class SettingsFragment : Fragment() {
         } else {
             LlmFallbackOrder.REMOTE_ONLY
         }
+        val computeBackend = ComputeBackend.entries.getOrElse(binding.spinnerComputeBackend.selectedItemPosition) {
+            ComputeBackend.AUTO
+        }
+
+        repository.savePrivacyMode(if (binding.spinnerPrivacyMode.selectedItemPosition == 0) PrivacyMode.STRICT_LOCAL_ONLY else PrivacyMode.HYBRID)
 
         val settings = LlmSettings(
             provider = currentProvider,
@@ -198,7 +273,16 @@ class SettingsFragment : Fragment() {
             temperature = temperature,
             localModelPath = localModelPath,
             localProfile = localProfile,
-            fallbackOrder = fallbackOrder
+            fallbackOrder = fallbackOrder,
+            runtimeControls = LocalRuntimeControls(
+                computeBackend = computeBackend,
+                contextWindowTokens = binding.etContextWindow.text?.toString()?.toIntOrNull() ?: localProfile.contextWindowTokens,
+                quantizationProfile = binding.etQuantizationProfile.text?.toString()?.trim().orEmpty().ifBlank { "Q4_K_M" },
+                maxRamMb = binding.etMaxRamMb.text?.toString()?.toIntOrNull() ?: 4096,
+                maxVramMb = binding.etMaxVramMb.text?.toString()?.toIntOrNull() ?: 2048
+            )
+            outboundClassification = classification,
+            tlsPinnedSpkiSha256 = tlsPin
         )
         repository.saveSettings(settings)
 
