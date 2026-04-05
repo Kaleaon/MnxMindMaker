@@ -24,6 +24,13 @@
     <string name="cancel">Cancel</string>
     <string name="ok">OK</string>
     <string name="export_success">Exported: %1$s</string>
+    <string name="create_snapshot">Create Snapshot</string>
+    <string name="compare_snapshot">Compare Snapshot</string>
+    <string name="restore_snapshot">Restore Snapshot</string>
+    <string name="snapshot_reason_title">Snapshot reason</string>
+    <string name="snapshot_drift_notes_title">Drift notes</string>
+    <string name="snapshot_pick_title">Select snapshot</string>
+    <string name="no_snapshots_available">No snapshots available yet.</string>
 
     <!-- AI dialog -->
     <string name="ask_ai_title">Ask AI for Mind Design Help</string>
