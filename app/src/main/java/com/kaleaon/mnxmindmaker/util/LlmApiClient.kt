@@ -149,11 +149,23 @@ class LlmApiClient(localBackend: LocalOnDeviceBackend? = null) {
         transcript: List<JSONObject>,
         tools: List<ToolSpec>
     ): AssistantTurn {
+        val userMessage = transcript.lastOrNull { it.optString("role", "user") == "user" }
+            ?.opt("content")
+            ?.toString()
+            ?: ""
         return when (settings.provider) {
             LlmProvider.ANTHROPIC -> callAnthropicTurn(settings, systemPrompt, transcript, tools)
             LlmProvider.OPENAI -> callOpenAITurn(settings, systemPrompt, transcript, tools)
             LlmProvider.GEMINI -> callGeminiTurn(settings, systemPrompt, transcript, tools)
             LlmProvider.VLLM_GEMMA4 -> callOpenAICompatibleTurn(settings, systemPrompt, transcript, tools)
+            LlmProvider.LOCAL_ON_DEVICE -> AssistantTurn(
+                text = resolveOnDeviceBackend(settings).streamCompletion(
+                    settings = settings,
+                    systemPrompt = systemPrompt,
+                    userMessage = userMessage
+                ),
+                raw = JSONObject()
+            )
             LlmProvider.LOCAL_ON_DEVICE -> {
                 val localText = resolveOnDeviceBackend().streamCompletion(
                     settings = settings,
@@ -174,6 +186,12 @@ class LlmApiClient(localBackend: LocalOnDeviceBackend? = null) {
         return onDeviceBackends.values.firstOrNull() ?: throw LlmApiException("No on-device backend is registered")
     }
 
+    private fun callAnthropicTurn(
+        settings: LlmSettings,
+        systemPrompt: String,
+        transcript: List<JSONObject>,
+        tools: List<ToolSpec>
+    ): AssistantTurn {
     private fun clientFor(settings: LlmSettings): OkHttpClient {
         val url = settings.baseUrl.toHttpUrlOrNull() ?: return baseClient
         val host = url.host

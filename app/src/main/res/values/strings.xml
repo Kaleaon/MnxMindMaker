@@ -91,4 +91,19 @@
     <string name="capability_summary">Capabilities — Context: %1$d tokens, Tool planning: %2$s, Packet generation: %3$s</string>
     <string name="capability_supported">supported</string>
     <string name="capability_limited">limited</string>
+    <string name="compute_backend_label">Runtime Device</string>
+    <string name="context_window_label">Context Window</string>
+    <string name="quantization_profile_label">Quantization Profile</string>
+    <string name="max_ram_label">Max RAM (MB)</string>
+    <string name="max_vram_label">Max VRAM (MB)</string>
+    <string name="discover_models">Discover Models</string>
+    <string name="install_recommended_model">Install Recommended Model</string>
+    <string name="model_manager_summary_default">Model manager idle.</string>
+    <string name="model_discovery_summary">Discovered %1$d models (%2$d installed).</string>
+    <string name="model_install_success">Installed %1$s (%2$s) and pinned this version.</string>
+    <string name="model_install_error">Install failed: %1$s</string>
+
+    <string name="llm_status_remote_active">REMOTE</string>
+    <string name="llm_status_local_fallback">LOCAL FALLBACK</string>
+    <string name="llm_status_remote_error">REMOTE ERROR</string>
 </resources>
