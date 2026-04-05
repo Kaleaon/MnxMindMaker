@@ -68,4 +68,13 @@
     <string name="temperature_label">Temperature (0–2)</string>
     <string name="enabled_label">Enable this provider</string>
     <string name="save_settings">Save Settings</string>
+    <string name="hint_local_model_path">Set the on-device model file path and runtime endpoint; no API key required.</string>
+    <string name="local_model_path_label">Local Model Path</string>
+    <string name="local_profile_label">Local Profile</string>
+    <string name="fallback_order_label">Fallback Order</string>
+    <string name="fallback_remote_only">Remote only</string>
+    <string name="fallback_local_first">Local first, remote fallback</string>
+    <string name="capability_summary">Capabilities — Context: %1$d tokens, Tool planning: %2$s, Packet generation: %3$s</string>
+    <string name="capability_supported">supported</string>
+    <string name="capability_limited">limited</string>
 </resources>

@@ -206,13 +206,44 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
             _isLoading.value = true
             _llmResponse.value = null
             try {
-                val activeSettings = withContext(Dispatchers.IO) {
-                    llmRepository.getActiveProvider()?.let { llmRepository.loadSettings(it) }
+                val invocationChain = withContext(Dispatchers.IO) {
+                    llmRepository.getInvocationChain()
                 }
-                if (activeSettings == null) {
-                    _error.value = "No LLM API configured. Go to Settings to add an API key."
+                if (invocationChain.isEmpty()) {
+                    _error.value = "No usable LLM configured. Add a provider in Settings."
                     return@launch
                 }
+
+                var response: String? = null
+                var lastError: String? = null
+                for (settings in invocationChain) {
+                    val caps = settings.capabilities
+                    val systemPrompt = buildString {
+                        appendLine("You are an AI mind design assistant helping the user build an AI mind graph in .mnx format.")
+                        appendLine("The mind graph represents identity, memories, knowledge, emotions, personality, beliefs, values, and relationships.")
+                        appendLine("Provide concise, structured suggestions for mind nodes and connections.")
+                        appendLine("Format suggestions as: NodeType: label - description")
+                        if (!caps.supportsToolPlanning) {
+                            appendLine("Do not propose multi-step tool plans; provide direct node suggestions only.")
+                        }
+                        if (!caps.supportsPacketGeneration) {
+                            appendLine("Keep output short and avoid dense packet-style dumps.")
+                        }
+                        appendLine("Stay within approximately ${caps.contextWindowTokens / 8} output tokens.")
+                    }
+                    try {
+                        response = withContext(Dispatchers.IO) {
+                            llmClient.complete(settings, systemPrompt, prompt)
+                        }
+                        break
+                    } catch (inner: LlmApiException) {
+                        lastError = "${settings.provider.displayName}: ${inner.message}"
+                    }
+                }
+
+                if (response == null) {
+                    _error.value = "AI request failed across fallback chain. $lastError"
+                    return@launch
                 val systemPrompt = """You are an AI mind design assistant helping the user build an AI mind graph
                     |in .mnx format. The mind graph represents an AI's identity, memories, knowledge,
                     |emotions, personality, beliefs, values, and relationships.
