@@ -54,11 +54,12 @@ class LlmApiClient {
             .addHeader("anthropic-version", "2023-06-01")
             .addHeader("content-type", "application/json")
             .build()
-        val response = httpClient.newCall(request).execute()
-        val responseBody = response.body?.string() ?: throw LlmApiException("Empty response from Anthropic")
-        if (!response.isSuccessful) throw LlmApiException("Anthropic error ${response.code}: $responseBody")
-        val json = JSONObject(responseBody)
-        return json.getJSONArray("content").getJSONObject(0).getString("text")
+        return httpClient.newCall(request).execute().use { response ->
+            val responseBody = response.body?.string() ?: throw LlmApiException("Empty response from Anthropic")
+            if (!response.isSuccessful) throw LlmApiException("Anthropic error ${response.code}: $responseBody")
+            val json = JSONObject(responseBody)
+            json.getJSONArray("content").getJSONObject(0).getString("text")
+        }
     }
 
     private fun callOpenAI(settings: LlmSettings, systemPrompt: String, userMessage: String): String {
@@ -77,12 +78,13 @@ class LlmApiClient {
             .addHeader("Authorization", "Bearer ${settings.apiKey}")
             .addHeader("content-type", "application/json")
             .build()
-        val response = httpClient.newCall(request).execute()
-        val responseBody = response.body?.string() ?: throw LlmApiException("Empty response from OpenAI")
-        if (!response.isSuccessful) throw LlmApiException("OpenAI error ${response.code}: $responseBody")
-        val jsonObj = JSONObject(responseBody)
-        return jsonObj.getJSONArray("choices").getJSONObject(0)
-            .getJSONObject("message").getString("content")
+        return httpClient.newCall(request).execute().use { response ->
+            val responseBody = response.body?.string() ?: throw LlmApiException("Empty response from OpenAI")
+            if (!response.isSuccessful) throw LlmApiException("OpenAI error ${response.code}: $responseBody")
+            val jsonObj = JSONObject(responseBody)
+            jsonObj.getJSONArray("choices").getJSONObject(0)
+                .getJSONObject("message").getString("content")
+        }
     }
 
     private fun callOpenAICompatible(settings: LlmSettings, systemPrompt: String, userMessage: String): String {
@@ -102,12 +104,13 @@ class LlmApiClient {
             .addHeader("Authorization", "Bearer $apiKey")
             .addHeader("content-type", "application/json")
             .build()
-        val response = httpClient.newCall(request).execute()
-        val responseBody = response.body?.string() ?: throw LlmApiException("Empty response from vLLM Gemma 4")
-        if (!response.isSuccessful) throw LlmApiException("vLLM Gemma 4 error ${response.code}: $responseBody")
-        val jsonObj = JSONObject(responseBody)
-        return jsonObj.getJSONArray("choices").getJSONObject(0)
-            .getJSONObject("message").getString("content")
+        return httpClient.newCall(request).execute().use { response ->
+            val responseBody = response.body?.string() ?: throw LlmApiException("Empty response from vLLM Gemma 4")
+            if (!response.isSuccessful) throw LlmApiException("vLLM Gemma 4 error ${response.code}: $responseBody")
+            val jsonObj = JSONObject(responseBody)
+            jsonObj.getJSONArray("choices").getJSONObject(0)
+                .getJSONObject("message").getString("content")
+        }
     }
 
     private fun callGemini(settings: LlmSettings, systemPrompt: String, userMessage: String): String {
@@ -129,14 +132,15 @@ class LlmApiClient {
             .post(body.toString().toRequestBody(json))
             .addHeader("content-type", "application/json")
             .build()
-        val response = httpClient.newCall(request).execute()
-        val responseBody = response.body?.string() ?: throw LlmApiException("Empty response from Gemini")
-        if (!response.isSuccessful) throw LlmApiException("Gemini error ${response.code}: $responseBody")
-        val jsonObj = JSONObject(responseBody)
-        return jsonObj.getJSONArray("candidates").getJSONObject(0)
-            .getJSONObject("content")
-            .getJSONArray("parts").getJSONObject(0)
-            .getString("text")
+        return httpClient.newCall(request).execute().use { response ->
+            val responseBody = response.body?.string() ?: throw LlmApiException("Empty response from Gemini")
+            if (!response.isSuccessful) throw LlmApiException("Gemini error ${response.code}: $responseBody")
+            val jsonObj = JSONObject(responseBody)
+            jsonObj.getJSONArray("candidates").getJSONObject(0)
+                .getJSONObject("content")
+                .getJSONArray("parts").getJSONObject(0)
+                .getString("text")
+        }
     }
 }
 
