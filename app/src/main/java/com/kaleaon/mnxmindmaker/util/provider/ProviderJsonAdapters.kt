@@ -91,9 +91,8 @@ internal object ProviderJsonAdapters {
             val functionObj = call.optJSONObject("function") ?: return@mapNotNull null
             ToolInvocation(
                 id = call.optString("id", UUID.randomUUID().toString()),
-                name = functionObj.optString("name"),
-                arguments = safeJsonObject(functionObj.optString("arguments", "{}")),
-                raw = call
+                toolName = functionObj.optString("name"),
+                argumentsJson = safeJsonObject(functionObj.optString("arguments", "{}"))
             )
         }
         return AssistantTurn(text = text, toolInvocations = invocations, raw = response)
@@ -109,9 +108,8 @@ internal object ProviderJsonAdapters {
                 "text" -> textParts += block.optString("text")
                 "tool_use" -> invocations += ToolInvocation(
                     id = block.optString("id", UUID.randomUUID().toString()),
-                    name = block.optString("name"),
-                    arguments = block.optJSONObject("input") ?: JSONObject(),
-                    raw = block
+                    toolName = block.optString("name"),
+                    argumentsJson = block.optJSONObject("input") ?: JSONObject()
                 )
             }
         }

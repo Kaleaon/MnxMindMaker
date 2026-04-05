@@ -1,41 +1,31 @@
 package com.kaleaon.mnxmindmaker.model
 
-/**
- * Execution runtime for a provider.
- */
+/** Execution runtime for a provider. */
 enum class LlmRuntime {
     REMOTE_API,
     LOCAL_ON_DEVICE
 }
 
-/**
- * Global privacy modes.
- */
+/** Global privacy modes. */
 enum class PrivacyMode {
     STRICT_LOCAL_ONLY,
     HYBRID
 }
 
-/**
- * End-to-end classification tags used for outbound data governance.
- */
+/** End-to-end classification tags used for outbound data governance. */
 enum class DataClassification {
     PUBLIC,
     SENSITIVE,
     RESTRICTED
 }
 
-/**
- * Preferred resolution order when local inference is enabled.
- */
+/** Preferred resolution order when local inference is enabled. */
 enum class LlmFallbackOrder {
     REMOTE_ONLY,
     LOCAL_FIRST_REMOTE_FALLBACK
 }
 
-/**
- * Local profile presets trade quality for speed / memory.
- */
+/** Local profile presets trade quality for speed / memory. */
 enum class LocalModelProfile(val displayName: String, val contextWindowTokens: Int) {
     FAST("Fast (4k)", 4096),
     BALANCED("Balanced (8k)", 8192),
@@ -56,9 +46,7 @@ data class LocalRuntimeControls(
     val maxVramMb: Int = 2048
 )
 
-/**
- * Capability flags used by higher-level features (tool planning, packet generation).
- */
+/** Capability flags used by higher-level features (tool planning, packet generation). */
 data class LlmCapabilityFlags(
     val supportsToolPlanning: Boolean,
     val supportsPacketGeneration: Boolean,
@@ -67,9 +55,7 @@ data class LlmCapabilityFlags(
     val contextWindowTokens: Int
 )
 
-/**
- * Supported external LLM providers.
- */
+/** Supported external LLM providers. */
 enum class LlmProvider(
     val displayName: String,
     val baseUrl: String,
@@ -80,12 +66,15 @@ enum class LlmProvider(
     OPENAI("OpenAI (GPT)", "https://api.openai.com/v1"),
     GEMINI("Google Gemini", "https://generativelanguage.googleapis.com/v1beta"),
     VLLM_GEMMA4("vLLM Gemma 4 (Self-hosted)", "http://10.0.2.2:8000/v1", requiresApiKey = false),
-    LOCAL_ON_DEVICE("Local On-Device Runtime", "http://10.0.2.2:8000/v1", requiresApiKey = false, runtime = LlmRuntime.LOCAL_ON_DEVICE)
+    LOCAL_ON_DEVICE(
+        "Local On-Device Runtime",
+        "http://10.0.2.2:8000/v1",
+        requiresApiKey = false,
+        runtime = LlmRuntime.LOCAL_ON_DEVICE
+    )
 }
 
-/**
- * Configuration for a single LLM provider API.
- */
+/** Configuration for a single LLM provider API. */
 data class LlmSettings(
     val provider: LlmProvider,
     val apiKey: String = "",
@@ -97,7 +86,7 @@ data class LlmSettings(
     val localModelPath: String = "",
     val localProfile: LocalModelProfile = LocalModelProfile.BALANCED,
     val fallbackOrder: LlmFallbackOrder = LlmFallbackOrder.REMOTE_ONLY,
-    val runtimeControls: LocalRuntimeControls = LocalRuntimeControls()
+    val runtimeControls: LocalRuntimeControls = LocalRuntimeControls(),
     val outboundClassification: DataClassification = DataClassification.SENSITIVE,
     val tlsPinnedSpkiSha256: String = ""
 ) {
@@ -136,9 +125,7 @@ fun LlmProvider.defaultCapabilities(profile: LocalModelProfile = LocalModelProfi
     }
 }
 
-/**
- * A prompt request to an LLM for AI mind design assistance.
- */
+/** A prompt request to an LLM for AI mind design assistance. */
 data class LlmRequest(
     val provider: LlmProvider,
     val systemPrompt: String,
