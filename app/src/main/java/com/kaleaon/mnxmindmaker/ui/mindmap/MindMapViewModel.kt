@@ -16,8 +16,9 @@ import com.kaleaon.mnxmindmaker.repository.LlmSettingsRepository
 import com.kaleaon.mnxmindmaker.repository.MnxRepository
 import com.kaleaon.mnxmindmaker.util.ContinuityAuditResult
 import com.kaleaon.mnxmindmaker.util.DimensionMapper
-import com.kaleaon.mnxmindmaker.util.LlmApiClient
 import com.kaleaon.mnxmindmaker.util.LlmApiException
+import com.kaleaon.mnxmindmaker.util.provider.ProviderRouter
+import com.kaleaon.mnxmindmaker.util.provider.RoutingPolicy
 import com.kaleaon.mnxmindmaker.util.tooling.ToolApprovalRequest
 import kotlinx.coroutines.CompletableDeferred
 import com.kaleaon.mnxmindmaker.util.ContinuityAuditResult
@@ -34,7 +35,7 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
     private val mnxRepository = MnxRepository(application)
     private val llmRepository = LlmSettingsRepository(application)
     private val continuityManager = ContinuityManager(application)
-    private val llmClient = LlmApiClient()
+    private val providerRouter = ProviderRouter()
 
     private val _graph = MutableLiveData(newDefaultGraph())
     val graph: LiveData<MindGraph> get() = _graph
@@ -268,6 +269,14 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
                     return@launch
                 }
 
+                val systemPrompt = buildString {
+                    appendLine("You are an AI mind design assistant helping the user build an AI mind graph in .mnx format.")
+                    appendLine("The mind graph represents identity, memories, knowledge, emotions, personality, beliefs, values, and relationships.")
+                    appendLine("Use tools when graph inspection or mutation is needed.")
+                    appendLine("When tool use is unnecessary, provide concise, structured suggestions.")
+                    appendLine("Format suggestions as: NodeType: label - description")
+                }
+
                 var response: String? = null
                 var lastError: String? = null
                 var remoteFailureType: String? = null
@@ -330,9 +339,17 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
                         setGraph = { updated -> _graph.postValue(updated) }
                     )
                     val orchestrator = ToolOrchestrator(
-                        llmApiClient = llmClient,
-                        settings = activeSettings,
+                        providerRouter = providerRouter,
+                        settingsChain = invocationChain,
                         registry = registry,
+                        policy = ToolPolicyEngine(registry),
+                        requestApproval = { requestToolApproval(it) },
+                        routingPolicy = RoutingPolicy(
+                            userPreference = llmRepository.getActiveProvider(),
+                            prioritizeCost = false,
+                            prioritizeLatency = true,
+                            allowOfflineFallback = true
+                        )
                         policy = ToolPolicyEngine(registry.specs().associateBy { it.name }),
                         requestApproval = { requestToolApproval(it) }
                     )
