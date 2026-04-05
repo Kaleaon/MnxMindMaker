@@ -40,6 +40,7 @@ class LlmSettingsRepository(private val context: Context) {
             .apply()
         plainPrefs.edit()
             .putString("${name}_model", settings.model)
+            .putString("${name}_baseUrl", settings.baseUrl)
             .putBoolean("${name}_enabled", settings.enabled)
             .putInt("${name}_maxTokens", settings.maxTokens)
             .putFloat("${name}_temperature", settings.temperature)
@@ -51,22 +52,27 @@ class LlmSettingsRepository(private val context: Context) {
         val apiKey = encryptedPrefs.getString("${name}_apiKey", "") ?: ""
         val model = plainPrefs.getString("${name}_model", provider.defaultModel())
             ?: provider.defaultModel()
+        val baseUrl = plainPrefs.getString("${name}_baseUrl", provider.baseUrl) ?: provider.baseUrl
         val enabled = plainPrefs.getBoolean("${name}_enabled", false)
         val maxTokens = plainPrefs.getInt("${name}_maxTokens", 2048)
         val temperature = plainPrefs.getFloat("${name}_temperature", 0.7f)
-        return LlmSettings(provider, apiKey, model, enabled, maxTokens, temperature)
+        return LlmSettings(provider, apiKey, model, baseUrl, enabled, maxTokens, temperature)
     }
 
     fun loadAllSettings(): List<LlmSettings> = LlmProvider.entries.map { loadSettings(it) }
 
     fun getActiveProvider(): LlmProvider? {
-        return LlmProvider.entries.firstOrNull { loadSettings(it).enabled && loadSettings(it).apiKey.isNotBlank() }
+        return LlmProvider.entries.firstOrNull { provider ->
+            val settings = loadSettings(provider)
+            settings.enabled && (!provider.requiresApiKey || settings.apiKey.isNotBlank())
+        }
     }
 
     private fun LlmProvider.defaultModel(): String = when (this) {
         LlmProvider.ANTHROPIC -> "claude-3-5-sonnet-20241022"
         LlmProvider.OPENAI -> "gpt-4o"
         LlmProvider.GEMINI -> "gemini-1.5-pro"
+        LlmProvider.VLLM_GEMMA4 -> "google/gemma-4-E4B-it"
     }
 
     companion object {

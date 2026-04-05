@@ -33,6 +33,7 @@ class LlmApiClient {
             LlmProvider.ANTHROPIC -> callAnthropic(settings, systemPrompt, userMessage)
             LlmProvider.OPENAI -> callOpenAI(settings, systemPrompt, userMessage)
             LlmProvider.GEMINI -> callGemini(settings, systemPrompt, userMessage)
+            LlmProvider.VLLM_GEMMA4 -> callOpenAICompatible(settings, systemPrompt, userMessage)
         }
     }
 
@@ -47,7 +48,7 @@ class LlmApiClient {
             }))
         }
         val request = Request.Builder()
-            .url("${settings.provider.baseUrl}/messages")
+            .url("${settings.baseUrl}/messages")
             .post(body.toString().toRequestBody(json))
             .addHeader("x-api-key", settings.apiKey)
             .addHeader("anthropic-version", "2023-06-01")
@@ -71,7 +72,7 @@ class LlmApiClient {
             })
         }
         val request = Request.Builder()
-            .url("${settings.provider.baseUrl}/chat/completions")
+            .url("${settings.baseUrl}/chat/completions")
             .post(body.toString().toRequestBody(json))
             .addHeader("Authorization", "Bearer ${settings.apiKey}")
             .addHeader("content-type", "application/json")
@@ -79,6 +80,31 @@ class LlmApiClient {
         val response = httpClient.newCall(request).execute()
         val responseBody = response.body?.string() ?: throw LlmApiException("Empty response from OpenAI")
         if (!response.isSuccessful) throw LlmApiException("OpenAI error ${response.code}: $responseBody")
+        val jsonObj = JSONObject(responseBody)
+        return jsonObj.getJSONArray("choices").getJSONObject(0)
+            .getJSONObject("message").getString("content")
+    }
+
+    private fun callOpenAICompatible(settings: LlmSettings, systemPrompt: String, userMessage: String): String {
+        val apiKey = settings.apiKey.ifBlank { "EMPTY" }
+        val body = JSONObject().apply {
+            put("model", settings.model)
+            put("max_tokens", settings.maxTokens)
+            put("temperature", settings.temperature.toDouble())
+            put("messages", JSONArray().apply {
+                put(JSONObject().apply { put("role", "system"); put("content", systemPrompt) })
+                put(JSONObject().apply { put("role", "user"); put("content", userMessage) })
+            })
+        }
+        val request = Request.Builder()
+            .url("${settings.baseUrl}/chat/completions")
+            .post(body.toString().toRequestBody(json))
+            .addHeader("Authorization", "Bearer $apiKey")
+            .addHeader("content-type", "application/json")
+            .build()
+        val response = httpClient.newCall(request).execute()
+        val responseBody = response.body?.string() ?: throw LlmApiException("Empty response from vLLM Gemma 4")
+        if (!response.isSuccessful) throw LlmApiException("vLLM Gemma 4 error ${response.code}: $responseBody")
         val jsonObj = JSONObject(responseBody)
         return jsonObj.getJSONArray("choices").getJSONObject(0)
             .getJSONObject("message").getString("content")
@@ -97,7 +123,7 @@ class LlmApiClient {
                 put("temperature", settings.temperature.toDouble())
             })
         }
-        val url = "${settings.provider.baseUrl}/models/${settings.model}:generateContent?key=${settings.apiKey}"
+        val url = "${settings.baseUrl}/models/${settings.model}:generateContent?key=${settings.apiKey}"
         val request = Request.Builder()
             .url(url)
             .post(body.toString().toRequestBody(json))

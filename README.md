@@ -13,6 +13,7 @@ A standalone Android APK for designing AI minds and exporting them to the
 | **N-Dimensional Nodes** | Every node carries a named dimension vector beyond the visible (x, y) canvas position. Values get 7 axes (`ethical_weight`, `social_impact`, `personal_relevance`, `priority`, `universality`, `actionability`, `intrinsic_worth`); beliefs get 7 axes (`confidence`, `evidence_strength`, `emotional_loading`, `social_consensus`, `revisability`, `centrality`, `acquired_recency`), etc. All dimensions are persisted in the `.mnx` `DIMENSIONAL_REFS` section |
 | **MNX Import / Export** | Read and write `.mnx` binary files — fully compatible with [TronProtocol](https://github.com/Kaleaon/TronProtocol)'s codec (magic, CRC32 per section, SHA-256 footer) |
 | **Data Import** | Paste or load plain text or JSON; the mapper heuristically assigns node types and populates default dimensions automatically |
+| **LLM API Settings** | Configure API keys, model names, and base URLs for **Anthropic** (Claude), **OpenAI** (GPT), **Google Gemini**, and **vLLM Gemma 4** (self-hosted OpenAI-compatible endpoint) |
 | **Continuity Metadata** | Supports kernel/memory/drift metadata fields (for example `protection_level`, `kernel_section`, `memory_class`, `raw_record`, `interpretation`, `drift_type`, and related schema attributes) |
 | **Runtime Slices** | Includes `STATE` and `DRIFT_RULE` node support plus boot-packet slice generation (kernel, state, warning, memory, and drift-rule bundles) |
 | **LLM API Settings** | Configure API keys and models for **Anthropic** (Claude), **OpenAI** (GPT), and **Google Gemini** — keys stored with AES-256-GCM encrypted SharedPreferences |
@@ -80,6 +81,20 @@ The repository-specific expansion plan is documented in:
 Keys are **never** hard-coded. Enter them in the **Settings** tab of the app.
 They are stored with `EncryptedSharedPreferences` (AES-256-GCM).
 
+### Self-hosted Gemma 4 via vLLM
+
+MnxMindMaker now supports the Gemma 4 vLLM OpenAI-compatible endpoint described in the
+[vLLM Gemma 4 recipe](https://github.com/vllm-project/recipes/blob/main/Google/Gemma4.md).
+
+Quick start based on that recipe:
+
+```bash
+vllm serve google/gemma-4-E4B-it --max-model-len 32768
+```
+
+Then in **Settings** choose **vLLM Gemma 4 (Self-hosted)** and keep the default Android emulator base URL
+`http://10.0.2.2:8000/v1` (or set your own host URL).
+
 ---
 
 ## Project structure
@@ -105,5 +120,5 @@ app/src/main/java/com/kaleaon/mnxmindmaker/
 └── util/
     ├── DimensionMapper.kt  N-dimensional default axes per NodeType
     ├── DataMapper.kt       Text/JSON → MindGraph (calls DimensionMapper)
-    └── LlmApiClient.kt     Anthropic / OpenAI / Gemini HTTP client
+    └── LlmApiClient.kt     Anthropic / OpenAI / Gemini / vLLM Gemma 4 HTTP client
 ```
