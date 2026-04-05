@@ -63,6 +63,7 @@ class SettingsFragment : Fragment() {
         binding.tvAnthropicInfo.text = getString(R.string.anthropic_api_info)
         binding.tvOpenAiInfo.text = getString(R.string.openai_api_info)
         binding.tvGeminiInfo.text = getString(R.string.gemini_api_info)
+        binding.tvVllmInfo.text = getString(R.string.vllm_gemma4_info)
     }
 
     // -- Ktheme theme picker --------------------------------------------------
@@ -114,6 +115,7 @@ class SettingsFragment : Fragment() {
             ?: LlmSettings(provider)
         binding.etApiKey.setText(settings.apiKey)
         binding.etModel.setText(settings.model)
+        binding.etBaseUrl.setText(settings.baseUrl)
         binding.etMaxTokens.setText(settings.maxTokens.toString())
         binding.etTemperature.setText(settings.temperature.toString())
         binding.switchEnabled.isChecked = settings.enabled
@@ -122,17 +124,19 @@ class SettingsFragment : Fragment() {
             LlmProvider.ANTHROPIC -> getString(R.string.hint_anthropic_key)
             LlmProvider.OPENAI -> getString(R.string.hint_openai_key)
             LlmProvider.GEMINI -> getString(R.string.hint_gemini_key)
+            LlmProvider.VLLM_GEMMA4 -> getString(R.string.hint_vllm_key)
         }
     }
 
     private fun saveCurrentProvider() {
         val apiKey = binding.etApiKey.text.toString().trim()
         val model = binding.etModel.text.toString().trim().ifEmpty { currentProvider.defaultModel() }
+        val baseUrl = binding.etBaseUrl.text.toString().trim().ifEmpty { currentProvider.baseUrl }
         val maxTokens = binding.etMaxTokens.text.toString().toIntOrNull() ?: 2048
         val temperature = binding.etTemperature.text.toString().toFloatOrNull() ?: 0.7f
         val enabled = binding.switchEnabled.isChecked
 
-        val settings = LlmSettings(currentProvider, apiKey, model, enabled, maxTokens, temperature)
+        val settings = LlmSettings(currentProvider, apiKey, model, baseUrl, enabled, maxTokens, temperature)
         repository.saveSettings(settings)
 
         val idx = currentSettings.indexOfFirst { it.provider == currentProvider }
