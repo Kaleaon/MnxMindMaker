@@ -65,7 +65,8 @@ class MnxRepository(private val context: Context) {
             val nodes = readList {
                 val nodeId = readString()
                 val nodeLabel = readString()
-                val nodeType = NodeType.valueOf(readString())
+                val typeName = readString()
+                val nodeType = NodeType.values().find { it.name == typeName } ?: NodeType.CUSTOM
                 val nodeDescription = readString()
                 val nodeX = readFloat()
                 val nodeY = readFloat()
