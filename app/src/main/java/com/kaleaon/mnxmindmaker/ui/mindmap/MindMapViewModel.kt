@@ -13,8 +13,9 @@ import com.kaleaon.mnxmindmaker.model.NodeType
 import com.kaleaon.mnxmindmaker.repository.LlmSettingsRepository
 import com.kaleaon.mnxmindmaker.repository.MnxRepository
 import com.kaleaon.mnxmindmaker.util.DimensionMapper
-import com.kaleaon.mnxmindmaker.util.LlmApiClient
 import com.kaleaon.mnxmindmaker.util.LlmApiException
+import com.kaleaon.mnxmindmaker.util.provider.ProviderRouter
+import com.kaleaon.mnxmindmaker.util.provider.RoutingPolicy
 import com.kaleaon.mnxmindmaker.util.tooling.ToolApprovalRequest
 import com.kaleaon.mnxmindmaker.util.tooling.ToolOrchestrator
 import com.kaleaon.mnxmindmaker.util.tooling.ToolPolicyEngine
@@ -34,7 +35,7 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
     private val mnxRepository = MnxRepository(application)
     private val llmRepository = LlmSettingsRepository(application)
     private val continuityManager = ContinuityManager(application)
-    private val llmClient = LlmApiClient()
+    private val providerRouter = ProviderRouter()
 
     private val _graph = MutableLiveData(newDefaultGraph())
     val graph: LiveData<MindGraph> get() = _graph
@@ -273,42 +274,13 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
                     return@launch
                 }
 
-                var response: String? = null
-                var lastError: String? = null
-                for (settings in invocationChain) {
-                    val caps = settings.capabilities
-                    val systemPrompt = buildString {
-                        appendLine("You are an AI mind design assistant helping the user build an AI mind graph in .mnx format.")
-                        appendLine("The mind graph represents identity, memories, knowledge, emotions, personality, beliefs, values, and relationships.")
-                        appendLine("Provide concise, structured suggestions for mind nodes and connections.")
-                        appendLine("Format suggestions as: NodeType: label - description")
-                        if (!caps.supportsToolPlanning) {
-                            appendLine("Do not propose multi-step tool plans; provide direct node suggestions only.")
-                        }
-                        if (!caps.supportsPacketGeneration) {
-                            appendLine("Keep output short and avoid dense packet-style dumps.")
-                        }
-                        appendLine("Stay within approximately ${caps.contextWindowTokens / 8} output tokens.")
-                    }
-                    try {
-                        response = withContext(Dispatchers.IO) {
-                            llmClient.complete(settings, systemPrompt, prompt)
-                        }
-                        break
-                    } catch (inner: LlmApiException) {
-                        lastError = "${settings.provider.displayName}: ${inner.message}"
-                    }
+                val systemPrompt = buildString {
+                    appendLine("You are an AI mind design assistant helping the user build an AI mind graph in .mnx format.")
+                    appendLine("The mind graph represents identity, memories, knowledge, emotions, personality, beliefs, values, and relationships.")
+                    appendLine("Use tools when graph inspection or mutation is needed.")
+                    appendLine("When tool use is unnecessary, provide concise, structured suggestions.")
+                    appendLine("Format suggestions as: NodeType: label - description")
                 }
-
-                if (response == null) {
-                    _error.value = "AI request failed across fallback chain. $lastError"
-                    return@launch
-                val systemPrompt = """You are an AI mind design assistant helping the user build an AI mind graph
-                    |in .mnx format. The mind graph represents an AI's identity, memories, knowledge,
-                    |emotions, personality, beliefs, values, and relationships.
-                    |Use tools whenever graph state inspection or mutation is needed.
-                    |When tool use is unnecessary, provide concise, structured suggestions.
-                    |Format suggestions as: NodeType: label - description""".trimMargin()
 
                 val response = withContext(Dispatchers.IO) {
                     val registry = ToolRegistry(
@@ -316,11 +288,17 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
                         setGraph = { updated -> _graph.postValue(updated) }
                     )
                     val orchestrator = ToolOrchestrator(
-                        llmApiClient = llmClient,
-                        settings = activeSettings,
+                        providerRouter = providerRouter,
+                        settingsChain = invocationChain,
                         registry = registry,
                         policy = ToolPolicyEngine(registry),
-                        requestApproval = { requestToolApproval(it) }
+                        requestApproval = { requestToolApproval(it) },
+                        routingPolicy = RoutingPolicy(
+                            userPreference = llmRepository.getActiveProvider(),
+                            prioritizeCost = false,
+                            prioritizeLatency = true,
+                            allowOfflineFallback = true
+                        )
                     )
                     orchestrator.run(systemPrompt, prompt)
                 }

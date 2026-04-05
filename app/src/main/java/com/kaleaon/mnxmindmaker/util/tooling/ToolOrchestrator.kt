@@ -1,16 +1,18 @@
 package com.kaleaon.mnxmindmaker.util.tooling
 
 import com.kaleaon.mnxmindmaker.model.LlmSettings
-import com.kaleaon.mnxmindmaker.util.LlmApiClient
+import com.kaleaon.mnxmindmaker.util.provider.ProviderRouter
+import com.kaleaon.mnxmindmaker.util.provider.RoutingPolicy
 import org.json.JSONArray
 import org.json.JSONObject
 
 class ToolOrchestrator(
-    private val llmApiClient: LlmApiClient,
-    private val settings: LlmSettings,
+    private val providerRouter: ProviderRouter,
+    private val settingsChain: List<LlmSettings>,
     private val registry: ToolRegistry,
     private val policy: ToolPolicyEngine,
     private val requestApproval: suspend (ToolApprovalRequest) -> Boolean,
+    private val routingPolicy: RoutingPolicy = RoutingPolicy(),
     private val maxToolRounds: Int = 6
 ) {
 
@@ -20,11 +22,12 @@ class ToolOrchestrator(
 
         val textParts = mutableListOf<String>()
         repeat(maxToolRounds) {
-            val turn = llmApiClient.completeAssistantTurn(
-                settings = settings,
+            val turn = providerRouter.chat(
+                settingsChain = settingsChain,
                 systemPrompt = systemPrompt,
                 transcript = transcript,
-                tools = registry.specs()
+                tools = registry.specs(),
+                policy = routingPolicy
             )
             if (turn.text.isNotBlank()) {
                 textParts += turn.text.trim()
@@ -37,12 +40,13 @@ class ToolOrchestrator(
             val toolResults = JSONArray()
             for (invocation in turn.toolInvocations) {
                 val result = executeInvocation(invocation)
-                toolResults.put(JSONObject()
-                    .put("tool_call_id", result.toolCallId)
-                    .put("name", result.toolName)
-                    .put("success", result.success)
-                    .put("output_text", result.outputText)
-                    .put("output_json", result.outputJson)
+                toolResults.put(
+                    JSONObject()
+                        .put("tool_call_id", result.toolCallId)
+                        .put("name", result.toolName)
+                        .put("success", result.success)
+                        .put("output_text", result.outputText)
+                        .put("output_json", result.outputJson)
                 )
             }
             transcript += JSONObject()
@@ -69,6 +73,7 @@ class ToolOrchestrator(
                     registry.invoke(invocation)
                 }
             }
+
             is ToolPolicyDecision.Deny -> ToolResult(invocation.id, invocation.name, false, decision.reason)
         }
     }
