@@ -1,0 +1,12 @@
+MindMaker Third-Party Notice
+============================
+
+This product includes third-party software components.
+
+The complete third-party attribution inventory, including license and
+redistribution details tracked for this repository, is documented in:
+
+- THIRD_PARTY_NOTICES.md
+
+Release packaging includes this NOTICE file and THIRD_PARTY_NOTICES.txt
+inside application assets for compliance distribution.

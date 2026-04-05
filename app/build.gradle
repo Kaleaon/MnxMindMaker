@@ -4,6 +4,8 @@ plugins {
     id 'org.jetbrains.kotlin.plugin.serialization'
 }
 
+def generatedComplianceAssetsDir = layout.buildDirectory.dir("generated/complianceAssets/main")
+
 android {
     namespace 'com.kaleaon.mnxmindmaker'
     compileSdk 34
@@ -37,6 +39,12 @@ android {
     kotlinOptions {
         jvmTarget = '1.8'
     }
+
+    sourceSets {
+        main {
+            assets.srcDir(generatedComplianceAssetsDir)
+        }
+    }
 }
 
 dependencies {
@@ -58,4 +66,15 @@ dependencies {
     testImplementation 'org.json:json:20231013'
     androidTestImplementation 'androidx.test.ext:junit:1.1.5'
     androidTestImplementation 'androidx.test.espresso:espresso-core:3.5.1'
+}
+
+tasks.register('prepareComplianceAssets', Copy) {
+    from(rootProject.file('NOTICE'))
+    from(rootProject.file('THIRD_PARTY_NOTICES.md'))
+    into(generatedComplianceAssetsDir)
+    rename('THIRD_PARTY_NOTICES.md', 'THIRD_PARTY_NOTICES.txt')
+}
+
+tasks.named('preBuild') {
+    dependsOn(tasks.named('prepareComplianceAssets'))
 }
