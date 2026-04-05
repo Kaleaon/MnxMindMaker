@@ -97,7 +97,7 @@ data class LlmSettings(
     val localModelPath: String = "",
     val localProfile: LocalModelProfile = LocalModelProfile.BALANCED,
     val fallbackOrder: LlmFallbackOrder = LlmFallbackOrder.REMOTE_ONLY,
-    val runtimeControls: LocalRuntimeControls = LocalRuntimeControls()
+    val runtimeControls: LocalRuntimeControls = LocalRuntimeControls(),
     val outboundClassification: DataClassification = DataClassification.SENSITIVE,
     val tlsPinnedSpkiSha256: String = ""
 ) {
