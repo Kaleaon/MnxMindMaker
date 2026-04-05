@@ -5,9 +5,9 @@ import com.kaleaon.mnxmindmaker.model.MindNode
 import com.kaleaon.mnxmindmaker.model.NodeType
 import com.kaleaon.mnxmindmaker.util.BootPacketGenerator
 import com.kaleaon.mnxmindmaker.util.run_continuity_audit
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
-import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class BootPacketGeneratorTest {
@@ -78,6 +78,9 @@ class BootPacketGeneratorTest {
         assertTrue(packet.memorySlice.none { it.id == restrictedMemory.id })
         assertTrue(safeMemory.attributes.containsKey("last_revalidated"))
         assertTrue(safeMemory.attributes.containsKey("confidence_drift"))
+    }
+
+    @Test
     fun `continuity audit finds high risk drift and missing repair memory`() {
         val riskyRule = MindNode(
             id = "rule-1",

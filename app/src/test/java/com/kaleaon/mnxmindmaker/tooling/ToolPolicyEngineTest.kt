@@ -73,4 +73,23 @@ class ToolPolicyEngineTest {
 
         assertEquals(PolicyDecisionType.REQUIRE_USER_APPROVAL, decision.type)
     }
+
+    @Test
+    fun `delete style tool name triggers explicit high risk approval`() {
+        val engine = ToolPolicyEngine(
+            specsByName = mapOf(
+                "calendar_delete_event" to ToolSpec(
+                    "calendar_delete_event",
+                    "Delete event",
+                    ToolOperationClass.MUTATING
+                )
+            )
+        )
+
+        val decision = engine.evaluate(ToolInvocation(id = "1", toolName = "calendar_delete_event"), MindGraph())
+
+        assertEquals(PolicyDecisionType.REQUIRE_USER_APPROVAL, decision.type)
+        assertEquals("delete", decision.explicitActionType)
+    }
+
 }
