@@ -17,6 +17,8 @@ import com.kaleaon.mnxmindmaker.R
 import com.kaleaon.mnxmindmaker.databinding.FragmentMindMapBinding
 import com.kaleaon.mnxmindmaker.ktheme.KthemeManager
 import com.kaleaon.mnxmindmaker.model.NodeType
+import com.kaleaon.mnxmindmaker.util.tooling.ToolApprovalRequest
+import com.kaleaon.mnxmindmaker.util.ContinuityAuditResult
 
 class MindMapFragment : Fragment() {
 
@@ -81,8 +83,18 @@ class MindMapFragment : Fragment() {
             viewModel.clearError()
         }
 
+        viewModel.toolApprovalRequest.observe(viewLifecycleOwner) { request ->
+            request ?: return@observe
+            showToolApprovalDialog(request)
+        }
+
         viewModel.isLoading.observe(viewLifecycleOwner) { loading ->
             binding.progressBar.visibility = if (loading) View.VISIBLE else View.GONE
+        }
+
+        viewModel.auditResult.observe(viewLifecycleOwner) { audit ->
+            val total = audit?.summary?.totalFindings ?: 0
+            binding.btnReviewAudit.text = getString(R.string.review_audit_with_count, total)
         }
 
         // Apply active Ktheme to the canvas (and react to future changes)
@@ -105,6 +117,10 @@ class MindMapFragment : Fragment() {
         binding.btnExportMnx.setOnClickListener { viewModel.exportToMnx() }
         binding.btnImportMnx.setOnClickListener { openMnxFile.launch(arrayOf("*/*")) }
         binding.btnAskAi.setOnClickListener { showAskAiDialog() }
+        binding.btnReviewAudit.setOnClickListener {
+            viewModel.runContinuityAudit()
+            showContinuityAuditDialog(viewModel.auditResult.value)
+        }
         binding.btnResetView.setOnClickListener { binding.mindMapCanvas.resetView() }
     }
 
@@ -148,11 +164,83 @@ class MindMapFragment : Fragment() {
             .show()
     }
 
+
+    private fun showToolApprovalDialog(request: ToolApprovalRequest) {
+        val message = buildString {
+            append("Allow AI tool call?\n\n")
+            append("Tool: ${request.toolName}\n")
+            append("Reason: ${request.reason}\n\n")
+            append("Arguments:\n${request.arguments}")
+        }
+        AlertDialog.Builder(requireContext())
+            .setTitle("AI Tool Approval")
+            .setMessage(message)
+            .setCancelable(false)
+            .setPositiveButton("Allow") { _, _ ->
+                viewModel.resolveToolApproval(request.id, true)
+            }
+            .setNegativeButton("Deny") { _, _ ->
+                viewModel.resolveToolApproval(request.id, false)
+            }
+            .show()
+    }
+
     private fun showLlmResponseDialog(response: String) {
         AlertDialog.Builder(requireContext())
             .setTitle(R.string.ai_response_title)
             .setMessage(response)
             .setPositiveButton(R.string.ok, null)
+            .show()
+    }
+
+    private fun showContinuityAuditDialog(audit: ContinuityAuditResult?) {
+        if (audit == null) {
+            Snackbar.make(binding.root, R.string.audit_not_available, Snackbar.LENGTH_SHORT).show()
+            return
+        }
+        if (audit.findings.isEmpty()) {
+            AlertDialog.Builder(requireContext())
+                .setTitle(R.string.review_audit)
+                .setMessage(getString(R.string.audit_no_findings))
+                .setPositiveButton(R.string.ok, null)
+                .show()
+            return
+        }
+        val labels = audit.findings.mapIndexed { index, finding ->
+            val status = if (finding.accepted) "✓" else "!"
+            "${index + 1}. [$status ${finding.severity}] ${finding.title}"
+        }.toTypedArray()
+        AlertDialog.Builder(requireContext())
+            .setTitle(getString(R.string.review_audit_title, audit.summary.totalFindings))
+            .setItems(labels) { _, which ->
+                val finding = audit.findings[which]
+                AlertDialog.Builder(requireContext())
+                    .setTitle(finding.title)
+                    .setMessage(
+                        buildString {
+                            appendLine("Category: ${finding.category}")
+                            appendLine("Severity: ${finding.severity} (${String.format("%.2f", finding.severityScore)})")
+                            appendLine("Confidence: ${String.format("%.2f", finding.confidenceScore)}")
+                            appendLine("Node IDs: ${finding.nodeIds.joinToString().ifBlank { "none" }}")
+                            appendLine("Rule IDs: ${finding.ruleIds.joinToString().ifBlank { "none" }}")
+                            appendLine()
+                            appendLine(finding.description)
+                            appendLine()
+                            append("Action: ${finding.suggestedAction}")
+                        }
+                    )
+                    .setPositiveButton(R.string.accept_warning) { _, _ ->
+                        viewModel.acceptAuditFinding(finding.id)
+                        Snackbar.make(binding.root, R.string.audit_warning_accepted, Snackbar.LENGTH_SHORT).show()
+                    }
+                    .setNeutralButton(R.string.create_corrective_node) { _, _ ->
+                        viewModel.convertAuditFindingToCorrectiveNode(finding.id)
+                        Snackbar.make(binding.root, R.string.audit_corrective_created, Snackbar.LENGTH_SHORT).show()
+                    }
+                    .setNegativeButton(R.string.cancel, null)
+                    .show()
+            }
+            .setNegativeButton(R.string.cancel, null)
             .show()
     }
 
