@@ -7,6 +7,12 @@ import com.kaleaon.mnxmindmaker.model.MindEdge
 import com.kaleaon.mnxmindmaker.model.MindGraph
 import com.kaleaon.mnxmindmaker.model.MindNode
 import com.kaleaon.mnxmindmaker.model.NodeType
+import com.kaleaon.mnxmindmaker.persona.runtime.ClassificationPrivacyConstraints
+import com.kaleaon.mnxmindmaker.persona.runtime.FallbackStrategy
+import com.kaleaon.mnxmindmaker.persona.runtime.InferenceParams
+import com.kaleaon.mnxmindmaker.persona.runtime.PersonaDeploymentManifest
+import com.kaleaon.mnxmindmaker.persona.runtime.RuntimeTarget
+import com.kaleaon.mnxmindmaker.persona.runtime.ToolPolicy
 import com.kaleaon.mnxmindmaker.repository.MnxRepository
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -85,5 +91,42 @@ class MnxRepositoryGraphRoundTripTest {
         assertEquals(original.modifiedAt, recovered.modifiedAt)
         assertEquals(original.nodes, recovered.nodes)
         assertEquals(original.edges, recovered.edges)
+    }
+
+    @Test
+    fun `persona manifest round-trips in META section with namespaced key`() {
+        val manifest = PersonaDeploymentManifest(
+            target = RuntimeTarget(provider = "openai", model = "gpt-4.2", runtime = "responses"),
+            inference = InferenceParams(temperature = 0.22, maxTokens = 1200, contextWindow = 128000),
+            toolPolicy = ToolPolicy(
+                allowlist = listOf("file_read", "node_update", "memory_search"),
+                policy = "allowlist_only"
+            ),
+            classification = ClassificationPrivacyConstraints(
+                classification = "confidential",
+                privacy = "hipaa_restricted"
+            ),
+            fallback = FallbackStrategy(mode = "model_failover", target = "gpt-4.1-mini", maxRetries = 2)
+        )
+
+        val meta = com.kaleaon.mnxmindmaker.mnx.MnxMeta(
+            mapOf(
+                "app" to "MnxMindMaker",
+                MnxRepository.META_PERSONA_DEPLOYMENT_KEY to
+                    MnxRepository.encodePersonaDeploymentManifest(manifest)
+            )
+        )
+        val encodedMeta = MnxCodec.serializeMeta(meta)
+        val decodedMeta = MnxCodec.deserializeMeta(encodedMeta)
+        val recovered = MnxRepository.manifestFromMeta(decodedMeta)
+
+        assertEquals(manifest, recovered)
+    }
+
+    @Test
+    fun `persona manifest defaults when META key is missing`() {
+        val meta = com.kaleaon.mnxmindmaker.mnx.MnxMeta(mapOf("app" to "MnxMindMaker"))
+        val recovered = MnxRepository.manifestFromMeta(meta)
+        assertEquals(PersonaDeploymentManifest.defaults(), recovered)
     }
 }
