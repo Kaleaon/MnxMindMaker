@@ -25,6 +25,7 @@ data class GovernedRoutingResult(
 
 class ProviderRouter(
     private val providers: List<AssistantProvider> = listOf(
+        LlmEdgeProvider(),
         LocalProvider(),
         ClaudeProvider(),
         ChatGPTProvider()

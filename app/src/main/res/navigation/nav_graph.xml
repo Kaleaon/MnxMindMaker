@@ -16,6 +16,9 @@
         <action
             android:id="@+id/action_mindMapFragment_to_settingsFragment"
             app:destination="@id/settingsFragment" />
+        <action
+            android:id="@+id/action_mindMapFragment_to_deployFragment"
+            app:destination="@id/deployFragment" />
     </fragment>
 
     <fragment
@@ -34,6 +37,16 @@
         android:id="@+id/settingsFragment"
         android:name="com.kaleaon.mnxmindmaker.ui.settings.SettingsFragment"
         android:label="@string/settings_title"
-        tools:layout="@layout/fragment_settings" />
+        tools:layout="@layout/fragment_settings">
+        <action
+            android:id="@+id/action_settingsFragment_to_deployFragment"
+            app:destination="@id/deployFragment" />
+    </fragment>
+
+    <fragment
+        android:id="@+id/deployFragment"
+        android:name="com.kaleaon.mnxmindmaker.ui.deploy.DeployFragment"
+        android:label="@string/deploy_title"
+        tools:layout="@layout/fragment_deploy" />
 
 </navigation>

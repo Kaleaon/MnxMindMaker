@@ -15,3 +15,9 @@ dependencyResolutionManagement {
 
 rootProject.name = "MnxMindMaker"
 include ':app'
+
+def llmedgeModuleDir = file('llmedge')
+if (llmedgeModuleDir.exists() && file('llmedge/build.gradle').exists()) {
+    include(':llmedge')
+    project(':llmedge').projectDir = llmedgeModuleDir
+}

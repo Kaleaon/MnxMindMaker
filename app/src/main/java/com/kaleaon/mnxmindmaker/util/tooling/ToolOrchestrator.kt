@@ -17,12 +17,15 @@ class ToolOrchestrator(
     private val maxToolRounds: Int = 6,
     private val tracer: RequestTracer? = null,
     private val nowMs: () -> Long = { System.currentTimeMillis() }
+    private val nowMs: () -> Long = { System.currentTimeMillis() },
+    private val routingPolicy: RoutingPolicy = RoutingPolicy()
+    private val routingPolicy: RoutingPolicy = RoutingPolicy(),
+    private val maxToolRounds: Int = 6
 ) {
 
     suspend fun run(systemPrompt: String, userPrompt: String): String {
         val transcript = mutableListOf<JSONObject>()
         transcript += JSONObject().put("role", "user").put("content", userPrompt)
-        tracer?.recordPromptPipeline("user_prompt", userPrompt)
 
         val textParts = mutableListOf<String>()
         repeat(maxToolRounds) {
@@ -37,17 +40,19 @@ class ToolOrchestrator(
             val providerName = settingsChain.firstOrNull()?.provider?.name ?: "unknown"
             tracer?.recordProviderResponse(providerName, turn.text, nowMs() - providerStart)
 
+            val routedProvider = settingsChain.firstOrNull()?.provider?.name ?: "UNKNOWN"
+            tracer?.recordProviderResponse(routedProvider, turn.text, nowMs() - providerStart)
             if (turn.text.isNotBlank()) {
                 textParts += turn.text.trim()
             }
 
+            if (turn.text.isNotBlank()) textParts += turn.text.trim()
             if (turn.toolInvocations.isEmpty()) {
                 return textParts.joinToString("\n\n").ifBlank { "Done." }
             }
 
             val toolResults = JSONArray()
             for (invocation in turn.toolInvocations) {
-                val toolStart = nowMs()
                 val result = executeInvocation(invocation)
                 tracer?.recordToolCall(invocation, result, nowMs() - toolStart)
                 toolResults.put(
@@ -84,7 +89,10 @@ class ToolOrchestrator(
                         explicitActionType = decision.explicitActionType
                     )
                 )
-                if (!approved) {
+
+                if (approved) {
+                    registry.invoke(invocation)
+                } else {
                     ToolResult(
                         toolUseId = invocation.id,
                         isError = true,
@@ -93,8 +101,6 @@ class ToolOrchestrator(
                             .put("error", "approval_rejected")
                             .put("message", "User denied tool invocation")
                     )
-                } else {
-                    registry.invoke(invocation)
                 }
             }
 
