@@ -5,11 +5,14 @@ import com.kaleaon.mnxmindmaker.model.MindNode
 import com.kaleaon.mnxmindmaker.model.NodeType
 import com.kaleaon.mnxmindmaker.util.tooling.InMemoryToolTranscriptStore
 import com.kaleaon.mnxmindmaker.util.tooling.RedactionUtils
+import com.kaleaon.mnxmindmaker.util.tooling.DeploymentManifestPolicy
+import com.kaleaon.mnxmindmaker.util.tooling.PersonaPolicy
 import com.kaleaon.mnxmindmaker.util.tooling.ToolExecutionEngine
 import com.kaleaon.mnxmindmaker.util.tooling.ToolExecutionOutcome
 import com.kaleaon.mnxmindmaker.util.tooling.ToolHandler
 import com.kaleaon.mnxmindmaker.util.tooling.ToolInvocation
 import com.kaleaon.mnxmindmaker.util.tooling.ToolOperationClass
+import com.kaleaon.mnxmindmaker.util.tooling.ToolPolicyContext
 import com.kaleaon.mnxmindmaker.util.tooling.ToolPolicyEngine
 import com.kaleaon.mnxmindmaker.util.tooling.ToolSpec
 import com.kaleaon.mnxmindmaker.util.tooling.ToolTranscriptRecorder
@@ -108,6 +111,86 @@ class ToolExecutionEngineTest {
         )
 
         assertFalse(result.rolledBack)
+        assertTrue(result.toolResults.single().isError)
+        assertEquals("approval_rejected", result.toolResults.single().contentJson.getString("error"))
+    }
+
+    @Test
+    fun `deployment persona denylist blocks execution before handler runs`() {
+        val graph = MindGraph(nodes = mutableListOf(MindNode(id = "n1", label = "A", type = NodeType.IDENTITY)))
+        var executed = false
+
+        val policy = ToolPolicyEngine(
+            mapOf("rename_node" to ToolSpec("rename_node", "Rename", ToolOperationClass.MUTATING))
+        )
+        val engine = ToolExecutionEngine(
+            policyEngine = policy,
+            handlers = mapOf(
+                "rename_node" to ToolHandler { _, _ ->
+                    executed = true
+                    ToolExecutionOutcome(JSONObject().put("ok", true), mutatedGraph = true)
+                }
+            ),
+            transcriptRecorder = ToolTranscriptRecorder(InMemoryToolTranscriptStore())
+        )
+
+        val result = engine.executeSequence(
+            runId = "run-3",
+            invocations = listOf(ToolInvocation("t1", "rename_node", JSONObject().put("node_id", "n1"))),
+            graph = graph,
+            policyContext = ToolPolicyContext(
+                personaId = "readonly",
+                deploymentPolicy = DeploymentManifestPolicy(
+                    personaPolicies = mapOf(
+                        "readonly" to PersonaPolicy(denyToolNames = setOf("rename_node"))
+                    )
+                )
+            ),
+            approve = { _, _ -> true }
+        )
+
+        assertFalse(executed)
+        assertTrue(result.toolResults.single().isError)
+        assertEquals("policy_denied", result.toolResults.single().contentJson.getString("error"))
+    }
+
+    @Test
+    fun `high risk approval gate still enforced when tool is allowlisted by deployment persona`() {
+        val graph = MindGraph(nodes = mutableListOf(MindNode(id = "n1", label = "A", type = NodeType.IDENTITY)))
+        var approvalAsked = false
+
+        val policy = ToolPolicyEngine(
+            mapOf("terminal_execute" to ToolSpec("terminal_execute", "Terminal", ToolOperationClass.HIGH_RISK))
+        )
+        val engine = ToolExecutionEngine(
+            policyEngine = policy,
+            handlers = mapOf(
+                "terminal_execute" to ToolHandler { _, _ ->
+                    ToolExecutionOutcome(JSONObject().put("ok", true), mutatedGraph = false)
+                }
+            ),
+            transcriptRecorder = ToolTranscriptRecorder(InMemoryToolTranscriptStore())
+        )
+
+        val result = engine.executeSequence(
+            runId = "run-4",
+            invocations = listOf(ToolInvocation("t1", "terminal_execute", JSONObject())),
+            graph = graph,
+            policyContext = ToolPolicyContext(
+                personaId = "ops",
+                deploymentPolicy = DeploymentManifestPolicy(
+                    personaPolicies = mapOf(
+                        "ops" to PersonaPolicy(allowToolNames = setOf("terminal_execute"))
+                    )
+                )
+            ),
+            approve = { _, _ ->
+                approvalAsked = true
+                false
+            }
+        )
+
+        assertTrue(approvalAsked)
         assertTrue(result.toolResults.single().isError)
         assertEquals("approval_rejected", result.toolResults.single().contentJson.getString("error"))
     }

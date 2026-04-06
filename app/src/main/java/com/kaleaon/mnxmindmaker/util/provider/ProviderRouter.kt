@@ -12,7 +12,8 @@ data class RoutingPolicy(
     val userPreference: LlmProvider? = null,
     val prioritizeCost: Boolean = false,
     val prioritizeLatency: Boolean = true,
-    val allowOfflineFallback: Boolean = true
+    val allowOfflineFallback: Boolean = true,
+    val strictLocalOnly: Boolean = false
 )
 
 class ProviderRouter(
@@ -68,6 +69,9 @@ class ProviderRouter(
     private fun orderByPolicy(settingsChain: List<LlmSettings>, policy: RoutingPolicy): List<LlmSettings> {
         var filtered = settingsChain.filter {
             policy.allowOfflineFallback || it.provider.runtime != LlmRuntime.LOCAL_ON_DEVICE
+        }
+        if (policy.strictLocalOnly) {
+            filtered = filtered.filter { it.provider.runtime == LlmRuntime.LOCAL_ON_DEVICE }
         }
 
         if (policy.userPreference != null) {
