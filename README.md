@@ -16,8 +16,74 @@ A standalone Android APK for designing AI minds and exporting them to the
 | **LLM API Settings** | Configure API keys, model names, and base URLs for **Anthropic** (Claude), **OpenAI** (GPT), **Google Gemini**, and **vLLM Gemma 4** (self-hosted OpenAI-compatible endpoint) |
 | **Continuity Metadata** | Supports kernel/memory/drift metadata fields (for example `protection_level`, `kernel_section`, `memory_class`, `raw_record`, `interpretation`, `drift_type`, and related schema attributes) |
 | **Runtime Slices** | Includes `STATE` and `DRIFT_RULE` node support plus boot-packet slice generation (kernel, state, warning, memory, and drift-rule bundles) |
-| **LLM API Settings** | Configure API keys and models for **Anthropic** (Claude), **OpenAI** (GPT), and **Google Gemini** — keys stored with AES-256-GCM encrypted SharedPreferences |
 | **AI Assistance** | Ask any configured LLM for mind-design suggestions directly from the canvas |
+
+---
+
+## Persona lifecycle overview
+
+MnxMindMaker treats each persona as a lifecycle artifact that moves from design-time graph to deploy-time runtime package.
+
+1. **Design**: create and connect domain nodes in the mind map.
+2. **Enrich**: add dimensions, continuity metadata, and state/drift constraints.
+3. **Validate**: run structural checks before export (required sections, edge consistency, dimension sanity).
+4. **Package**: export as `.mnx` and (optionally) generate deployment manifest metadata.
+5. **Deploy**: push through the deployment wizard to cloud or local runtime targets.
+6. **Operate**: monitor behavior, review drift/warnings, and tune nodes or policy settings.
+7. **Iterate**: re-import, revise, and republish while preserving compatibility for previous artifacts.
+
+See the full deployment model in [`docs/Persona-Deployment-Architecture.md`](docs/Persona-Deployment-Architecture.md).
+
+## Deploy wizard behavior
+
+The deploy wizard is intentionally conservative and policy-aware:
+
+- **Step 1: Artifact selection** — choose `.mnx` source and optional manifest.
+- **Step 2: Target selection** — choose runtime profile (`cloud`, `hybrid`, or `local`).
+- **Step 3: Policy validation** — evaluate runtime permissions, tool policy defaults, and model-provider constraints.
+- **Step 4: Compatibility gate** — auto-detect legacy `.mnx` files without manifests and apply fallback defaults.
+- **Step 5: Confirmation** — display effective config + warnings before final deploy.
+
+When compatibility mode is triggered, wizard warnings are non-blocking unless a policy explicitly requires manifest-enforced fields.
+
+## Legacy `.mnx` compatibility (no manifest)
+
+Legacy `.mnx` files that predate deployment manifests remain loadable and deployable.
+
+- If no manifest is found, the system enters **manifest-compat mode**.
+- Missing manifest fields are inferred from graph metadata and sensible runtime defaults.
+- Policy-sensitive fields (for example external tool permissions) default to **least privilege**.
+- Operators can save back a new manifest to permanently remove compatibility warnings.
+
+Detailed rules are documented in [`docs/MNX-META-Deployment-Manifest-Spec.md`](docs/MNX-META-Deployment-Manifest-Spec.md).
+
+---
+
+## llmedge local-runtime setup
+
+Use the local runtime profile when running fully on-device or via local network endpoints.
+
+### Prerequisites
+
+- Android device/emulator running the app.
+- Local llmedge runtime reachable from device.
+- Model assets available to llmedge runtime.
+
+### Setup steps
+
+1. In app **Settings**, select **Local Runtime (llmedge)** as provider profile.
+2. Set runtime base URL:
+   - Android emulator host machine: `http://10.0.2.2:<port>`
+   - Physical device on LAN: `http://<host-ip>:<port>`
+3. Configure model/runtime ID expected by your llmedge instance.
+4. Run **Connection Test** and verify health endpoint success.
+5. Open deploy wizard and choose target profile `local`.
+
+### Operational guidance
+
+- Prefer quantized/local-compatible models for latency and memory stability.
+- Keep policy settings explicit when enabling tool use in local mode.
+- For local-runtime troubleshooting and policy misconfiguration checks, use the operator checklist in [`docs/llmedge-Integration-Notes.md`](docs/llmedge-Integration-Notes.md).
 
 ---
 
@@ -67,6 +133,15 @@ beyond the defaults via `MindNode(dimensions = mapOf("my_axis" to 0.8f))`.
 ```
 
 The APK will appear at `app/build/outputs/apk/release/app-release.apk`.
+
+---
+
+## Deployment and operations docs
+
+- [`docs/Persona-Deployment-Architecture.md`](docs/Persona-Deployment-Architecture.md)
+- [`docs/MNX-META-Deployment-Manifest-Spec.md`](docs/MNX-META-Deployment-Manifest-Spec.md)
+- [`docs/llmedge-Integration-Notes.md`](docs/llmedge-Integration-Notes.md)
+- [`docs/Release-Notes-Deployment-and-Local-Runtime.md`](docs/Release-Notes-Deployment-and-Local-Runtime.md)
 
 ---
 
