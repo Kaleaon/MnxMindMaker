@@ -13,10 +13,18 @@ import com.kaleaon.mnxmindmaker.model.MindEdge
 import com.kaleaon.mnxmindmaker.model.MindGraph
 import com.kaleaon.mnxmindmaker.model.MindNode
 import com.kaleaon.mnxmindmaker.model.NodeType
+import com.kaleaon.mnxmindmaker.persona.runtime.ClassificationPrivacyConstraints
+import com.kaleaon.mnxmindmaker.persona.runtime.FallbackStrategy
+import com.kaleaon.mnxmindmaker.persona.runtime.InferenceParams
+import com.kaleaon.mnxmindmaker.persona.runtime.PersonaDeploymentManifest
+import com.kaleaon.mnxmindmaker.persona.runtime.RuntimeTarget
+import com.kaleaon.mnxmindmaker.persona.runtime.ToolPolicy
 import com.kaleaon.mnxmindmaker.util.BootPacketGenerator
 import com.kaleaon.mnxmindmaker.util.DimensionMapper
 import java.io.File
 import java.io.InputStream
+import org.json.JSONArray
+import org.json.JSONObject
 
 /**
  * Repository for reading and writing .mnx files.
@@ -26,6 +34,7 @@ class MnxRepository(private val context: Context) {
 
     companion object {
         internal const val GRAPH_PAYLOAD_SECTION_TYPE: Short = (-1).toShort()
+        internal const val META_PERSONA_DEPLOYMENT_KEY = "persona.deployment.v1"
 
         internal fun serializeGraphPayload(graph: MindGraph): ByteArray = mnxSerialize {
             writeString(graph.id)
@@ -104,6 +113,101 @@ class MnxRepository(private val context: Context) {
                 modifiedAt = modifiedAt
             )
         }
+
+        internal fun encodePersonaDeploymentManifest(
+            manifest: PersonaDeploymentManifest
+        ): String = JSONObject().apply {
+            put(
+                "target",
+                JSONObject().put("provider", manifest.target.provider)
+                    .put("model", manifest.target.model)
+                    .put("runtime", manifest.target.runtime)
+            )
+            put(
+                "inference",
+                JSONObject().put("temperature", manifest.inference.temperature)
+                    .put("max_tokens", manifest.inference.maxTokens)
+                    .put("context_window", manifest.inference.contextWindow)
+            )
+            put(
+                "tools",
+                JSONObject().put("allowlist", JSONArray(manifest.toolPolicy.allowlist))
+                    .put("policy", manifest.toolPolicy.policy)
+            )
+            put(
+                "constraints",
+                JSONObject().put("classification", manifest.classification.classification)
+                    .put("privacy", manifest.classification.privacy)
+            )
+            put(
+                "fallback",
+                JSONObject().put("mode", manifest.fallback.mode)
+                    .put("target", manifest.fallback.target)
+                    .put("max_retries", manifest.fallback.maxRetries)
+            )
+        }.toString()
+
+        internal fun decodePersonaDeploymentManifest(raw: String?): PersonaDeploymentManifest {
+            if (raw.isNullOrBlank()) return PersonaDeploymentManifest.defaults()
+            return runCatching {
+                val root = JSONObject(raw)
+                val target = root.optJSONObject("target")
+                val inference = root.optJSONObject("inference")
+                val tools = root.optJSONObject("tools")
+                val constraints = root.optJSONObject("constraints")
+                val fallback = root.optJSONObject("fallback")
+                val allowlist = mutableListOf<String>()
+                val allowlistJson = tools?.optJSONArray("allowlist")
+                if (allowlistJson != null) {
+                    for (i in 0 until allowlistJson.length()) {
+                        allowlist.add(allowlistJson.optString(i))
+                    }
+                }
+                PersonaDeploymentManifest(
+                    target = RuntimeTarget(
+                        provider = target?.takeIf { it.has("provider") }?.optString("provider")
+                            ?: RuntimeTarget().provider,
+                        model = target?.takeIf { it.has("model") }?.optString("model")
+                            ?: RuntimeTarget().model,
+                        runtime = target?.takeIf { it.has("runtime") }?.optString("runtime")
+                            ?: RuntimeTarget().runtime
+                    ),
+                    inference = InferenceParams(
+                        temperature = inference?.takeIf { it.has("temperature") }
+                            ?.optDouble("temperature")
+                            ?: InferenceParams().temperature,
+                        maxTokens = inference?.takeIf { it.has("max_tokens") }?.optInt("max_tokens")
+                            ?: InferenceParams().maxTokens,
+                        contextWindow = inference?.takeIf { it.has("context_window") }
+                            ?.optInt("context_window")
+                            ?: InferenceParams().contextWindow
+                    ),
+                    toolPolicy = ToolPolicy(
+                        allowlist = allowlist.filter { it.isNotBlank() },
+                        policy = tools?.takeIf { it.has("policy") }?.optString("policy")
+                            ?: ToolPolicy().policy
+                    ),
+                    classification = ClassificationPrivacyConstraints(
+                        classification = constraints?.takeIf { it.has("classification") }
+                            ?.optString("classification")
+                            ?: ClassificationPrivacyConstraints().classification,
+                        privacy = constraints?.takeIf { it.has("privacy") }?.optString("privacy")
+                            ?: ClassificationPrivacyConstraints().privacy
+                    ),
+                    fallback = FallbackStrategy(
+                        mode = fallback?.takeIf { it.has("mode") }?.optString("mode")
+                            ?: FallbackStrategy().mode,
+                        target = fallback?.takeIf { it.has("target") }?.optString("target")
+                            ?: FallbackStrategy().target,
+                        maxRetries = fallback?.takeIf { it.has("max_retries") }?.optInt("max_retries")
+                            ?: FallbackStrategy().maxRetries
+                    )
+                )
+            }.getOrElse { PersonaDeploymentManifest.defaults() }
+        }
+
+        internal fun manifestFromMeta(meta: MnxMeta): PersonaDeploymentManifest =
+            decodePersonaDeploymentManifest(meta.entries[META_PERSONA_DEPLOYMENT_KEY])
     }
     data class ContinuityMetadata(
         val snapshotId: String,
@@ -126,11 +230,20 @@ class MnxRepository(private val context: Context) {
         return outFile
     }
 
-    fun writeGraphToFile(graph: MindGraph, outFile: File, continuityMetadata: ContinuityMetadata? = null) {
-        MnxCodec.encodeToFile(buildMnxFile(graph, continuityMetadata), outFile)
+    fun writeGraphToFile(
+        graph: MindGraph,
+        outFile: File,
+        continuityMetadata: ContinuityMetadata? = null,
+        personaManifest: PersonaDeploymentManifest = PersonaDeploymentManifest.defaults()
+    ) {
+        MnxCodec.encodeToFile(buildMnxFile(graph, continuityMetadata, personaManifest), outFile)
     }
 
-    fun buildMnxFile(graph: MindGraph, continuityMetadata: ContinuityMetadata? = null): MnxFile {
+    fun buildMnxFile(
+        graph: MindGraph,
+        continuityMetadata: ContinuityMetadata? = null,
+        personaManifest: PersonaDeploymentManifest = PersonaDeploymentManifest.defaults()
+    ): MnxFile {
         val sections = mutableMapOf<MnxFormat.MnxSectionType, ByteArray>()
         val rawSections = mutableMapOf<Short, ByteArray>()
 
@@ -171,6 +284,7 @@ class MnxRepository(private val context: Context) {
                 it.reason?.let { reason -> put("snapshot_reason", reason) }
                 it.driftNotes?.let { notes -> put("snapshot_drift_notes", notes) }
             }
+            put(META_PERSONA_DEPLOYMENT_KEY, encodePersonaDeploymentManifest(personaManifest))
         })
         sections[MnxFormat.MnxSectionType.META] = MnxCodec.serializeMeta(meta)
 
@@ -274,6 +388,15 @@ class MnxRepository(private val context: Context) {
         }.toMutableList()
 
         return MindGraph(name = graphName, nodes = nodesWithDims, edges = edges)
+    }
+
+    fun readPersonaDeploymentManifest(stream: InputStream): PersonaDeploymentManifest {
+        val mnxFile = MnxCodec.decode(stream)
+        if (!mnxFile.hasSection(MnxFormat.MnxSectionType.META)) {
+            return PersonaDeploymentManifest.defaults()
+        }
+        val meta = MnxCodec.deserializeMeta(mnxFile.sections[MnxFormat.MnxSectionType.META]!!)
+        return manifestFromMeta(meta)
     }
 
     fun getMnxExportsDir(): File = File(context.filesDir, "mnx_exports").also { it.mkdirs() }
