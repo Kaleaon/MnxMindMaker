@@ -65,6 +65,22 @@
     <string name="theme_reset_done">Theme reset to default</string>
 
     <!-- Settings -->
+
+    <string name="deploy_title">Deploy</string>
+    <string name="deploy_open_wizard">Open Deploy Wizard</string>
+    <string name="deploy_refresh_sources">Refresh Sources</string>
+    <string name="deploy_back">Back</string>
+    <string name="deploy_next">Next</string>
+    <string name="deploy_confirm">Confirm</string>
+    <string name="deploy_step_graph_title">Step 1: Graph Source</string>
+    <string name="deploy_step_validation_title">Step 2: Validator Output</string>
+    <string name="deploy_step_runtime_title">Step 3: Runtime Config</string>
+    <string name="deploy_step_summary_title">Step 4: Deployment Summary</string>
+    <string name="deploy_env_hint">Environment (e.g., staging, prod)</string>
+    <string name="deploy_endpoint_hint">Runtime endpoint URL</string>
+    <string name="deploy_release_channel_hint">Release channel (canary/stable)</string>
+    <string name="deploy_notes_hint">Deployment notes</string>
+
     <string name="settings_title">Settings</string>
     <string name="settings_saved">%1$s settings saved</string>
     <string name="hint_anthropic_key">Get your key at console.anthropic.com</string>

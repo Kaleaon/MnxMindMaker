@@ -17,6 +17,7 @@ import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.viewModels
+import androidx.navigation.fragment.findNavController
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.snackbar.Snackbar
 import com.kaleaon.mnxmindmaker.R
@@ -26,6 +27,7 @@ import com.kaleaon.mnxmindmaker.ktheme.KthemeManager
 import com.kaleaon.mnxmindmaker.model.NodeType
 import com.kaleaon.mnxmindmaker.util.ContinuityAuditResult
 import com.kaleaon.mnxmindmaker.util.tooling.ToolApprovalRequest
+import com.kaleaon.mnxmindmaker.ui.deploy.DeploymentSessionState
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -66,6 +68,7 @@ class MindMapFragment : Fragment() {
         viewModel.graph.observe(viewLifecycleOwner) { graph ->
             binding.mindMapCanvas.graph = graph
             binding.tvGraphName.text = graph?.name ?: ""
+            DeploymentSessionState.currentGraph = graph
         }
 
         viewModel.selectedNode.observe(viewLifecycleOwner) { node ->
@@ -106,6 +109,7 @@ class MindMapFragment : Fragment() {
         viewModel.auditResult.observe(viewLifecycleOwner) { audit ->
             val total = audit?.summary?.totalFindings ?: 0
             binding.btnReviewAudit.text = getString(R.string.review_audit_with_count, total)
+            DeploymentSessionState.currentAudit = audit
         }
 
         viewModel.chatMessages.observe(viewLifecycleOwner) { messages ->
@@ -138,6 +142,9 @@ class MindMapFragment : Fragment() {
         binding.btnCreateSnapshot.setOnClickListener { showCreateSnapshotDialog() }
         binding.btnCompareSnapshot.setOnClickListener { showSnapshotPickerDialog(compareMode = true) }
         binding.btnRestoreSnapshot.setOnClickListener { showSnapshotPickerDialog(compareMode = false) }
+        binding.btnDeploy.setOnClickListener {
+            findNavController().navigate(R.id.action_mindMapFragment_to_deployFragment)
+        }
         binding.btnExportMnx.setOnClickListener { viewModel.exportToMnx() }
         binding.btnImportMnx.setOnClickListener { openMnxFile.launch(arrayOf("*/*")) }
         binding.btnAskAi.setOnClickListener { showChatDialog() }

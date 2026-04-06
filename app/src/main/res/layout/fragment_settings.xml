@@ -20,6 +20,13 @@
             android:textStyle="bold"
             android:textColor="@color/colorOnPrimary"
             android:layout_marginBottom="16dp" />
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_open_deploy"
+            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="16dp"
+            android:text="@string/deploy_open_wizard" />
 
         <TextView
             android:layout_width="match_parent"

@@ -10,6 +10,7 @@ import android.widget.ArrayAdapter
 import android.widget.LinearLayout
 import androidx.appcompat.app.AlertDialog
 import androidx.fragment.app.Fragment
+import androidx.navigation.fragment.findNavController
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.google.android.material.snackbar.Snackbar
 import com.kaleaon.mnxmindmaker.R
@@ -60,6 +61,10 @@ class SettingsFragment : Fragment() {
         externalAccountRepository = ExternalAccountRepository(requireContext())
         modelManager = ModelManager(requireContext())
         currentSettings = repository.loadAllSettings().toMutableList()
+
+        binding.btnOpenDeploy.setOnClickListener {
+            findNavController().navigate(R.id.action_settingsFragment_to_deployFragment)
+        }
 
         // ---- Ktheme picker --------------------------------------------------
         setupThemePicker()
