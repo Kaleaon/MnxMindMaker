@@ -19,6 +19,7 @@ class ToolExecutionEngine(
         runId: String,
         invocations: List<ToolInvocation>,
         graph: MindGraph,
+        policyContext: ToolPolicyContext = ToolPolicyContext(),
         approve: (ToolInvocation, PolicyDecision) -> Boolean
     ): MutationSequenceResult {
         var workingGraph = graph.deepCopy()
@@ -31,7 +32,7 @@ class ToolExecutionEngine(
         for (invocation in invocations) {
             transcriptRecorder.recordRequest(runId, invocation)
 
-            val decision = policyEngine.evaluate(invocation, workingGraph)
+            val decision = policyEngine.evaluate(invocation, workingGraph, policyContext)
             transcriptRecorder.recordDecision(runId, invocation, decision)
 
             if (decision.type == PolicyDecisionType.DENY) {

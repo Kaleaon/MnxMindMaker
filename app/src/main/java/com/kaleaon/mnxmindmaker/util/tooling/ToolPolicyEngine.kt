@@ -9,15 +9,40 @@ class ToolPolicyEngine(
     private val specsByName: Map<String, ToolSpec>
 ) {
 
-    fun evaluate(invocation: ToolInvocation): PolicyDecision = evaluate(invocation, MindGraph())
+    fun evaluate(invocation: ToolInvocation): PolicyDecision = evaluate(invocation, MindGraph(), ToolPolicyContext())
 
-    fun evaluate(invocation: ToolInvocation, graph: MindGraph): PolicyDecision {
+    fun evaluate(invocation: ToolInvocation, graph: MindGraph): PolicyDecision =
+        evaluate(invocation, graph, ToolPolicyContext())
+
+    fun evaluate(
+        invocation: ToolInvocation,
+        graph: MindGraph,
+        context: ToolPolicyContext
+    ): PolicyDecision {
         val spec = specsByName[invocation.toolName]
             ?: return PolicyDecision(
                 type = PolicyDecisionType.DENY,
                 reason = "Unknown tool '${invocation.toolName}' denied by default",
                 riskLevel = ToolRiskLevel.HIGH
             )
+
+        val personaPolicy = context.deploymentPolicy?.policyForPersona(context.personaId)
+        if (invocation.toolName in (personaPolicy?.denyToolNames ?: emptySet())) {
+            return PolicyDecision(
+                type = PolicyDecisionType.DENY,
+                reason = "Tool '${invocation.toolName}' denied by persona policy",
+                riskLevel = spec.riskLevel
+            )
+        }
+        if ((personaPolicy?.allowToolNames ?: emptySet()).isNotEmpty() &&
+            invocation.toolName !in (personaPolicy?.allowToolNames ?: emptySet())
+        ) {
+            return PolicyDecision(
+                type = PolicyDecisionType.DENY,
+                reason = "Tool '${invocation.toolName}' not in persona allowlist",
+                riskLevel = spec.riskLevel
+            )
+        }
 
         val explicitAction = inferExplicitActionType(invocation.toolName)
 

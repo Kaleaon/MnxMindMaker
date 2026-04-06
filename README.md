@@ -68,6 +68,16 @@ beyond the defaults via `MindNode(dimensions = mapOf("my_axis" to 0.8f))`.
 
 The APK will appear at `app/build/outputs/apk/release/app-release.apk`.
 
+### llmedge integration assumptions
+
+MnxMindMaker resolves `llmedge` in this order:
+
+1. **Preferred:** a local Gradle module at `./llmedge` (included automatically when `llmedge/build.gradle` exists).
+2. **Fallback:** one or more prebuilt binaries in `app/libs` matching `llmedge*.aar` or `llmedge*.jar`.
+3. If neither source exists, the app builds normally without llmedge wiring active.
+
+This ordering keeps existing cloud-provider integrations (Anthropic/OpenAI/Gemini/vLLM) unchanged while enabling optional on-device llmedge packaging.
+
 ---
 
 ## Pyn Expansion Planning
