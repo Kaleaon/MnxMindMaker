@@ -17,9 +17,8 @@ class LocalProvider(
 
     override val id: String = "local"
 
-    override fun supports(settings: LlmSettings): Boolean {
-        return settings.provider == LlmProvider.LOCAL_ON_DEVICE || settings.provider == LlmProvider.VLLM_GEMMA4
-    }
+    override fun supports(settings: LlmSettings): Boolean =
+        settings.provider == LlmProvider.VLLM_GEMMA4 || isOpenAiCompatibleSelfHosted(settings)
 
     override fun chat(request: ProviderRequest) = runCatching {
         val apiKey = request.settings.apiKey.ifBlank { "EMPTY" }
@@ -28,11 +27,7 @@ class LocalProvider(
             systemPrompt = request.systemPrompt,
             transcript = request.transcript,
             tools = request.tools
-        ).apply {
-            if (request.settings.provider == LlmProvider.LOCAL_ON_DEVICE) {
-                put("extra_body", JSONObject().put("local_model_path", request.settings.localModelPath))
-            }
-        }
+        )
 
         val httpRequest = Request.Builder()
             .url("${request.settings.baseUrl}/chat/completions")
@@ -61,6 +56,13 @@ class LocalProvider(
         } catch (e: Exception) {
             ProviderHealth(false, "Health check exception: ${e.message}")
         }
+    }
+
+
+    private fun isOpenAiCompatibleSelfHosted(settings: LlmSettings): Boolean {
+        if (settings.provider != LlmProvider.OPENAI) return false
+        val normalized = settings.baseUrl.lowercase()
+        return !normalized.contains("api.openai.com")
     }
 
     companion object {
