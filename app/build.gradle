@@ -5,6 +5,8 @@ plugins {
 }
 
 def generatedComplianceAssetsDir = layout.buildDirectory.dir("generated/complianceAssets/main")
+def llmedgeAarOrJar = fileTree(dir: 'libs', include: ['llmedge*.aar', 'llmedge*.jar'])
+def hasLlmedgeAarOrJar = !llmedgeAarOrJar.isEmpty()
 
 android {
     namespace 'com.kaleaon.mnxmindmaker'
@@ -45,6 +47,15 @@ android {
             assets.srcDir(generatedComplianceAssetsDir)
         }
     }
+
+    packaging {
+        jniLibs {
+            useLegacyPackaging true
+        }
+        resources {
+            excludes += ['META-INF/INDEX.LIST', 'META-INF/DEPENDENCIES']
+        }
+    }
 }
 
 dependencies {
@@ -61,6 +72,11 @@ dependencies {
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'
     implementation 'androidx.security:security-crypto:1.1.0-alpha06'
     implementation 'org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.2'
+    if (findProject(':llmedge') != null) {
+        implementation project(':llmedge')
+    } else if (hasLlmedgeAarOrJar) {
+        implementation llmedgeAarOrJar
+    }
 
     testImplementation 'junit:junit:4.13.2'
     testImplementation 'org.json:json:20231013'
