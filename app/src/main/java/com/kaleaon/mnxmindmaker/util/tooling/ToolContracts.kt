@@ -47,6 +47,27 @@ data class ToolSpec(
     val execute: ToolHandler? = null
 )
 
+data class PersonaPolicy(
+    val allowToolNames: Set<String> = emptySet(),
+    val denyToolNames: Set<String> = emptySet(),
+    val strictLocalOnly: Boolean = false
+)
+
+data class DeploymentManifestPolicy(
+    val defaultPersonaId: String? = null,
+    val personaPolicies: Map<String, PersonaPolicy> = emptyMap()
+) {
+    fun policyForPersona(personaId: String?): PersonaPolicy? {
+        val resolvedPersonaId = personaId ?: defaultPersonaId ?: return null
+        return personaPolicies[resolvedPersonaId]
+    }
+}
+
+data class ToolPolicyContext(
+    val personaId: String? = null,
+    val deploymentPolicy: DeploymentManifestPolicy? = null
+)
+
 data class ToolInvocation(
     val id: String,
     val toolName: String,
