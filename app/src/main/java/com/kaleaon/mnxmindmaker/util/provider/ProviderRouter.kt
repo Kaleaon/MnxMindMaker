@@ -1,8 +1,11 @@
 package com.kaleaon.mnxmindmaker.util.provider
 
+import com.kaleaon.mnxmindmaker.model.DataClassification
+import com.kaleaon.mnxmindmaker.model.LlmFallbackOrder
 import com.kaleaon.mnxmindmaker.model.LlmProvider
 import com.kaleaon.mnxmindmaker.model.LlmRuntime
 import com.kaleaon.mnxmindmaker.model.LlmSettings
+import com.kaleaon.mnxmindmaker.model.PrivacyMode
 import com.kaleaon.mnxmindmaker.util.LlmApiException
 import com.kaleaon.mnxmindmaker.util.tooling.AssistantTurn
 import com.kaleaon.mnxmindmaker.util.tooling.ToolSpec
@@ -13,6 +16,11 @@ data class RoutingPolicy(
     val prioritizeCost: Boolean = false,
     val prioritizeLatency: Boolean = true,
     val allowOfflineFallback: Boolean = true
+)
+
+data class GovernedRoutingResult(
+    val settings: List<LlmSettings>,
+    val rejections: List<String>
 )
 
 class ProviderRouter(
@@ -59,6 +67,42 @@ class ProviderRouter(
         )
     }
 
+    fun selectGovernedChain(
+        settingsChain: List<LlmSettings>,
+        privacyMode: PrivacyMode,
+        maxClassification: DataClassification,
+        fallbackOrder: LlmFallbackOrder
+    ): GovernedRoutingResult {
+        val rejections = mutableListOf<String>()
+
+        var filtered = settingsChain.filter { settings ->
+            val classificationAllowed = classificationRank(settings.outboundClassification) <= classificationRank(maxClassification)
+            if (!classificationAllowed) {
+                rejections += "${settings.provider.name}: classification ${settings.outboundClassification} exceeds $maxClassification"
+            }
+            classificationAllowed
+        }
+
+        filtered = filtered.filter { settings ->
+            val allowed = privacyMode != PrivacyMode.STRICT_LOCAL_ONLY || settings.provider.runtime == LlmRuntime.LOCAL_ON_DEVICE
+            if (!allowed) {
+                rejections += "${settings.provider.name}: blocked by STRICT_LOCAL_ONLY privacy mode"
+            }
+            allowed
+        }
+
+        filtered = when (fallbackOrder) {
+            LlmFallbackOrder.REMOTE_ONLY -> filtered.filterNot { it.provider.runtime == LlmRuntime.LOCAL_ON_DEVICE }
+            LlmFallbackOrder.LOCAL_FIRST_REMOTE_FALLBACK -> {
+                val local = filtered.filter { it.provider.runtime == LlmRuntime.LOCAL_ON_DEVICE }
+                val remote = filtered.filter { it.provider.runtime != LlmRuntime.LOCAL_ON_DEVICE }
+                local + remote
+            }
+        }
+
+        return GovernedRoutingResult(settings = filtered, rejections = rejections)
+    }
+
     fun healthCheck(settings: LlmSettings): ProviderHealth {
         val provider = providers.firstOrNull { it.supports(settings) }
             ?: return ProviderHealth(false, "No adapter for ${settings.provider.displayName}")
@@ -82,6 +126,12 @@ class ProviderRouter(
             if (policy.prioritizeLatency) score += latencyRank(settings.provider)
             score
         }
+    }
+
+    private fun classificationRank(classification: DataClassification): Int = when (classification) {
+        DataClassification.PUBLIC -> 0
+        DataClassification.SENSITIVE -> 1
+        DataClassification.RESTRICTED -> 2
     }
 
     private fun costRank(provider: LlmProvider): Int = when (provider) {
