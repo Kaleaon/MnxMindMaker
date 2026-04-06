@@ -9,7 +9,31 @@ enum class TraceEventType {
     RETRIEVAL_HIT,
     TOOL_CALL,
     PROVIDER_RESPONSE,
+    DEPLOY_INITIATED,
+    DEPLOY_COMPLETED,
+    DEPLOY_FAILED,
+    ACTIVATION_SUCCESS,
+    ACTIVATION_FAILURE,
+    INVOCATION_METRIC,
     ERROR
+}
+
+data class CorrelationIds(
+    val correlationId: String,
+    val personaVersion: String,
+    val deploymentManifestHash: String
+) {
+    companion object {
+        fun from(personaVersion: String, deploymentManifestHash: String): CorrelationIds {
+            val normalizedVersion = personaVersion.trim()
+            val normalizedHash = deploymentManifestHash.trim()
+            return CorrelationIds(
+                correlationId = "${normalizedVersion.ifEmpty { "unknown" }}:${normalizedHash.ifEmpty { "unknown" }}",
+                personaVersion = normalizedVersion,
+                deploymentManifestHash = normalizedHash
+            )
+        }
+    }
 }
 
 data class TraceEvent(
@@ -97,6 +121,76 @@ class RequestTracer(
         )
     }
 
+    fun recordDeployInitiated(personaVersion: String, deploymentManifestHash: String) {
+        val correlation = CorrelationIds.from(personaVersion, deploymentManifestHash)
+        record(
+            TraceEventType.DEPLOY_INITIATED,
+            lifecyclePayload(correlation)
+        )
+    }
+
+    fun recordDeployCompleted(personaVersion: String, deploymentManifestHash: String, durationMs: Long) {
+        val correlation = CorrelationIds.from(personaVersion, deploymentManifestHash)
+        record(
+            TraceEventType.DEPLOY_COMPLETED,
+            lifecyclePayload(correlation) + ("duration_ms" to durationMs.toString())
+        )
+    }
+
+    fun recordDeployFailed(personaVersion: String, deploymentManifestHash: String, reason: String) {
+        val correlation = CorrelationIds.from(personaVersion, deploymentManifestHash)
+        record(
+            TraceEventType.DEPLOY_FAILED,
+            lifecyclePayload(correlation) + ("reason" to reason.take(300))
+        )
+    }
+
+    fun recordActivationSuccess(personaVersion: String, deploymentManifestHash: String, provider: String) {
+        val correlation = CorrelationIds.from(personaVersion, deploymentManifestHash)
+        record(
+            TraceEventType.ACTIVATION_SUCCESS,
+            lifecyclePayload(correlation) + ("provider" to provider)
+        )
+    }
+
+    fun recordActivationFailure(
+        personaVersion: String,
+        deploymentManifestHash: String,
+        provider: String,
+        reason: String
+    ) {
+        val correlation = CorrelationIds.from(personaVersion, deploymentManifestHash)
+        record(
+            TraceEventType.ACTIVATION_FAILURE,
+            lifecyclePayload(correlation) +
+                mapOf(
+                    "provider" to provider,
+                    "reason" to reason.take(300)
+                )
+        )
+    }
+
+    fun recordProviderInvocationMetric(
+        personaVersion: String,
+        deploymentManifestHash: String,
+        provider: String,
+        latencyMs: Long,
+        success: Boolean,
+        errorRate: Double
+    ) {
+        val correlation = CorrelationIds.from(personaVersion, deploymentManifestHash)
+        record(
+            TraceEventType.INVOCATION_METRIC,
+            lifecyclePayload(correlation) +
+                mapOf(
+                    "provider" to provider,
+                    "latency_ms" to latencyMs.toString(),
+                    "success" to success.toString(),
+                    "error_rate" to errorRate.toString()
+                )
+        )
+    }
+
     fun recordError(stage: String, message: String) {
         record(
             TraceEventType.ERROR,
@@ -115,6 +209,12 @@ class RequestTracer(
             events = events.toList()
         )
     }
+
+    private fun lifecyclePayload(correlation: CorrelationIds): Map<String, String> = mapOf(
+        "correlation_id" to correlation.correlationId,
+        "persona_version" to correlation.personaVersion,
+        "deployment_manifest_hash" to correlation.deploymentManifestHash
+    )
 
     private fun record(type: TraceEventType, payload: Map<String, String>) {
         events += TraceEvent(type = type, atEpochMs = nowMs(), payload = payload)

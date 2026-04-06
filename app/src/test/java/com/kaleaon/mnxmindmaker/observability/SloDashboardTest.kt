@@ -9,6 +9,7 @@ import com.kaleaon.mnxmindmaker.util.observability.SloTargets
 import com.kaleaon.mnxmindmaker.util.observability.SloTracker
 import com.kaleaon.mnxmindmaker.util.observability.TraceEvent
 import com.kaleaon.mnxmindmaker.util.observability.TraceEventType
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -55,6 +56,21 @@ class SloDashboardTest {
                     completedAtEpochMs = 240,
                     events = listOf(
                         TraceEvent(TraceEventType.PROMPT_PIPELINE, 120, mapOf("stage" to "incoming")),
+                        TraceEvent(
+                            TraceEventType.DEPLOY_INITIATED,
+                            150,
+                            mapOf("persona_version" to "v4", "deployment_manifest_hash" to "abc")
+                        ),
+                        TraceEvent(
+                            TraceEventType.DEPLOY_COMPLETED,
+                            180,
+                            mapOf("persona_version" to "v4", "deployment_manifest_hash" to "abc")
+                        ),
+                        TraceEvent(
+                            TraceEventType.INVOCATION_METRIC,
+                            210,
+                            mapOf("provider" to "OPENAI", "latency_ms" to "220", "error_rate" to "0.05")
+                        ),
                         TraceEvent(TraceEventType.PROVIDER_RESPONSE, 220, mapOf("provider" to "OPENAI"))
                     )
                 )
@@ -63,5 +79,68 @@ class SloDashboardTest {
 
         assertTrue(dashboard.contains("Internal GenAI Reliability Dashboard"))
         assertTrue(dashboard.contains("PROMPT_PIPELINE"))
+        assertTrue(dashboard.contains("Deploy Reliability"))
+        assertTrue(dashboard.contains("Runtime Quality"))
+        assertTrue(dashboard.contains("OPENAI"))
+    }
+
+    @Test
+    fun `summary helpers aggregate deploy and runtime quality`() {
+        val traces = listOf(
+            RequestTrace(
+                requestId = "req-deploy-1",
+                startedAtEpochMs = 10,
+                completedAtEpochMs = 20,
+                events = listOf(
+                    TraceEvent(TraceEventType.DEPLOY_INITIATED, 11, emptyMap()),
+                    TraceEvent(TraceEventType.DEPLOY_COMPLETED, 12, emptyMap())
+                )
+            ),
+            RequestTrace(
+                requestId = "req-deploy-2",
+                startedAtEpochMs = 30,
+                completedAtEpochMs = 40,
+                events = listOf(
+                    TraceEvent(TraceEventType.DEPLOY_INITIATED, 31, emptyMap()),
+                    TraceEvent(TraceEventType.DEPLOY_FAILED, 32, emptyMap())
+                )
+            ),
+            RequestTrace(
+                requestId = "req-runtime",
+                startedAtEpochMs = 50,
+                completedAtEpochMs = 70,
+                events = listOf(
+                    TraceEvent(
+                        TraceEventType.INVOCATION_METRIC,
+                        51,
+                        mapOf("provider" to "OPENAI", "latency_ms" to "300", "error_rate" to "0.10")
+                    ),
+                    TraceEvent(
+                        TraceEventType.INVOCATION_METRIC,
+                        52,
+                        mapOf("provider" to "OPENAI", "latency_ms" to "500", "error_rate" to "0.20")
+                    ),
+                    TraceEvent(
+                        TraceEventType.INVOCATION_METRIC,
+                        53,
+                        mapOf("provider" to "LOCAL", "latency_ms" to "100", "error_rate" to "0.00")
+                    )
+                )
+            )
+        )
+
+        val deploySummary = SloTracker.summarizeDeployReliability(traces)
+        assertEquals(2, deploySummary.initiatedCount)
+        assertEquals(1, deploySummary.completedCount)
+        assertEquals(1, deploySummary.failedCount)
+        assertEquals(0.5, deploySummary.completionRate, 0.001)
+        assertEquals(0.5, deploySummary.failureRate, 0.001)
+
+        val runtimeSummary = SloTracker.summarizeRuntimeQuality(traces)
+        assertEquals(2, runtimeSummary.providers.size)
+        assertEquals(300L, runtimeSummary.overallAvgLatencyMs)
+        assertEquals(0.1, runtimeSummary.overallErrorRate, 0.001)
+        assertTrue(runtimeSummary.providers.any { it.provider == "OPENAI" && it.avgLatencyMs == 400L })
+        assertTrue(runtimeSummary.providers.any { it.provider == "LOCAL" && it.errorRate == 0.0 })
     }
 }
