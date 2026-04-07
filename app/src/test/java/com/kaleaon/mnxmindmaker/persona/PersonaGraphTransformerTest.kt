@@ -55,7 +55,7 @@ class PersonaGraphTransformerTest {
 
         val persona = PersonaGraphTransformer.fromMindGraph(
             graph = graph,
-            owner = "alice",
+            owner = "persona-owner",
             version = "1.2.0",
             lifecycleState = PersonaLifecycleState.REVIEWED
         )
@@ -86,7 +86,7 @@ class PersonaGraphTransformerTest {
 
         val persona = PersonaGraphTransformer.fromMindGraph(
             graph = baseGraph,
-            owner = "owner@example.com",
+            owner = "redacted-owner",
             version = "2.0.0"
         ).copy(
             values = listOf(
@@ -134,7 +134,7 @@ class PersonaGraphTransformerTest {
 
         assertEquals(NodeType.BELIEF, beliefNode.type)
         assertEquals(0.92f, beliefNode.dimensions["confidence"])
-        assertEquals("owner@example.com", beliefNode.attributes["persona.owner"])
+        assertEquals("redacted-owner", beliefNode.attributes["persona.owner"])
         assertEquals("2.0.0", valueNode.attributes["persona.version"])
         assertEquals("0.95", valueNode.attributes["weight"])
         assertFalse(roundTripped.edges.isEmpty())
