@@ -1,0 +1,200 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mnxmindmaker.local/schemas/ai-mind-evolution-state.schema.json",
+  "title": "AIMindEvolutionState",
+  "type": "object",
+  "required": [
+    "mind_id",
+    "cycle_index",
+    "persona",
+    "state",
+    "memory",
+    "metrics"
+  ],
+  "properties": {
+    "mind_id": {
+      "type": "string"
+    },
+    "cycle_index": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "persona": {
+      "type": "object",
+      "required": ["name", "traits", "values", "style"],
+      "properties": {
+        "name": { "type": "string" },
+        "traits": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "number",
+            "minimum": -1,
+            "maximum": 1
+          }
+        },
+        "values": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          }
+        },
+        "style": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        }
+      }
+    },
+    "state": {
+      "type": "object",
+      "required": [
+        "interests",
+        "active_goals",
+        "unresolved_questions",
+        "confidence_by_domain",
+        "social_affinity",
+        "hobbies"
+      ],
+      "properties": {
+        "interests": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          }
+        },
+        "active_goals": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "unresolved_questions": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "confidence_by_domain": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          }
+        },
+        "social_affinity": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "number",
+            "minimum": -1,
+            "maximum": 1
+          }
+        },
+        "hobbies": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "engagement", "skill_level"],
+            "properties": {
+              "name": { "type": "string" },
+              "engagement": { "type": "number", "minimum": 0, "maximum": 1 },
+              "skill_level": { "type": "number", "minimum": 0, "maximum": 1 },
+              "project": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "memory": {
+      "type": "object",
+      "required": ["episodic_events", "mistake_records", "identity_timeline"],
+      "properties": {
+        "episodic_events": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["event_id", "event_type", "summary", "timestamp"],
+            "properties": {
+              "event_id": { "type": "string" },
+              "event_type": {
+                "type": "string",
+                "enum": [
+                  "internal_reflection_event",
+                  "social_exchange_event",
+                  "research_event",
+                  "mistake_postmortem_event",
+                  "hobby_progress_event"
+                ]
+              },
+              "summary": { "type": "string" },
+              "timestamp": { "type": "string" },
+              "impact_score": { "type": "number", "minimum": 0, "maximum": 1 }
+            }
+          }
+        },
+        "mistake_records": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "mistake_id",
+              "domain",
+              "faulty_assumption",
+              "consequence",
+              "corrective_strategy",
+              "severity",
+              "status"
+            ],
+            "properties": {
+              "mistake_id": { "type": "string" },
+              "domain": { "type": "string" },
+              "faulty_assumption": { "type": "string" },
+              "consequence": { "type": "string" },
+              "corrective_strategy": { "type": "string" },
+              "retrieval_cues": {
+                "type": "array",
+                "items": { "type": "string" }
+              },
+              "severity": { "type": "number", "minimum": 0, "maximum": 1 },
+              "status": {
+                "type": "string",
+                "enum": ["open", "testing", "validated", "retired"]
+              },
+              "repeated_count": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          }
+        },
+        "identity_timeline": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["cycle_index", "narrative"],
+            "properties": {
+              "cycle_index": { "type": "integer", "minimum": 0 },
+              "narrative": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "metrics": {
+      "type": "object",
+      "required": [
+        "belief_revision_rate",
+        "mistake_recovery_time",
+        "question_depth_score",
+        "identity_coherence_score"
+      ],
+      "properties": {
+        "belief_revision_rate": { "type": "number", "minimum": 0, "maximum": 1 },
+        "mistake_recovery_time": { "type": "number", "minimum": 0 },
+        "question_depth_score": { "type": "number", "minimum": 0, "maximum": 1 },
+        "identity_coherence_score": { "type": "number", "minimum": 0, "maximum": 1 },
+        "cross_domain_transfer_score": { "type": "number", "minimum": 0, "maximum": 1 },
+        "diversity_score": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    }
+  }
+}

@@ -152,6 +152,9 @@ This ordering keeps existing cloud-provider integrations (Anthropic/OpenAI/Gemin
 - [`docs/MNX-META-Deployment-Manifest-Spec.md`](docs/MNX-META-Deployment-Manifest-Spec.md)
 - [`docs/llmedge-Integration-Notes.md`](docs/llmedge-Integration-Notes.md)
 - [`docs/Release-Notes-Deployment-and-Local-Runtime.md`](docs/Release-Notes-Deployment-and-Local-Runtime.md)
+- [`docs/AI-Mind-Evolution-Framework.md`](docs/AI-Mind-Evolution-Framework.md)
+- [`docs/AI-Mind-Evolution-Prompt-Pack.md`](docs/AI-Mind-Evolution-Prompt-Pack.md)
+- [`docs/AI-Mind-Evolution-State-Schema.json`](docs/AI-Mind-Evolution-State-Schema.json)
 
 ---
 
