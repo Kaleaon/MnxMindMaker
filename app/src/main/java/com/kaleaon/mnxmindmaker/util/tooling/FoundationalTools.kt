@@ -132,7 +132,15 @@ class FoundationalTools(
                 upsert(bucket, recordId, current)
             }
             "list" -> Unit
-            else -> error("Unsupported action: $action")
+            else -> {
+                return ToolExecutionOutcome(
+                    JSONObject()
+                        .put("error", "unsupported_action")
+                        .put("action", action)
+                        .put("kind", kind),
+                    mutatedGraph = false
+                )
+            }
         }
 
         writeDb(db)
@@ -156,7 +164,14 @@ class FoundationalTools(
                 upsert(events, id, event)
             }
             "delete" -> remove(events, invocation.argumentsJson.optString("id"))
-            else -> error("Unsupported calendar action: $action")
+            else -> {
+                return ToolExecutionOutcome(
+                    JSONObject()
+                        .put("error", "unsupported_calendar_action")
+                        .put("action", action),
+                    mutatedGraph = false
+                )
+            }
         }
         writeCalendar(store)
         return ToolExecutionOutcome(JSONObject().put("events", events), mutatedGraph = false)
@@ -194,7 +209,17 @@ class FoundationalTools(
             .directory(appRoot)
             .redirectErrorStream(true)
             .start()
-        process.waitFor(15, TimeUnit.SECONDS)
+        val finished = process.waitFor(15, TimeUnit.SECONDS)
+        if (!finished) {
+            process.destroyForcibly()
+            return ToolExecutionOutcome(
+                JSONObject()
+                    .put("command", command)
+                    .put("error", "command_timeout")
+                    .put("timeout_seconds", 15),
+                mutatedGraph = false
+            )
+        }
         val output = process.inputStream.bufferedReader().readText()
         return ToolExecutionOutcome(
             JSONObject()
@@ -265,6 +290,10 @@ class FoundationalTools(
         connection.connectTimeout = 8_000
         connection.readTimeout = 12_000
         connection.requestMethod = "GET"
-        return connection.inputStream.bufferedReader().readText()
+        return try {
+            connection.inputStream.bufferedReader().use { it.readText() }
+        } finally {
+            connection.disconnect()
+        }
     }
 }

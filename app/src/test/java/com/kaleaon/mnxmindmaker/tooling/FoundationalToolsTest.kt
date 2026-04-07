@@ -52,4 +52,41 @@ class FoundationalToolsTest {
         assertTrue(items.length() >= 1)
         assertEquals("t1", items.getJSONObject(0).getString("id"))
     }
+
+    @Test
+    fun `unsupported notes action returns structured error`() {
+        val root = createTempDir(prefix = "tooling-test")
+        val tools = FoundationalTools(appRoot = root, scopedDirectories = listOf(root))
+        val result = tools.handlers().getValue("notes_tasks_db").execute(
+            ToolInvocation(
+                "1",
+                "notes_tasks_db",
+                JSONObject()
+                    .put("action", "not_real")
+                    .put("kind", "tasks")
+            ),
+            MindGraph()
+        )
+
+        assertEquals("unsupported_action", result.contentJson.getString("error"))
+        assertEquals("not_real", result.contentJson.getString("action"))
+    }
+
+    @Test
+    fun `terminal command timeout returns error payload`() {
+        val root = createTempDir(prefix = "tooling-test")
+        val tools = FoundationalTools(
+            appRoot = root,
+            scopedDirectories = listOf(root),
+            allowTerminal = true,
+            allowedCommandPrefixes = listOf("sleep")
+        )
+        val result = tools.handlers().getValue("terminal_execute").execute(
+            ToolInvocation("1", "terminal_execute", JSONObject().put("command", "sleep 20")),
+            MindGraph()
+        )
+
+        assertEquals("command_timeout", result.contentJson.getString("error"))
+        assertEquals(15, result.contentJson.getInt("timeout_seconds"))
+    }
 }
