@@ -5,7 +5,11 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.viewModelScope
+import com.kaleaon.mnxmindmaker.repository.LlmSettingsRepository
 import com.kaleaon.mnxmindmaker.repository.DeploymentRepository
+import com.kaleaon.mnxmindmaker.util.provider.ValidationSeverity
+import com.kaleaon.mnxmindmaker.util.provider.validate
+import com.kaleaon.mnxmindmaker.util.provider.validateRuntimeEndpoint
 import com.kaleaon.mnxmindmaker.util.run_continuity_audit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -15,6 +19,7 @@ import java.util.UUID
 class DeployViewModel(application: Application) : AndroidViewModel(application) {
 
     private val deploymentRepository = DeploymentRepository(application)
+    private val settingsRepository = LlmSettingsRepository(application)
     private val deploymentId = UUID.randomUUID().toString()
 
     private val _uiState = MutableLiveData(DeployUiState())
@@ -45,6 +50,20 @@ class DeployViewModel(application: Application) : AndroidViewModel(application) 
 
     fun goToNextStep() {
         val state = _uiState.value ?: return
+        if (state.currentStep == DeployWizardStep.RUNTIME) {
+            val runtimeIssues = validateRuntimeEndpoint(state.runtimeConfig.endpoint)
+            val providerIssues = settingsRepository
+                .loadAllSettings()
+                .filter { it.enabled }
+                .flatMap { validate(it, settingsRepository.loadPrivacyMode()) }
+            val criticalIssues = (runtimeIssues + providerIssues).filter { it.severity == ValidationSeverity.CRITICAL }
+            if (criticalIssues.isNotEmpty()) {
+                _uiState.value = state.copy(
+                    errorMessage = "Cannot continue: ${criticalIssues.first().message}"
+                )
+                return
+            }
+        }
         val next = when (state.currentStep) {
             DeployWizardStep.GRAPH -> DeployWizardStep.VALIDATION
             DeployWizardStep.VALIDATION -> DeployWizardStep.RUNTIME
