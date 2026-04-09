@@ -31,7 +31,7 @@ object DataMapper {
         "anti_erasure_relevant", "requires_review", "invariant_reason", "attachment_type",
         "care_obligation", "repair_rule", "panic_trigger_risk", "drift_type", "drift_signature",
         "corrective_action", "severity", "signature", "retrieval_trigger",
-        "linked_high_risk_memories"
+        "linked_high_risk_memories", "memory_wing", "memory_hall", "memory_room"
     )
 
     /**

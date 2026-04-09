@@ -28,6 +28,7 @@ import com.kaleaon.mnxmindmaker.model.LocalRuntimeControls
 import com.kaleaon.mnxmindmaker.model.ModelManager
 import com.kaleaon.mnxmindmaker.model.ModelInstallState
 import com.kaleaon.mnxmindmaker.model.PrivacyMode
+import com.kaleaon.mnxmindmaker.model.RetrievalModePreference
 import com.kaleaon.mnxmindmaker.model.defaultModel
 import com.kaleaon.mnxmindmaker.repository.AuthRepository
 import com.kaleaon.mnxmindmaker.repository.ExternalAccountRepository
@@ -113,6 +114,15 @@ class SettingsFragment : Fragment() {
             requireContext(),
             android.R.layout.simple_spinner_item,
             ComputeBackend.entries.map { it.label }
+        ).also { it.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item) }
+        binding.spinnerRetrievalModePreference.adapter = ArrayAdapter(
+            requireContext(),
+            android.R.layout.simple_spinner_item,
+            listOf(
+                getString(R.string.retrieval_mode_raw_verbatim),
+                getString(R.string.retrieval_mode_summary),
+                getString(R.string.retrieval_mode_hierarchical)
+            )
         ).also { it.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item) }
 
         binding.spinnerProvider.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
@@ -370,9 +380,18 @@ class SettingsFragment : Fragment() {
         binding.etQuantizationProfile.setText(settings.runtimeControls.quantizationProfile)
         binding.etMaxRamMb.setText(settings.runtimeControls.maxRamMb.toString())
         binding.etMaxVramMb.setText(settings.runtimeControls.maxVramMb.toString())
+        binding.switchEnableWakeUpContext.isChecked = settings.enableWakeUpContext
+        binding.etWakeUpTokenBudget.setText(settings.wakeUpTokenBudget.toString())
         binding.switchEnabled.isChecked = settings.enabled
         binding.etTlsPin.setText(settings.tlsPinnedSpkiSha256)
         binding.spinnerClassification.setSelection(DataClassification.entries.indexOf(settings.outboundClassification).coerceAtLeast(0))
+        binding.spinnerRetrievalModePreference.setSelection(
+            when (settings.retrievalModePreference) {
+                RetrievalModePreference.RAW_VERBATIM -> 0
+                RetrievalModePreference.SUMMARY -> 1
+                RetrievalModePreference.HIERARCHICAL -> 2
+            }
+        )
 
         binding.spinnerLocalProfile.setSelection(
             LocalModelProfile.entries.indexOf(settings.localProfile).coerceAtLeast(0)
@@ -412,7 +431,14 @@ class SettingsFragment : Fragment() {
         val maxTokens = binding.etMaxTokens.text.toString().toIntOrNull() ?: 2048
         val temperature = binding.etTemperature.text.toString().toFloatOrNull() ?: 0.7f
         val enabled = binding.switchEnabled.isChecked
+        val enableWakeUpContext = binding.switchEnableWakeUpContext.isChecked
+        val wakeUpTokenBudget = binding.etWakeUpTokenBudget.text.toString().toIntOrNull() ?: 1024
         val tlsPin = binding.etTlsPin.text.toString().trim()
+        val retrievalModePreference = when (binding.spinnerRetrievalModePreference.selectedItemPosition) {
+            0 -> RetrievalModePreference.RAW_VERBATIM
+            2 -> RetrievalModePreference.HIERARCHICAL
+            else -> RetrievalModePreference.SUMMARY
+        }
         val classification = DataClassification.entries.getOrElse(binding.spinnerClassification.selectedItemPosition) { DataClassification.SENSITIVE }
         val localModelPath = binding.etLocalModelPath.text.toString().trim()
         val localProfile = LocalModelProfile.entries.getOrElse(binding.spinnerLocalProfile.selectedItemPosition) {
@@ -446,9 +472,12 @@ class SettingsFragment : Fragment() {
                 quantizationProfile = binding.etQuantizationProfile.text?.toString()?.trim().orEmpty().ifBlank { "Q4_K_M" },
                 maxRamMb = binding.etMaxRamMb.text?.toString()?.toIntOrNull() ?: 4096,
                 maxVramMb = binding.etMaxVramMb.text?.toString()?.toIntOrNull() ?: 2048
-            )
+            ),
             outboundClassification = classification,
-            tlsPinnedSpkiSha256 = tlsPin
+            tlsPinnedSpkiSha256 = tlsPin,
+            enableWakeUpContext = enableWakeUpContext,
+            wakeUpTokenBudget = wakeUpTokenBudget,
+            retrievalModePreference = retrievalModePreference
         )
         repository.saveSettings(settings)
 

@@ -5,6 +5,7 @@ import com.kaleaon.mnxmindmaker.util.eval.BenchmarkSuiteResult
 import com.kaleaon.mnxmindmaker.util.eval.BenchmarkTask
 import com.kaleaon.mnxmindmaker.util.eval.BenchmarkTaskType
 import com.kaleaon.mnxmindmaker.util.observability.RequestTrace
+import com.kaleaon.mnxmindmaker.util.observability.RetrievalTargets
 import com.kaleaon.mnxmindmaker.util.observability.SloTargets
 import com.kaleaon.mnxmindmaker.util.observability.SloTracker
 import com.kaleaon.mnxmindmaker.util.observability.TraceEvent
@@ -81,6 +82,7 @@ class SloDashboardTest {
         assertTrue(dashboard.contains("PROMPT_PIPELINE"))
         assertTrue(dashboard.contains("Deploy Reliability"))
         assertTrue(dashboard.contains("Runtime Quality"))
+        assertTrue(dashboard.contains("Retrieval Benchmarks"))
         assertTrue(dashboard.contains("OPENAI"))
     }
 
@@ -142,5 +144,32 @@ class SloDashboardTest {
         assertEquals(0.1, runtimeSummary.overallErrorRate, 0.001)
         assertTrue(runtimeSummary.providers.any { it.provider == "OPENAI" && it.avgLatencyMs == 400L })
         assertTrue(runtimeSummary.providers.any { it.provider == "LOCAL" && it.errorRate == 0.0 })
+    }
+
+    @Test
+    fun `retrieval benchmarks publish markdown and json with regression alerts`() {
+        val report = SloTracker.ingestRetrievalBenchmarks(
+            perModeRecallAtK = mapOf("semantic" to 0.82, "hybrid" to 0.91),
+            perModeMrr = mapOf("semantic" to 0.56, "hybrid" to 0.64),
+            targets = RetrievalTargets(
+                minRecallAtKByMode = mapOf("semantic" to 0.85, "hybrid" to 0.90),
+                minMrrByMode = mapOf("semantic" to 0.60, "hybrid" to 0.60)
+            )
+        )
+
+        assertEquals(2, report.metricsByMode.size)
+        assertEquals(2, report.alerts.size)
+        assertTrue(report.alerts.any { it.metric == "recall@k" && it.mode == "semantic" })
+        assertTrue(report.alerts.any { it.metric == "mrr" && it.mode == "semantic" })
+
+        val sloReport = SloTracker.fromBenchmarks(BenchmarkSuiteResult(emptyList()))
+        val markdown = SloTracker.renderInternalDashboard(sloReport, traces = emptyList(), retrievalReport = report)
+        assertTrue(markdown.contains("semantic: recall@k=82.00%, mrr=56.00%"))
+        assertTrue(markdown.contains("Retrieval Regression Alerts"))
+
+        val json = SloTracker.renderCiJsonReport(sloReport, traces = emptyList(), retrievalReport = report)
+        assertTrue(json.contains("\"retrieval\""))
+        assertTrue(json.contains("\"mode\":\"semantic\""))
+        assertTrue(json.contains("\"regressionAlerts\""))
     }
 }
