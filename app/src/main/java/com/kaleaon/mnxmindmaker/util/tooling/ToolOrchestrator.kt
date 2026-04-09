@@ -17,10 +17,6 @@ class ToolOrchestrator(
     private val maxToolRounds: Int = 6,
     private val tracer: RequestTracer? = null,
     private val nowMs: () -> Long = { System.currentTimeMillis() }
-    private val nowMs: () -> Long = { System.currentTimeMillis() },
-    private val routingPolicy: RoutingPolicy = RoutingPolicy()
-    private val routingPolicy: RoutingPolicy = RoutingPolicy(),
-    private val maxToolRounds: Int = 6
 ) {
 
     suspend fun run(systemPrompt: String, userPrompt: String): String {
@@ -37,31 +33,32 @@ class ToolOrchestrator(
                 tools = registry.specs(),
                 policy = routingPolicy
             )
+
             val providerName = settingsChain.firstOrNull()?.provider?.name ?: "unknown"
             tracer?.recordProviderResponse(providerName, turn.text, nowMs() - providerStart)
 
-            val routedProvider = settingsChain.firstOrNull()?.provider?.name ?: "UNKNOWN"
-            tracer?.recordProviderResponse(routedProvider, turn.text, nowMs() - providerStart)
             if (turn.text.isNotBlank()) {
                 textParts += turn.text.trim()
             }
 
-            if (turn.text.isNotBlank()) textParts += turn.text.trim()
             if (turn.toolInvocations.isEmpty()) {
                 return textParts.joinToString("\n\n").ifBlank { "Done." }
             }
 
             val toolResults = JSONArray()
             for (invocation in turn.toolInvocations) {
+                val toolStart = nowMs()
                 val result = executeInvocation(invocation)
                 tracer?.recordToolCall(invocation, result, nowMs() - toolStart)
+
+                val outputText = result.contentJson.optString("output_text", result.contentJson.toString())
                 toolResults.put(
                     JSONObject()
-                        .put("tool_call_id", result.toolCallId)
+                        .put("tool_call_id", result.toolUseId)
                         .put("name", invocation.toolName)
-                        .put("success", result.success)
-                        .put("output_text", result.outputText)
-                        .put("output_json", result.outputJson)
+                        .put("success", !result.isError)
+                        .put("output_text", outputText)
+                        .put("output_json", result.contentJson)
                 )
             }
 
@@ -70,7 +67,9 @@ class ToolOrchestrator(
                 .put("content", toolResults)
         }
 
-        return textParts.joinToString("\n\n").ifBlank { "Tool loop reached limit with no textual response." }
+        return textParts
+            .joinToString("\n\n")
+            .ifBlank { "Tool loop reached limit with no textual response." }
     }
 
     private suspend fun executeInvocation(invocation: ToolInvocation): ToolResult {
