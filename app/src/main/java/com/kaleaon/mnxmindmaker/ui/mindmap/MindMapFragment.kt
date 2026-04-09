@@ -31,7 +31,6 @@ import com.kaleaon.mnxmindmaker.ui.deploy.DeploymentSessionState
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import com.kaleaon.mnxmindmaker.util.ContinuityAuditResult
 
 class MindMapFragment : Fragment() {
 
@@ -42,6 +41,7 @@ class MindMapFragment : Fragment() {
 
     private var chatDialog: AlertDialog? = null
     private var chatAdapter: ChatMessageAdapter? = null
+    private var displayedToolApprovalRequestId: String? = null
 
     private val openMnxFile = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri ?: return@registerForActivityResult
@@ -125,6 +125,23 @@ class MindMapFragment : Fragment() {
             viewModel.clearCompareCandidateMessage()
         }
 
+        viewModel.pendingToolApprovalRequest.observe(viewLifecycleOwner) { request ->
+            if (request == null) {
+                displayedToolApprovalRequestId = null
+                return@observe
+            }
+            if (request.id == displayedToolApprovalRequestId) return@observe
+            displayedToolApprovalRequestId = request.id
+            showToolApprovalDialog(request)
+        }
+
+        viewModel.lastToolApprovalResolution.observe(viewLifecycleOwner) { resolution ->
+            resolution ?: return@observe
+            val status = if (resolution.approved) "approved" else "denied"
+            Snackbar.make(binding.root, "Tool request ${resolution.requestId.take(8)} $status.", Snackbar.LENGTH_SHORT).show()
+            viewModel.clearToolApprovalResolution()
+        }
+
         KthemeManager.activeTheme.observe(viewLifecycleOwner) { theme ->
             binding.mindMapCanvas.applyTheme(theme)
             theme?.colorScheme?.let { cs ->
@@ -147,8 +164,12 @@ class MindMapFragment : Fragment() {
         }
         binding.btnExportMnx.setOnClickListener { viewModel.exportToMnx() }
         binding.btnImportMnx.setOnClickListener { openMnxFile.launch(arrayOf("*/*")) }
-        binding.btnAskAi.setOnClickListener { showChatDialog() }
-        binding.btnAskAi.setOnClickListener { showAskAiDialogWithDataUsePanel() }
+        binding.btnAskAi.setOnClickListener {
+            when (viewModel.askAiEntryMode.value ?: AskAiEntryMode.DATA_USE_PANEL) {
+                AskAiEntryMode.CHAT_PANEL -> showChatDialog()
+                AskAiEntryMode.DATA_USE_PANEL -> showAskAiDialogWithDataUsePanel()
+            }
+        }
         binding.btnReviewAudit.setOnClickListener {
             viewModel.runContinuityAudit()
             showContinuityAuditDialog(viewModel.auditResult.value)

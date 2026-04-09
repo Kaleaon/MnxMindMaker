@@ -18,6 +18,7 @@ import com.kaleaon.mnxmindmaker.repository.LlmSettingsRepository
 import com.kaleaon.mnxmindmaker.repository.MnxRepository
 import com.kaleaon.mnxmindmaker.util.ContinuityAuditResult
 import com.kaleaon.mnxmindmaker.util.DimensionMapper
+import com.kaleaon.mnxmindmaker.util.tooling.ToolApprovalRequest
 import com.kaleaon.mnxmindmaker.util.LlmApiClient
 import com.kaleaon.mnxmindmaker.util.LlmApiException
 import com.kaleaon.mnxmindmaker.util.run_continuity_audit
@@ -71,6 +72,17 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
 
     private val _compareCandidateMessageId = MutableLiveData<String?>()
     val compareCandidateMessageId: LiveData<String?> get() = _compareCandidateMessageId
+
+    private val interactionPolicy = MindMapInteractionPolicy()
+
+    private val _pendingToolApprovalRequest = MutableLiveData<ToolApprovalRequest?>()
+    val pendingToolApprovalRequest: LiveData<ToolApprovalRequest?> get() = _pendingToolApprovalRequest
+
+    private val _lastToolApprovalResolution = MutableLiveData<ToolApprovalResolution?>()
+    val lastToolApprovalResolution: LiveData<ToolApprovalResolution?> get() = _lastToolApprovalResolution
+
+    private val _askAiEntryMode = MutableLiveData(interactionPolicy.askAiEntryMode)
+    val askAiEntryMode: LiveData<AskAiEntryMode> get() = _askAiEntryMode
 
     private val acceptedFindingIds = mutableSetOf<String>()
 
@@ -330,6 +342,21 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
 
     fun clearCompareCandidateMessage() {
         _compareCandidateMessageId.value = null
+    }
+
+    fun requestToolApproval(request: ToolApprovalRequest) {
+        interactionPolicy.queueToolApproval(request)
+        _pendingToolApprovalRequest.value = interactionPolicy.peekPendingToolApprovalRequest()
+    }
+
+    fun resolveToolApproval(requestId: String, approved: Boolean) {
+        val resolution = interactionPolicy.resolveToolApproval(requestId, approved) ?: return
+        _pendingToolApprovalRequest.value = interactionPolicy.peekPendingToolApprovalRequest()
+        _lastToolApprovalResolution.value = resolution
+    }
+
+    fun clearToolApprovalResolution() {
+        _lastToolApprovalResolution.value = null
     }
 
     private fun runSingleChat(
