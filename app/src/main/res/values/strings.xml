@@ -155,6 +155,7 @@
     <string name="link_success">%1$s account linked.</string>
     <string name="link_refresh_success">%1$s access token refreshed.</string>
     <string name="link_refresh_failed">%1$s refresh failed. Link an account with a refresh token first.</string>
+    <string name="link_refresh_provider_rejected">%1$s rejected the refresh token. Re-link this account to continue.</string>
     <string name="link_revoke_success">%1$s account link revoked.</string>
     <string name="link_expiry_unknown">unknown</string>
     <string name="link_status_not_linked">%1$s: not linked</string>
