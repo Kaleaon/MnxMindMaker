@@ -9,6 +9,16 @@ import org.json.JSONObject
 
 object BootPacketGenerator {
 
+    data class WakeUpTokenBudget(
+        val l0Tokens: Int = 320,
+        val l1Tokens: Int = 480
+    ) {
+        init {
+            require(l0Tokens >= 0) { "l0Tokens must be >= 0" }
+            require(l1Tokens >= 0) { "l1Tokens must be >= 0" }
+        }
+    }
+
     enum class Mode {
         FULL,
         EMERGENCY_WARNING,
@@ -256,5 +266,170 @@ object BootPacketGenerator {
         Mode.RELATIONSHIP -> packet.copy(projectSlice = emptyList())
         Mode.PROJECT -> packet
         Mode.PUBLIC_PERSONA -> packet.copy(warningSlice = emptyList())
+    }
+
+    fun generateWakeUpContext(
+        graph: MindGraph,
+        tokenBudget: WakeUpTokenBudget = WakeUpTokenBudget()
+    ): String {
+        val l0Items = buildL0Items(graph.nodes)
+        val l1Items = buildL1Items(graph.nodes)
+
+        val l0Selected = fitItemsToBudget(l0Items, tokenBudget.l0Tokens)
+        val l1Selected = fitItemsToBudget(l1Items, tokenBudget.l1Tokens)
+
+        return buildString {
+            appendLine("L0: identity/core values/core constraints")
+            if (l0Selected.isEmpty()) {
+                appendLine("- _none_")
+            } else {
+                l0Selected.forEach { appendLine(it.renderedLine) }
+            }
+            appendLine()
+            appendLine("L1: stable preferences/projects/long-horizon context")
+            if (l1Selected.isEmpty()) {
+                appendLine("- _none_")
+            } else {
+                l1Selected.forEach { appendLine(it.renderedLine) }
+            }
+        }.trimEnd()
+    }
+
+    private data class WakeItem(
+        val priorityBucket: Int,
+        val score: Float,
+        val sortLabel: String,
+        val id: String,
+        val renderedLine: String
+    )
+
+    private fun buildL0Items(nodes: List<MindNode>): List<WakeItem> =
+        nodes.asSequence()
+            .filterNot { it.attributes["protection_level"]?.lowercase() == "sealed" }
+            .mapNotNull { node ->
+                val bucket = when {
+                    node.type == NodeType.IDENTITY -> 0
+                    node.type == NodeType.VALUE || node.attributes["semantic_subtype"]?.lowercase() in setOf("value", "core_value") -> 1
+                    node.type == NodeType.DRIFT_RULE -> 2
+                    node.attributes["semantic_subtype"]?.lowercase() in setOf("constraint", "core_constraint", "drift_rule") -> 2
+                    node.attributes["memory_class"]?.lowercase() == "warning" -> 2
+                    else -> null
+                } ?: return@mapNotNull null
+
+                WakeItem(
+                    priorityBucket = bucket,
+                    score = wakeScore(node),
+                    sortLabel = node.label.lowercase(),
+                    id = node.id,
+                    renderedLine = formatWakeLine(node)
+                )
+            }
+            .sortedWith(
+                compareBy<WakeItem> { it.priorityBucket }
+                    .thenByDescending { it.score }
+                    .thenBy { it.sortLabel }
+                    .thenBy { it.id }
+            )
+            .toList()
+
+    private fun buildL1Items(nodes: List<MindNode>): List<WakeItem> =
+        nodes.asSequence()
+            .filterNot { it.attributes["protection_level"]?.lowercase() == "sealed" }
+            .mapNotNull { node ->
+                val subtype = node.attributes["semantic_subtype"]?.lowercase()
+                val bucket = when {
+                    subtype in setOf("preference", "stable_preference") || node.type in setOf(NodeType.PERSONALITY, NodeType.BELIEF) -> 0
+                    subtype == "project" || node.label.contains("project", ignoreCase = true) -> 1
+                    subtype in setOf("long_horizon", "long_term", "evergreen") ||
+                        node.attributes["horizon"]?.lowercase() in setOf("long", "long_term") -> 2
+                    else -> null
+                } ?: return@mapNotNull null
+
+                WakeItem(
+                    priorityBucket = bucket,
+                    score = wakeScore(node),
+                    sortLabel = node.label.lowercase(),
+                    id = node.id,
+                    renderedLine = formatWakeLine(node)
+                )
+            }
+            .sortedWith(
+                compareBy<WakeItem> { it.priorityBucket }
+                    .thenByDescending { it.score }
+                    .thenBy { it.sortLabel }
+                    .thenBy { it.id }
+            )
+            .toList()
+
+    private fun wakeScore(node: MindNode): Float {
+        val relevance = node.attributes["current_relevance"]?.toFloatOrNull()?.coerceIn(0f, 1f) ?: 0.4f
+        val confidence = node.attributes["confidence"]?.toFloatOrNull()?.coerceIn(0f, 1f) ?: 0.5f
+        val protectionBonus = if (node.attributes["protection_level"]?.lowercase() == "protected") 0.15f else 0f
+        return (relevance * 0.6f + confidence * 0.4f + protectionBonus).coerceIn(0f, 1f)
+    }
+
+    private fun formatWakeLine(node: MindNode): String {
+        val base = StringBuilder()
+            .append("- [")
+            .append(node.type.name.lowercase())
+            .append("] ")
+            .append(node.label.trim())
+
+        if (node.description.isNotBlank()) {
+            base.append(" :: ").append(node.description.trim())
+        }
+
+        val stableAttributeKeys = listOf(
+            "semantic_subtype",
+            "horizon",
+            "current_relevance",
+            "confidence",
+            "protection_level"
+        )
+        val attrs = stableAttributeKeys
+            .mapNotNull { key ->
+                node.attributes[key]
+                    ?.takeIf { it.isNotBlank() }
+                    ?.let { value -> "$key=$value" }
+            }
+        if (attrs.isNotEmpty()) {
+            base.append(" {").append(attrs.joinToString(", ")).append("}")
+        }
+        return base.toString().replace(Regex("\\s+"), " ").trim()
+    }
+
+    private fun fitItemsToBudget(items: List<WakeItem>, budgetTokens: Int): List<WakeItem> {
+        if (budgetTokens <= 0 || items.isEmpty()) return emptyList()
+
+        val selected = mutableListOf<WakeItem>()
+        var used = 0
+        items.forEach { item ->
+            val tokens = estimateTokens(item.renderedLine)
+            if (used + tokens <= budgetTokens) {
+                selected += item
+                used += tokens
+            } else {
+                val remaining = budgetTokens - used
+                if (remaining > 0) {
+                    val truncatedLine = truncateToTokenBudget(item.renderedLine, remaining)
+                    if (truncatedLine.isNotBlank()) {
+                        selected += item.copy(renderedLine = truncatedLine)
+                    }
+                }
+                return selected
+            }
+        }
+        return selected
+    }
+
+    private fun estimateTokens(text: String): Int =
+        ((text.trim().length + 3) / 4).coerceAtLeast(1)
+
+    private fun truncateToTokenBudget(text: String, budgetTokens: Int): String {
+        if (budgetTokens <= 0) return ""
+        val maxChars = (budgetTokens * 4).coerceAtLeast(1)
+        if (text.length <= maxChars) return text
+        val clipped = text.take(maxChars).trimEnd()
+        return if (clipped.length <= 1) "…" else "$clipped…"
     }
 }
