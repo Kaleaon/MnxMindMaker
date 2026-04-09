@@ -38,6 +38,12 @@ enum class ComputeBackend(val label: String) {
     AUTO("Auto")
 }
 
+enum class RetrievalModePreference {
+    RAW_VERBATIM,
+    SUMMARY,
+    HIERARCHICAL
+}
+
 data class LocalRuntimeControls(
     val computeBackend: ComputeBackend = ComputeBackend.AUTO,
     val contextWindowTokens: Int = 8192,
@@ -88,7 +94,10 @@ data class LlmSettings(
     val fallbackOrder: LlmFallbackOrder = LlmFallbackOrder.REMOTE_ONLY,
     val runtimeControls: LocalRuntimeControls = LocalRuntimeControls(),
     val outboundClassification: DataClassification = DataClassification.SENSITIVE,
-    val tlsPinnedSpkiSha256: String = ""
+    val tlsPinnedSpkiSha256: String = "",
+    val enableWakeUpContext: Boolean = true,
+    val wakeUpTokenBudget: Int = 1024,
+    val retrievalModePreference: RetrievalModePreference = RetrievalModePreference.SUMMARY
 ) {
     val capabilities: LlmCapabilityFlags
         get() = provider.defaultCapabilities(localProfile)
