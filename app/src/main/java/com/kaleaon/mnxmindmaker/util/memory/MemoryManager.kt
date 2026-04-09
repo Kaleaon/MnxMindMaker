@@ -38,18 +38,59 @@ class MemoryManager {
         val sensitivity: String = "low"
     )
 
+    interface MemoryPersistenceStore {
+        fun deleteExpired(category: MemoryCategory, memoryIds: List<String>)
+    }
+
+    interface MemoryExpiryTelemetry {
+        fun onExpiredRemoved(category: MemoryCategory, removedCount: Int, malformedTimestampCount: Int)
+    }
+
+    private object NoOpMemoryPersistenceStore : MemoryPersistenceStore {
+        override fun deleteExpired(category: MemoryCategory, memoryIds: List<String>) = Unit
+    }
+
+    private object StdoutMemoryExpiryTelemetry : MemoryExpiryTelemetry {
+        override fun onExpiredRemoved(category: MemoryCategory, removedCount: Int, malformedTimestampCount: Int) {
+            println(
+                "MemoryManager.purgeExpired category=$category removed=$removedCount malformed_timestamps=$malformedTimestampCount"
+            )
+        }
+    }
+
+    private data class PurgeSelection(val expiredIds: List<String>, val malformedTimestampCount: Int)
+
     private val sessionTurns = mutableListOf<SessionTurn>()
     private val profileMemories = ConcurrentHashMap<String, MindNode>()
     private val semanticIndex = SemanticMemoryVectorIndex()
+    private val expiryPurgeCounters = ConcurrentHashMap<MemoryCategory, Int>()
+    private val persistenceStore: MemoryPersistenceStore
+    private val expiryTelemetry: MemoryExpiryTelemetry
 
     @Volatile
     private var policySettings: MemoryPolicySettings = MemoryPolicySettings()
+
+    constructor() : this(
+        persistenceStore = NoOpMemoryPersistenceStore,
+        expiryTelemetry = StdoutMemoryExpiryTelemetry
+    )
+
+    constructor(
+        persistenceStore: MemoryPersistenceStore,
+        expiryTelemetry: MemoryExpiryTelemetry = StdoutMemoryExpiryTelemetry
+    ) {
+        this.persistenceStore = persistenceStore
+        this.expiryTelemetry = expiryTelemetry
+        MemoryCategory.entries.forEach { expiryPurgeCounters[it] = 0 }
+    }
 
     fun setPolicy(settings: MemoryPolicySettings) {
         policySettings = settings
     }
 
     fun getPolicy(): MemoryPolicySettings = policySettings
+
+    fun getExpiryPurgeCounters(): Map<MemoryCategory, Int> = expiryPurgeCounters.toMap()
 
     fun appendSessionTurn(turn: SessionTurn) {
         if (policySettings.mode == MemoryPolicyMode.OFF) return
@@ -139,21 +180,65 @@ class MemoryManager {
 
     private fun purgeExpired(nowEpochMs: Long) {
         val expiryMap = policySettings.expiryByCategoryMs
-
-        val sessionExpiry = expiryMap[MemoryCategory.SESSION]
-        if (sessionExpiry != null) {
-            sessionTurns.removeAll { nowEpochMs - it.timestampMs > sessionExpiry }
+        purgeExpiredByCategory(MemoryCategory.SESSION, expiryMap[MemoryCategory.SESSION]) { maxAgeMs ->
+            PurgeSelection(
+                expiredIds = sessionTurns
+                    .filter { nowEpochMs - it.timestampMs > maxAgeMs }
+                    .map { it.id },
+                malformedTimestampCount = 0
+            )
+        }?.let { expiredIds ->
+            sessionTurns.removeAll { it.id in expiredIds.toSet() }
         }
 
-        val profileExpiry = expiryMap[MemoryCategory.PROFILE]
-        if (profileExpiry != null) {
-            val toRemove = profileMemories.values
-                .filter { nowEpochMs - (it.attributes["timestamp"]?.toLongOrNull() ?: nowEpochMs) > profileExpiry }
-                .map { it.id }
-            toRemove.forEach { profileMemories.remove(it) }
+        purgeExpiredByCategory(MemoryCategory.PROFILE, expiryMap[MemoryCategory.PROFILE]) { maxAgeMs ->
+            profileMemories.values.selectExpiredByTimestamp(
+                nowEpochMs = nowEpochMs,
+                maxAgeMs = maxAgeMs
+            )
+        }?.let { expiredIds ->
+            expiredIds.forEach { profileMemories.remove(it) }
         }
 
-        semanticIndex.purgeExpired(nowEpochMs, expiryMap[MemoryCategory.SEMANTIC])
+        purgeExpiredByCategory(MemoryCategory.SEMANTIC, expiryMap[MemoryCategory.SEMANTIC]) { maxAgeMs ->
+            semanticIndex.memories().selectExpiredByTimestamp(
+                nowEpochMs = nowEpochMs,
+                maxAgeMs = maxAgeMs
+            )
+        }?.let { expiredIds ->
+            semanticIndex.deleteMany(expiredIds)
+        }
+    }
+
+    private fun purgeExpiredByCategory(
+        category: MemoryCategory,
+        maxAgeMs: Long?,
+        selectExpired: (Long) -> PurgeSelection
+    ): List<String>? {
+        if (maxAgeMs == null) return null
+        val selection = selectExpired(maxAgeMs)
+        if (selection.expiredIds.isEmpty()) {
+            expiryTelemetry.onExpiredRemoved(category, 0, selection.malformedTimestampCount)
+            return emptyList()
+        }
+        persistenceStore.deleteExpired(category, selection.expiredIds)
+        expiryPurgeCounters.compute(category) { _, count -> (count ?: 0) + selection.expiredIds.size }
+        expiryTelemetry.onExpiredRemoved(category, selection.expiredIds.size, selection.malformedTimestampCount)
+        return selection.expiredIds
+    }
+
+    private fun Collection<MindNode>.selectExpiredByTimestamp(nowEpochMs: Long, maxAgeMs: Long): PurgeSelection {
+        var malformedTimestampCount = 0
+        val expiredIds = this.filter { memory ->
+            val ts = parseTimestamp(memory.attributes["timestamp"])
+            if (ts == null) malformedTimestampCount += 1
+            nowEpochMs - (ts ?: nowEpochMs) > maxAgeMs
+        }.map { it.id }
+        return PurgeSelection(expiredIds = expiredIds, malformedTimestampCount = malformedTimestampCount)
+    }
+
+    private fun parseTimestamp(rawTimestamp: String?): Long? {
+        return rawTimestamp?.toLongOrNull()
     }
 
     private fun SessionTurn.toMindNode(): MindNode {
@@ -213,16 +298,10 @@ private class SemanticMemoryVectorIndex {
             .toList()
     }
 
-    fun purgeExpired(nowEpochMs: Long, maxAgeMs: Long?) {
-        if (maxAgeMs == null) return
-        val expiredIds = memories.values
-            .filter { memory ->
-                val ts = memory.attributes["timestamp"]?.toLongOrNull() ?: nowEpochMs
-                nowEpochMs - ts > maxAgeMs
-            }
-            .map { it.id }
+    fun memories(): Collection<MindNode> = memories.values.toList()
 
-        expiredIds.forEach {
+    fun deleteMany(ids: List<String>) {
+        ids.forEach {
             memories.remove(it)
             vectors.remove(it)
         }
