@@ -70,6 +70,11 @@ enum class LlmProvider(
 ) {
     ANTHROPIC("Anthropic (Claude)", "https://api.anthropic.com/v1"),
     OPENAI("OpenAI (GPT)", "https://api.openai.com/v1"),
+    OPENAI_COMPATIBLE_SELF_HOSTED(
+        "OpenAI-compatible (Self-hosted)",
+        "http://10.0.2.2:8000/v1",
+        requiresApiKey = false
+    ),
     GEMINI("Google Gemini", "https://generativelanguage.googleapis.com/v1beta"),
     VLLM_GEMMA4("vLLM Gemma 4 (Self-hosted)", "http://10.0.2.2:8000/v1", requiresApiKey = false),
     LOCAL_ON_DEVICE(
@@ -106,6 +111,7 @@ data class LlmSettings(
 fun LlmProvider.defaultModel(): String = when (this) {
     LlmProvider.ANTHROPIC -> "claude-3-5-sonnet-20241022"
     LlmProvider.OPENAI -> "gpt-4o"
+    LlmProvider.OPENAI_COMPATIBLE_SELF_HOSTED -> "openai-compatible/default"
     LlmProvider.GEMINI -> "gemini-1.5-pro"
     LlmProvider.VLLM_GEMMA4 -> "google/gemma-4-E4B-it"
     LlmProvider.LOCAL_ON_DEVICE -> "local/default"
@@ -115,6 +121,7 @@ fun LlmProvider.defaultCapabilities(profile: LocalModelProfile = LocalModelProfi
     return when (this) {
         LlmProvider.ANTHROPIC,
         LlmProvider.OPENAI,
+        LlmProvider.OPENAI_COMPATIBLE_SELF_HOSTED,
         LlmProvider.GEMINI,
         LlmProvider.VLLM_GEMMA4 -> LlmCapabilityFlags(
             supportsToolPlanning = true,

@@ -85,6 +85,7 @@
     <string name="settings_saved">%1$s settings saved</string>
     <string name="hint_anthropic_key">Get your key at console.anthropic.com</string>
     <string name="hint_openai_key">Get your key at platform.openai.com</string>
+    <string name="hint_openai_compatible_self_hosted_key">Optional bearer token for your self-hosted OpenAI-compatible endpoint.</string>
     <string name="hint_gemini_key">Get your key at aistudio.google.com</string>
     <string name="hint_vllm_key">Optional for local vLLM. Leave blank to use Bearer EMPTY.</string>
     <string name="anthropic_api_info">Anthropic Claude — powerful reasoning, long context</string>
@@ -119,6 +120,7 @@
     <string name="preflight_result_idle">Preflight diagnostics idle.</string>
     <string name="preflight_running">Running preflight diagnostics…</string>
     <string name="preflight_blocked_validation">Preflight blocked: fix critical validation issues first.</string>
+    <string name="api_key_required_for_provider">%1$s requires an API key.</string>
     <string name="hint_local_model_path">Set the on-device model file path and runtime endpoint; no API key required.</string>
     <string name="local_model_path_label">Local Model Path</string>
     <string name="local_profile_label">Local Profile</string>
@@ -160,6 +162,7 @@
     <string name="link_success">%1$s account linked.</string>
     <string name="link_refresh_success">%1$s access token refreshed.</string>
     <string name="link_refresh_failed">%1$s refresh failed. Link an account with a refresh token first.</string>
+    <string name="link_refresh_provider_rejected">%1$s rejected the refresh token. Re-link this account to continue.</string>
     <string name="link_revoke_success">%1$s account link revoked.</string>
     <string name="link_expiry_unknown">unknown</string>
     <string name="link_status_not_linked">%1$s: not linked</string>

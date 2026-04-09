@@ -14,6 +14,7 @@ import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.Assert.fail
 import org.junit.Test
 
 class ProviderRouterTest {
@@ -131,13 +132,99 @@ class ProviderRouterTest {
     }
 
     @Test
+    fun `local provider supports explicit self hosted providers only`() {
+    fun `default provider router includes gemini adapter`() {
+        val health = ProviderRouter().healthCheck(settings(LlmProvider.GEMINI))
+
+        assertFalse(health.message.contains("No adapter"))
+    }
+
+    @Test
     fun `local provider supports vllm and self hosted openai but not official openai`() {
         val provider = com.kaleaon.mnxmindmaker.util.provider.LocalProvider()
 
         assertTrue(provider.supports(settings(LlmProvider.VLLM_GEMMA4)))
-        assertTrue(provider.supports(settings(LlmProvider.OPENAI, baseUrl = "http://10.0.2.2:9000/v1")))
+        assertTrue(provider.supports(settings(LlmProvider.OPENAI_COMPATIBLE_SELF_HOSTED, baseUrl = "http://10.0.2.2:9000/v1")))
         assertFalse(provider.supports(settings(LlmProvider.OPENAI, baseUrl = "https://api.openai.com/v1")))
-        assertFalse(provider.supports(settings(LlmProvider.LOCAL_ON_DEVICE)))
+        assertFalse(provider.supports(settings(LlmProvider.OPENAI, baseUrl = "http://10.0.2.2:9000/v1")))
+    }
+
+    @Test
+    fun `official openai always routes to chatgpt provider`() {
+        val router = ProviderRouter(
+            providers = listOf(
+                StubProvider("local") { it.provider == LlmProvider.OPENAI_COMPATIBLE_SELF_HOSTED },
+                StubProvider("chatgpt") { it.provider == LlmProvider.OPENAI }
+            )
+        )
+
+        val turn = router.chat(
+            settingsChain = listOf(settings(LlmProvider.OPENAI)),
+            systemPrompt = "system",
+            transcript = emptyList()
+        )
+
+        assertEquals("chatgpt", turn.text)
+    }
+
+    @Test
+    fun `self hosted openai compatible always routes to local provider`() {
+        val router = ProviderRouter(
+            providers = listOf(
+                StubProvider("local") { it.provider == LlmProvider.OPENAI_COMPATIBLE_SELF_HOSTED },
+                StubProvider("chatgpt") { it.provider == LlmProvider.OPENAI }
+            )
+        )
+
+        val turn = router.chat(
+            settingsChain = listOf(settings(LlmProvider.OPENAI_COMPATIBLE_SELF_HOSTED, baseUrl = "http://10.0.2.2:9000/v1")),
+            systemPrompt = "system",
+            transcript = emptyList()
+        )
+
+        assertEquals("local", turn.text)
+    }
+
+    @Test
+    fun `misconfigured openai url fails fast with actionable message`() {
+        val router = ProviderRouter(
+            providers = listOf(
+                StubProvider("chatgpt") { it.provider == LlmProvider.OPENAI }
+            )
+        )
+
+        try {
+            router.chat(
+                settingsChain = listOf(settings(LlmProvider.OPENAI, baseUrl = "http://10.0.2.2:9000/v1")),
+                systemPrompt = "system",
+                transcript = emptyList()
+            )
+            fail("Expected an exception for misconfigured OpenAI URL")
+        } catch (e: Exception) {
+            assertTrue(e.message.orEmpty().contains("OpenAI must use https://api.openai.com/v1"))
+            assertTrue(e.message.orEmpty().contains("OpenAI-compatible (Self-hosted)"))
+        }
+    }
+
+    @Test
+    fun `misconfigured self hosted url fails fast with actionable message`() {
+        val router = ProviderRouter(
+            providers = listOf(
+                StubProvider("local") { it.provider == LlmProvider.OPENAI_COMPATIBLE_SELF_HOSTED }
+            )
+        )
+
+        try {
+            router.chat(
+                settingsChain = listOf(settings(LlmProvider.OPENAI_COMPATIBLE_SELF_HOSTED, baseUrl = "https://api.openai.com/v1")),
+                systemPrompt = "system",
+                transcript = emptyList()
+            )
+            fail("Expected an exception for misconfigured self-hosted URL")
+        } catch (e: Exception) {
+            assertTrue(e.message.orEmpty().contains("cannot use api.openai.com"))
+            assertTrue(e.message.orEmpty().contains("Select OpenAI (GPT)"))
+        }
     }
 
     private fun settings(

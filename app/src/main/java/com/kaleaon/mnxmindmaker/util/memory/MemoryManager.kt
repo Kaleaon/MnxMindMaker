@@ -191,7 +191,7 @@ class MemoryManager(
             emptyList()
         }
         val all = sessionNodes + profileNodes + semanticNodes
-        return MemoryRetrievalService.retrieve(
+        return MemoryRetrievalService.retrieveWithSuggestions(
             memories = all,
             context = MemoryRetrievalService.RetrievalContext(prompt = query, task = "memory_search"),
             limit = limit,
@@ -205,7 +205,7 @@ class MemoryManager(
                 ),
                 allowSensitiveBoot = true
             )
-        )
+        ).memories
     }
 
     fun status(nowEpochMs: Long = System.currentTimeMillis()): MemoryStatus {
@@ -266,7 +266,11 @@ class MemoryManager(
         val routedCandidates = rawCandidates.map { MemoryRouting.applyCanonicalRoute(it, route) }
         val tiered = MemoryRouting.tierCandidates(routedCandidates, route)
 
-        return MemoryRetrievalService.retrieveForPromptInjection(tiered.flattened(), context, limit)
+        return MemoryRetrievalService.retrieveForPromptInjectionWithSuggestions(
+            memories = tiered.flattened(),
+            context = context,
+            limit = limit
+        ).memories
     }
 
     private fun purgeExpired(nowEpochMs: Long) {

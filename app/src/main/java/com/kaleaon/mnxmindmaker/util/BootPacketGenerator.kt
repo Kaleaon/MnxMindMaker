@@ -179,7 +179,11 @@ object BootPacketGenerator {
             stateSlice = targetedSlice(state, limitFor(mode).state, context),
             relationshipSlice = targetedSlice(relationships, limitFor(mode).relationship, context),
             warningSlice = targetedSlice(warnings, limitFor(mode).warning, context),
-            memorySlice = MemoryRetrievalService.retrieveForPromptInjection(memories, context, limitFor(mode).memory),
+            memorySlice = MemoryRetrievalService.retrieveForPromptInjectionWithSuggestions(
+                memories = memories,
+                context = context,
+                limit = limitFor(mode).memory
+            ).memories,
             projectSlice = targetedSlice(projects, limitFor(mode).project, context),
             driftRuleSlice = targetedSlice(driftRules, limitFor(mode).driftRule, context),
             continuityAudit = continuityAudit
