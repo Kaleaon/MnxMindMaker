@@ -114,6 +114,11 @@
     <string name="retrieval_mode_hierarchical">hierarchical</string>
     <string name="enabled_label">Enable this provider</string>
     <string name="save_settings">Save Settings</string>
+    <string name="settings_validation_failed">Fix critical validation issues before saving.</string>
+    <string name="run_preflight_diagnostics">Run preflight diagnostics</string>
+    <string name="preflight_result_idle">Preflight diagnostics idle.</string>
+    <string name="preflight_running">Running preflight diagnostics…</string>
+    <string name="preflight_blocked_validation">Preflight blocked: fix critical validation issues first.</string>
     <string name="hint_local_model_path">Set the on-device model file path and runtime endpoint; no API key required.</string>
     <string name="local_model_path_label">Local Model Path</string>
     <string name="local_profile_label">Local Profile</string>

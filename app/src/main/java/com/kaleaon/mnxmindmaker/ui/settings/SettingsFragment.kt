@@ -10,6 +10,7 @@ import android.widget.ArrayAdapter
 import android.widget.LinearLayout
 import androidx.appcompat.app.AlertDialog
 import androidx.fragment.app.Fragment
+import androidx.lifecycle.lifecycleScope
 import androidx.navigation.fragment.findNavController
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.google.android.material.snackbar.Snackbar
@@ -29,10 +30,17 @@ import com.kaleaon.mnxmindmaker.model.ModelManager
 import com.kaleaon.mnxmindmaker.model.ModelInstallState
 import com.kaleaon.mnxmindmaker.model.PrivacyMode
 import com.kaleaon.mnxmindmaker.model.RetrievalModePreference
-import com.kaleaon.mnxmindmaker.model.defaultModel
 import com.kaleaon.mnxmindmaker.repository.AuthRepository
 import com.kaleaon.mnxmindmaker.repository.ExternalAccountRepository
 import com.kaleaon.mnxmindmaker.repository.LlmSettingsRepository
+import com.kaleaon.mnxmindmaker.util.provider.PreflightDiagnosticsResult
+import com.kaleaon.mnxmindmaker.util.provider.ProviderPreflightDiagnostics
+import com.kaleaon.mnxmindmaker.util.provider.ValidationIssue
+import com.kaleaon.mnxmindmaker.util.provider.ValidationSeverity
+import com.kaleaon.mnxmindmaker.util.provider.validate
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.text.DateFormat
 import java.util.Date
 
@@ -49,8 +57,6 @@ class SettingsFragment : Fragment() {
     private var currentSettings: MutableList<LlmSettings> = mutableListOf()
 
     private var themeAdapter: ThemeAdapter? = null
-    private val tlsPinPattern = Regex("^[A-Za-z0-9+/]{43}=$")
-
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, saved: Bundle?): View {
         _binding = FragmentSettingsBinding.inflate(inflater, container, false)
         return binding.root
@@ -141,6 +147,7 @@ class SettingsFragment : Fragment() {
         setupAccountLinkingSection()
 
         binding.btnSaveSettings.setOnClickListener { saveCurrentProvider() }
+        binding.btnRunPreflight.setOnClickListener { runPreflightDiagnostics() }
         binding.btnDiscoverModels.setOnClickListener {
             val models = modelManager.discoverModels()
             binding.tvModelManagerSummary.text = getString(
@@ -369,6 +376,8 @@ class SettingsFragment : Fragment() {
     // -- LLM settings ---------------------------------------------------------
 
     private fun loadProviderSettings(provider: LlmProvider) {
+        showValidationErrors(emptyList())
+        binding.tvPreflightResult.text = getString(R.string.preflight_result_idle)
         val settings = currentSettings.firstOrNull { it.provider == provider }
             ?: LlmSettings(provider)
         binding.etApiKey.setText(settings.apiKey)
@@ -427,7 +436,7 @@ class SettingsFragment : Fragment() {
 
     private fun saveCurrentProvider() {
         val apiKey = binding.etApiKey.text.toString().trim()
-        val model = binding.etModel.text.toString().trim().ifEmpty { currentProvider.defaultModel() }
+        val model = binding.etModel.text.toString().trim()
         val baseUrl = binding.etBaseUrl.text.toString().trim().ifEmpty { currentProvider.baseUrl }
         val maxTokens = binding.etMaxTokens.text.toString().toIntOrNull() ?: 2048
         val temperature = binding.etTemperature.text.toString().toFloatOrNull() ?: 0.7f
@@ -435,15 +444,6 @@ class SettingsFragment : Fragment() {
         val enableWakeUpContext = binding.switchEnableWakeUpContext.isChecked
         val wakeUpTokenBudget = binding.etWakeUpTokenBudget.text.toString().toIntOrNull() ?: 1024
         val tlsPin = binding.etTlsPin.text.toString().trim()
-        if (!isValidTlsPin(tlsPin)) {
-            Snackbar.make(
-                binding.root,
-                getString(R.string.tls_pin_validation_error),
-                Snackbar.LENGTH_LONG
-            ).show()
-            binding.etTlsPin.requestFocus()
-            return
-        }
         val retrievalModePreference = when (binding.spinnerRetrievalModePreference.selectedItemPosition) {
             0 -> RetrievalModePreference.RAW_VERBATIM
             2 -> RetrievalModePreference.HIERARCHICAL
@@ -463,7 +463,11 @@ class SettingsFragment : Fragment() {
             ComputeBackend.AUTO
         }
 
-        repository.savePrivacyMode(if (binding.spinnerPrivacyMode.selectedItemPosition == 0) PrivacyMode.STRICT_LOCAL_ONLY else PrivacyMode.HYBRID)
+        val privacyMode = if (binding.spinnerPrivacyMode.selectedItemPosition == 0) {
+            PrivacyMode.STRICT_LOCAL_ONLY
+        } else {
+            PrivacyMode.HYBRID
+        }
 
         val settings = LlmSettings(
             provider = currentProvider,
@@ -489,6 +493,19 @@ class SettingsFragment : Fragment() {
             wakeUpTokenBudget = wakeUpTokenBudget,
             retrievalModePreference = retrievalModePreference
         )
+
+        val issues = validate(settings, privacyMode)
+        showValidationErrors(issues)
+        if (issues.any { it.severity == ValidationSeverity.CRITICAL }) {
+            Snackbar.make(
+                binding.root,
+                getString(R.string.settings_validation_failed),
+                Snackbar.LENGTH_LONG
+            ).show()
+            return
+        }
+
+        repository.savePrivacyMode(privacyMode)
         repository.saveSettings(settings)
 
         val idx = currentSettings.indexOfFirst { it.provider == currentProvider }
@@ -501,10 +518,106 @@ class SettingsFragment : Fragment() {
         ).show()
     }
 
-    private fun isValidTlsPin(value: String): Boolean {
-        if (value.isBlank()) return true
-        if (value.startsWith("sha256/", ignoreCase = true)) return false
-        return tlsPinPattern.matches(value)
+    private fun runPreflightDiagnostics() {
+        val privacyMode = if (binding.spinnerPrivacyMode.selectedItemPosition == 0) {
+            PrivacyMode.STRICT_LOCAL_ONLY
+        } else {
+            PrivacyMode.HYBRID
+        }
+        val draft = buildDraftSettings()
+        val issues = validate(draft, privacyMode)
+        showValidationErrors(issues)
+        if (issues.any { it.severity == ValidationSeverity.CRITICAL }) {
+            binding.tvPreflightResult.text = getString(R.string.preflight_blocked_validation)
+            return
+        }
+
+        binding.tvPreflightResult.text = getString(R.string.preflight_running)
+        lifecycleScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                ProviderPreflightDiagnostics.run(draft)
+            }
+            binding.tvPreflightResult.text = renderPreflightResult(result, issues)
+        }
+    }
+
+    private fun buildDraftSettings(): LlmSettings {
+        val model = binding.etModel.text.toString().trim()
+        val localProfile = LocalModelProfile.entries.getOrElse(binding.spinnerLocalProfile.selectedItemPosition) {
+            LocalModelProfile.BALANCED
+        }
+        return LlmSettings(
+            provider = currentProvider,
+            apiKey = binding.etApiKey.text.toString().trim(),
+            model = model,
+            baseUrl = binding.etBaseUrl.text.toString().trim().ifEmpty { currentProvider.baseUrl },
+            enabled = binding.switchEnabled.isChecked,
+            maxTokens = binding.etMaxTokens.text.toString().toIntOrNull() ?: 2048,
+            temperature = binding.etTemperature.text.toString().toFloatOrNull() ?: 0.7f,
+            localModelPath = binding.etLocalModelPath.text.toString().trim(),
+            localProfile = localProfile,
+            fallbackOrder = if (binding.spinnerFallbackOrder.selectedItemPosition == 1) {
+                LlmFallbackOrder.LOCAL_FIRST_REMOTE_FALLBACK
+            } else {
+                LlmFallbackOrder.REMOTE_ONLY
+            },
+            runtimeControls = LocalRuntimeControls(
+                computeBackend = ComputeBackend.entries.getOrElse(binding.spinnerComputeBackend.selectedItemPosition) { ComputeBackend.AUTO },
+                contextWindowTokens = binding.etContextWindow.text?.toString()?.toIntOrNull() ?: localProfile.contextWindowTokens,
+                quantizationProfile = binding.etQuantizationProfile.text?.toString()?.trim().orEmpty().ifBlank { "Q4_K_M" },
+                maxRamMb = binding.etMaxRamMb.text?.toString()?.toIntOrNull() ?: 4096,
+                maxVramMb = binding.etMaxVramMb.text?.toString()?.toIntOrNull() ?: 2048
+            ),
+            outboundClassification = DataClassification.entries.getOrElse(binding.spinnerClassification.selectedItemPosition) { DataClassification.SENSITIVE },
+            tlsPinnedSpkiSha256 = binding.etTlsPin.text.toString().trim(),
+            enableWakeUpContext = binding.switchEnableWakeUpContext.isChecked,
+            wakeUpTokenBudget = binding.etWakeUpTokenBudget.text.toString().toIntOrNull() ?: 1024,
+            retrievalModePreference = when (binding.spinnerRetrievalModePreference.selectedItemPosition) {
+                0 -> RetrievalModePreference.RAW_VERBATIM
+                2 -> RetrievalModePreference.HIERARCHICAL
+                else -> RetrievalModePreference.SUMMARY
+            }
+        )
+    }
+
+    private fun showValidationErrors(issues: List<ValidationIssue>) {
+        binding.tilModel.error = issues.firstOrNull { it.field == "model" }?.message
+        binding.tilBaseUrl.error = issues.firstOrNull { it.field == "baseUrl" }?.message
+        binding.tilMaxTokens.error = issues.firstOrNull { it.field == "maxTokens" }?.message
+        binding.tilContextWindow.error = issues.firstOrNull { it.field == "contextWindowTokens" }?.message
+        binding.tilTlsPin.error = issues.firstOrNull { it.field == "tlsPinnedSpkiSha256" }?.message
+        binding.tilWakeUpTokenBudget.error = issues.firstOrNull { it.field == "wakeUpTokenBudget" }?.message
+
+        val providerIssue = issues.firstOrNull { it.field == "provider" }?.message
+        if (providerIssue != null) {
+            binding.tvCapabilitySummary.text = providerIssue
+        } else {
+            val settings = currentSettings.firstOrNull { it.provider == currentProvider } ?: LlmSettings(currentProvider)
+            val caps = settings.capabilities
+            binding.tvCapabilitySummary.text = getString(
+                R.string.capability_summary,
+                caps.contextWindowTokens,
+                if (caps.supportsToolPlanning) getString(R.string.capability_supported) else getString(R.string.capability_limited),
+                if (caps.supportsPacketGeneration) getString(R.string.capability_supported) else getString(R.string.capability_limited)
+            )
+        }
+    }
+
+    private fun renderPreflightResult(result: PreflightDiagnosticsResult, issues: List<ValidationIssue>): String {
+        val validationSummary = if (issues.isEmpty()) {
+            "Validation: OK"
+        } else {
+            val critical = issues.count { it.severity == ValidationSeverity.CRITICAL }
+            val warning = issues.count { it.severity == ValidationSeverity.WARNING }
+            "Validation: $critical critical, $warning warning"
+        }
+        val reachability = if (result.reachable) "Reachable" else "Unreachable"
+        return "$validationSummary\n" +
+            "Provider: ${result.provider.displayName}\n" +
+            "Probe: ${result.endpoint.trimEnd('/')}${result.probePath}\n" +
+            "Status: $reachability (${result.statusCode ?: "n/a"})\n" +
+            "Latency: ${result.latencyMs}ms\n" +
+            "Detail: ${result.detail}"
     }
 
     override fun onDestroyView() {

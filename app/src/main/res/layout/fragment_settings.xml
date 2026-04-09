@@ -335,6 +335,7 @@
             android:layout_marginBottom="4dp" />
 
         <com.google.android.material.textfield.TextInputLayout
+            android:id="@+id/til_model"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginBottom="16dp"
@@ -355,6 +356,7 @@
             android:layout_marginBottom="4dp" />
 
         <com.google.android.material.textfield.TextInputLayout
+            android:id="@+id/til_base_url"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginBottom="16dp"
@@ -389,6 +391,7 @@
             android:layout_marginBottom="4dp" />
 
         <com.google.android.material.textfield.TextInputLayout
+            android:id="@+id/til_tls_pin"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginBottom="16dp"
@@ -466,6 +469,7 @@
                 android:layout_marginBottom="4dp" />
 
             <com.google.android.material.textfield.TextInputLayout
+                android:id="@+id/til_context_window"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginBottom="16dp"
@@ -572,6 +576,7 @@
             android:layout_marginBottom="4dp" />
 
         <com.google.android.material.textfield.TextInputLayout
+            android:id="@+id/til_max_tokens"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginBottom="16dp"
@@ -622,6 +627,7 @@
             android:layout_marginBottom="4dp" />
 
         <com.google.android.material.textfield.TextInputLayout
+            android:id="@+id/til_wake_up_token_budget"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginBottom="16dp"
@@ -664,6 +670,23 @@
             android:text="@string/save_settings"
             android:layout_marginBottom="8dp" />
 
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_run_preflight"
+            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/run_preflight_diagnostics"
+            android:layout_marginBottom="8dp" />
+
+        <TextView
+            android:id="@+id/tv_preflight_result"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/preflight_result_idle"
+            android:textColor="@color/colorOnSurface"
+            android:textSize="12sp"
+            android:layout_marginBottom="8dp" />
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btn_discover_models"
             style="@style/Widget.MaterialComponents.Button.OutlinedButton"
