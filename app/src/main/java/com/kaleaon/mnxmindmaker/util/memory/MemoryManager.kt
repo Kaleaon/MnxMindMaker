@@ -34,6 +34,10 @@ class MemoryManager {
         val id: String = UUID.randomUUID().toString(),
         val role: String,
         val content: String,
+        val conversationId: String? = null,
+        val turnIndex: Int? = null,
+        val chunkSpan: String? = null,
+        val source: String = role,
         val timestampMs: Long = System.currentTimeMillis(),
         val sensitivity: String = "low"
     )
@@ -165,6 +169,11 @@ class MemoryManager {
             attributes = mutableMapOf(
                 "semantic_subtype" to "session",
                 "memory_category" to MemoryCategory.SESSION.name.lowercase(),
+                "conversation_id" to (conversationId ?: ""),
+                "turn_index" to (turnIndex?.toString() ?: ""),
+                "chunk_span" to (chunkSpan ?: ""),
+                "source" to source,
+                "role" to role,
                 "timestamp" to timestampMs.toString(),
                 "current_relevance" to "0.75",
                 "sensitivity" to sensitivity

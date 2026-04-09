@@ -139,4 +139,35 @@ class MemoryManagerTest {
 
         assertEquals(0, retrieved.size)
     }
+
+    @Test
+    fun `session turn metadata is preserved in retrieved memory attributes`() {
+        val manager = MemoryManager()
+        manager.setPolicy(
+            MemoryManager.MemoryPolicySettings(mode = MemoryManager.MemoryPolicyMode.SESSION_ONLY)
+        )
+        manager.appendSessionTurn(
+            MemoryManager.SessionTurn(
+                role = "assistant",
+                source = "import",
+                content = "Chunked transcript segment",
+                conversationId = "conv-42",
+                turnIndex = 7,
+                chunkSpan = "7:0-199"
+            )
+        )
+
+        val retrieved = manager.retrieveForPromptInjection(
+            prompt = "transcript",
+            task = "audit",
+            limit = 5
+        )
+
+        val sessionNode = retrieved.first { it.attributes["semantic_subtype"] == "session" }
+        assertEquals("conv-42", sessionNode.attributes["conversation_id"])
+        assertEquals("7", sessionNode.attributes["turn_index"])
+        assertEquals("7:0-199", sessionNode.attributes["chunk_span"])
+        assertEquals("import", sessionNode.attributes["source"])
+        assertEquals("assistant", sessionNode.attributes["role"])
+    }
 }
