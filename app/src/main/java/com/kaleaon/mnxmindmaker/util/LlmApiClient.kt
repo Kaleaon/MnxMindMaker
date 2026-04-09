@@ -5,6 +5,7 @@ import com.kaleaon.mnxmindmaker.model.LlmSettings
 import com.kaleaon.mnxmindmaker.util.provider.AssistantProvider
 import com.kaleaon.mnxmindmaker.util.provider.ChatGPTProvider
 import com.kaleaon.mnxmindmaker.util.provider.ClaudeProvider
+import com.kaleaon.mnxmindmaker.util.provider.GeminiProvider
 import com.kaleaon.mnxmindmaker.util.provider.LocalProvider
 import com.kaleaon.mnxmindmaker.util.provider.ProviderRequest
 import com.kaleaon.mnxmindmaker.util.tooling.AssistantTurn
@@ -15,6 +16,7 @@ class LlmApiClient(
     private val providers: List<AssistantProvider> = listOf(
         LocalProvider(),
         ClaudeProvider(),
+        GeminiProvider(),
         ChatGPTProvider()
     )
 ) {
