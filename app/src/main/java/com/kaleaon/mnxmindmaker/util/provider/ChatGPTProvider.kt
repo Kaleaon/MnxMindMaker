@@ -11,7 +11,7 @@ import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
 class ChatGPTProvider(
-    private val httpClient: OkHttpClient = defaultClient(),
+    private val baseHttpClient: OkHttpClient = defaultClient(),
     private val jsonMediaType: okhttp3.MediaType = "application/json; charset=utf-8".toMediaType()
 ) : AssistantProvider {
 
@@ -34,6 +34,7 @@ class ChatGPTProvider(
             .addHeader("content-type", "application/json")
             .build()
 
+        val httpClient = HttpClientFactory.clientFor(request.settings, baseHttpClient)
         httpClient.newCall(httpRequest).execute().use { response ->
             val responseBody = response.body?.string() ?: throw LlmApiException("Empty response from OpenAI")
             if (!response.isSuccessful) throw LlmApiException("OpenAI error ${response.code}: $responseBody")

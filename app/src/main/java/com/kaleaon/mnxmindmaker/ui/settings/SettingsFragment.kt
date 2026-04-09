@@ -49,6 +49,7 @@ class SettingsFragment : Fragment() {
     private var currentSettings: MutableList<LlmSettings> = mutableListOf()
 
     private var themeAdapter: ThemeAdapter? = null
+    private val tlsPinPattern = Regex("^[A-Za-z0-9+/]{43}=$")
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, saved: Bundle?): View {
         _binding = FragmentSettingsBinding.inflate(inflater, container, false)
@@ -434,6 +435,15 @@ class SettingsFragment : Fragment() {
         val enableWakeUpContext = binding.switchEnableWakeUpContext.isChecked
         val wakeUpTokenBudget = binding.etWakeUpTokenBudget.text.toString().toIntOrNull() ?: 1024
         val tlsPin = binding.etTlsPin.text.toString().trim()
+        if (!isValidTlsPin(tlsPin)) {
+            Snackbar.make(
+                binding.root,
+                getString(R.string.tls_pin_validation_error),
+                Snackbar.LENGTH_LONG
+            ).show()
+            binding.etTlsPin.requestFocus()
+            return
+        }
         val retrievalModePreference = when (binding.spinnerRetrievalModePreference.selectedItemPosition) {
             0 -> RetrievalModePreference.RAW_VERBATIM
             2 -> RetrievalModePreference.HIERARCHICAL
@@ -489,6 +499,12 @@ class SettingsFragment : Fragment() {
             getString(R.string.settings_saved, currentProvider.displayName),
             Snackbar.LENGTH_SHORT
         ).show()
+    }
+
+    private fun isValidTlsPin(value: String): Boolean {
+        if (value.isBlank()) return true
+        if (value.startsWith("sha256/", ignoreCase = true)) return false
+        return tlsPinPattern.matches(value)
     }
 
     override fun onDestroyView() {
