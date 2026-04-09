@@ -58,7 +58,8 @@ class MemoryManager {
 
     fun upsertSemanticMemory(node: MindNode) {
         if (policySettings.mode != MemoryPolicyMode.PERSISTENT) return
-        semanticIndex.upsert(node)
+        val seedRoute = MemoryRouting.inferRoute(prompt = node.label, task = node.description)
+        semanticIndex.upsert(MemoryRouting.applyCanonicalRoute(node, seedRoute))
     }
 
     fun upsertProfileMemory(
@@ -81,6 +82,9 @@ class MemoryManager {
                 "timestamp" to timestampMs.toString(),
                 "current_relevance" to "0.85"
             ).apply {
+                put(MemoryRouting.KEY_MEMORY_WING, "self")
+                put(MemoryRouting.KEY_MEMORY_HALL, "preferences")
+                put(MemoryRouting.KEY_MEMORY_ROOM, "voice_style")
                 if (!writingStyle.isNullOrBlank()) put("writing_style", writingStyle)
             }
         )
@@ -128,13 +132,17 @@ class MemoryManager {
             emptyList()
         }
 
-        val candidates = when (policySettings.mode) {
+        val rawCandidates = when (policySettings.mode) {
             MemoryPolicyMode.OFF -> emptyList()
             MemoryPolicyMode.SESSION_ONLY -> sessionMemories + profile
             MemoryPolicyMode.PERSISTENT -> sessionMemories + profile + semantic
         }
 
-        return MemoryRetrievalService.retrieveForPromptInjection(candidates, context, limit)
+        val route = MemoryRouting.inferRoute(prompt = prompt, task = task)
+        val routedCandidates = rawCandidates.map { MemoryRouting.applyCanonicalRoute(it, route) }
+        val tiered = MemoryRouting.tierCandidates(routedCandidates, route)
+
+        return MemoryRetrievalService.retrieveForPromptInjection(tiered.flattened(), context, limit)
     }
 
     private fun purgeExpired(nowEpochMs: Long) {
@@ -167,7 +175,10 @@ class MemoryManager {
                 "memory_category" to MemoryCategory.SESSION.name.lowercase(),
                 "timestamp" to timestampMs.toString(),
                 "current_relevance" to "0.75",
-                "sensitivity" to sensitivity
+                "sensitivity" to sensitivity,
+                MemoryRouting.KEY_MEMORY_WING to "history",
+                MemoryRouting.KEY_MEMORY_HALL to "events",
+                MemoryRouting.KEY_MEMORY_ROOM to "session_turn"
             )
         )
     }
