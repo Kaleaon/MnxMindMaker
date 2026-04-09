@@ -6,7 +6,9 @@ enum class ComposerProviderChoice(val label: String) {
     AUTO("Auto"),
     LOCAL("Local"),
     CLAUDE("Claude"),
-    CHATGPT("ChatGPT")
+    CHATGPT("ChatGPT"),
+    GEMINI("Gemini"),
+    VLLM("vLLM")
 }
 
 data class MessageProvenance(
