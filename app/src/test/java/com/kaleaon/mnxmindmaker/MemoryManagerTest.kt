@@ -3,12 +3,30 @@ package com.kaleaon.mnxmindmaker
 import com.kaleaon.mnxmindmaker.model.MindNode
 import com.kaleaon.mnxmindmaker.model.NodeType
 import com.kaleaon.mnxmindmaker.util.memory.MemoryManager
+import java.util.concurrent.ConcurrentHashMap
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class MemoryManagerTest {
+    private class RecordingStore : MemoryManager.MemoryPersistenceStore {
+        val deletedByCategory = ConcurrentHashMap<MemoryManager.MemoryCategory, MutableList<String>>()
+        override fun deleteExpired(category: MemoryManager.MemoryCategory, memoryIds: List<String>) {
+            deletedByCategory.computeIfAbsent(category) { mutableListOf() }.addAll(memoryIds)
+        }
+    }
+
+    private class RecordingTelemetry : MemoryManager.MemoryExpiryTelemetry {
+        val events = mutableListOf<Triple<MemoryManager.MemoryCategory, Int, Int>>()
+        override fun onExpiredRemoved(
+            category: MemoryManager.MemoryCategory,
+            removedCount: Int,
+            malformedTimestampCount: Int
+        ) {
+            events.add(Triple(category, removedCount, malformedTimestampCount))
+        }
+    }
 
     @Test
     fun `session only policy excludes persistent semantic memories`() {
@@ -160,6 +178,10 @@ class MemoryManagerTest {
     @Test
     fun `auto expiry purges memories by category and keeps fresh entries`() {
         val manager = MemoryManager()
+    fun `auto expiry purges memories by category`() {
+        val store = RecordingStore()
+        val telemetry = RecordingTelemetry()
+        val manager = MemoryManager(store, telemetry)
         val now = 50_000L
         manager.setPolicy(
             MemoryManager.MemoryPolicySettings(
@@ -218,5 +240,94 @@ class MemoryManagerTest {
         assertTrue(retrieved.any { it.id == "semantic-fresh" })
         assertTrue(retrieved.any { it.id == "tone-fresh" })
         assertEquals(3, retrieved.size)
+        assertEquals(0, retrieved.size)
+        assertEquals(listOf("tone"), store.deletedByCategory[MemoryManager.MemoryCategory.PROFILE])
+        assertEquals(listOf("semantic-old"), store.deletedByCategory[MemoryManager.MemoryCategory.SEMANTIC])
+        assertEquals(1, store.deletedByCategory[MemoryManager.MemoryCategory.SESSION]?.size)
+        assertEquals(1, manager.getExpiryPurgeCounters()[MemoryManager.MemoryCategory.SESSION])
+        assertEquals(1, manager.getExpiryPurgeCounters()[MemoryManager.MemoryCategory.PROFILE])
+        assertEquals(1, manager.getExpiryPurgeCounters()[MemoryManager.MemoryCategory.SEMANTIC])
+        assertTrue(telemetry.events.contains(Triple(MemoryManager.MemoryCategory.SESSION, 1, 0)))
+        assertTrue(telemetry.events.contains(Triple(MemoryManager.MemoryCategory.PROFILE, 1, 0)))
+        assertTrue(telemetry.events.contains(Triple(MemoryManager.MemoryCategory.SEMANTIC, 1, 0)))
+    }
+
+    @Test
+    fun `malformed timestamps use fallback and emit malformed telemetry count`() {
+        val store = RecordingStore()
+        val telemetry = RecordingTelemetry()
+        val manager = MemoryManager(store, telemetry)
+        manager.setPolicy(
+            MemoryManager.MemoryPolicySettings(
+                mode = MemoryManager.MemoryPolicyMode.PERSISTENT,
+                expiryByCategoryMs = mapOf(
+                    MemoryManager.MemoryCategory.SESSION to 1000L,
+                    MemoryManager.MemoryCategory.SEMANTIC to 1000L,
+                    MemoryManager.MemoryCategory.PROFILE to 1000L
+                )
+            )
+        )
+        manager.upsertProfileMemory(
+            key = "tone",
+            value = "friendly",
+            timestampMs = 1_000L
+        )
+        manager.editMemory("tone") { node ->
+            node.copy(attributes = node.attributes.toMutableMap().apply { put("timestamp", "not-a-number") })
+        }
+        manager.upsertSemanticMemory(
+            MindNode(
+                id = "semantic-invalid-ts",
+                label = "semantic",
+                type = NodeType.MEMORY,
+                description = "record",
+                attributes = mutableMapOf("timestamp" to "bad", "current_relevance" to "0.8")
+            )
+        )
+
+        val retrieved = manager.retrieveForPromptInjection(
+            prompt = "check",
+            task = "check",
+            limit = 10,
+            nowEpochMs = 50_000L
+        )
+
+        assertTrue(retrieved.any { it.id == "tone" })
+        assertTrue(retrieved.any { it.id == "semantic-invalid-ts" })
+        assertFalse(store.deletedByCategory.containsKey(MemoryManager.MemoryCategory.PROFILE))
+        assertFalse(store.deletedByCategory.containsKey(MemoryManager.MemoryCategory.SEMANTIC))
+        assertTrue(telemetry.events.contains(Triple(MemoryManager.MemoryCategory.PROFILE, 0, 1)))
+        assertTrue(telemetry.events.contains(Triple(MemoryManager.MemoryCategory.SEMANTIC, 0, 1)))
+    }
+
+    @Test
+    fun `session turn metadata is preserved in retrieved memory attributes`() {
+        val manager = MemoryManager()
+        manager.setPolicy(
+            MemoryManager.MemoryPolicySettings(mode = MemoryManager.MemoryPolicyMode.SESSION_ONLY)
+        )
+        manager.appendSessionTurn(
+            MemoryManager.SessionTurn(
+                role = "assistant",
+                source = "import",
+                content = "Chunked transcript segment",
+                conversationId = "conv-42",
+                turnIndex = 7,
+                chunkSpan = "7:0-199"
+            )
+        )
+
+        val retrieved = manager.retrieveForPromptInjection(
+            prompt = "transcript",
+            task = "audit",
+            limit = 5
+        )
+
+        val sessionNode = retrieved.first { it.attributes["semantic_subtype"] == "session" }
+        assertEquals("conv-42", sessionNode.attributes["conversation_id"])
+        assertEquals("7", sessionNode.attributes["turn_index"])
+        assertEquals("7:0-199", sessionNode.attributes["chunk_span"])
+        assertEquals("import", sessionNode.attributes["source"])
+        assertEquals("assistant", sessionNode.attributes["role"])
     }
 }

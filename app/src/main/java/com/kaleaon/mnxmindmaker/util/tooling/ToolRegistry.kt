@@ -5,12 +5,14 @@ import com.kaleaon.mnxmindmaker.model.MindGraph
 import com.kaleaon.mnxmindmaker.model.MindNode
 import com.kaleaon.mnxmindmaker.model.NodeType
 import com.kaleaon.mnxmindmaker.util.DimensionMapper
+import com.kaleaon.mnxmindmaker.util.memory.MemoryManager
 import org.json.JSONArray
 import org.json.JSONObject
 
 class ToolRegistry(
     private val getGraph: () -> MindGraph,
-    private val setGraph: (MindGraph) -> Unit
+    private val setGraph: (MindGraph) -> Unit,
+    private val memoryManager: MemoryManager? = null
 ) {
 
     private val specs = listOf(
@@ -44,6 +46,71 @@ class ToolRegistry(
             name = "set_node_attribute",
             description = "Set node attributes map key/value for a node id.",
             operationClass = ToolOperationClass.MUTATING
+        ),
+        ToolSpec(
+            name = "memory_search",
+            description = "Search memory entries by query text. Safety: read-only operation.",
+            operationClass = ToolOperationClass.READ_ONLY,
+            inputSchema = JSONObject()
+                .put("type", "object")
+                .put("additionalProperties", false)
+                .put("required", JSONArray().put("query"))
+                .put("properties", JSONObject()
+                    .put("query", JSONObject().put("type", "string").put("minLength", 1))
+                    .put("limit", JSONObject().put("type", "integer").put("minimum", 1).put("maximum", 50)))
+        ),
+        ToolSpec(
+            name = "memory_upsert",
+            description = "Upsert memory by id/category/value/sensitivity. Safety: restricted sensitivity is denied and high sensitivity requires allow_high_sensitivity=true.",
+            operationClass = ToolOperationClass.MUTATING,
+            inputSchema = JSONObject()
+                .put("type", "object")
+                .put("additionalProperties", false)
+                .put("required", JSONArray().put("memory_id").put("category").put("value").put("sensitivity"))
+                .put("properties", JSONObject()
+                    .put("memory_id", JSONObject().put("type", "string").put("minLength", 1))
+                    .put("category", JSONObject().put("type", "string").put("enum", JSONArray().put("profile").put("semantic")))
+                    .put("value", JSONObject().put("type", "string").put("minLength", 1))
+                    .put("label", JSONObject().put("type", "string"))
+                    .put("tags", JSONObject().put("type", "string"))
+                    .put("writing_style", JSONObject().put("type", "string"))
+                    .put("sensitivity", JSONObject().put("type", "string").put("enum", JSONArray().put("low").put("medium").put("high").put("restricted")))
+                    .put("allow_high_sensitivity", JSONObject().put("type", "boolean")))
+        ),
+        ToolSpec(
+            name = "memory_edit",
+            description = "Edit memory by id. Safety: restricted sensitivity is denied and high sensitivity requires allow_high_sensitivity=true.",
+            operationClass = ToolOperationClass.MUTATING,
+            inputSchema = JSONObject()
+                .put("type", "object")
+                .put("additionalProperties", false)
+                .put("required", JSONArray().put("memory_id"))
+                .put("properties", JSONObject()
+                    .put("memory_id", JSONObject().put("type", "string").put("minLength", 1))
+                    .put("value", JSONObject().put("type", "string"))
+                    .put("label", JSONObject().put("type", "string"))
+                    .put("tags", JSONObject().put("type", "string"))
+                    .put("writing_style", JSONObject().put("type", "string"))
+                    .put("sensitivity", JSONObject().put("type", "string").put("enum", JSONArray().put("low").put("medium").put("high").put("restricted")))
+                    .put("allow_high_sensitivity", JSONObject().put("type", "boolean")))
+        ),
+        ToolSpec(
+            name = "memory_delete",
+            description = "Delete memory by id. Safety: restricted sensitivity is denied and high sensitivity requires allow_high_sensitivity=true.",
+            operationClass = ToolOperationClass.MUTATING,
+            inputSchema = JSONObject()
+                .put("type", "object")
+                .put("additionalProperties", false)
+                .put("required", JSONArray().put("memory_id"))
+                .put("properties", JSONObject()
+                    .put("memory_id", JSONObject().put("type", "string").put("minLength", 1))
+                    .put("allow_high_sensitivity", JSONObject().put("type", "boolean")))
+        ),
+        ToolSpec(
+            name = "memory_status",
+            description = "Return current memory mode and counters. Safety: read-only operation.",
+            operationClass = ToolOperationClass.READ_ONLY,
+            inputSchema = JSONObject().put("type", "object").put("additionalProperties", false)
         )
     )
 
@@ -59,7 +126,168 @@ class ToolRegistry(
             "add_node" -> addNode(invocation)
             "link_nodes" -> linkNodes(invocation)
             "set_node_attribute" -> setNodeAttribute(invocation)
+            "memory_search" -> memorySearch(invocation)
+            "memory_upsert" -> memoryUpsert(invocation)
+            "memory_edit" -> memoryEdit(invocation)
+            "memory_delete" -> memoryDelete(invocation)
+            "memory_status" -> memoryStatus(invocation)
             else -> ToolResult(invocation.id, invocation.name, false, "Unknown tool: ${invocation.name}")
+        }
+    }
+
+    private fun memorySearch(invocation: ToolInvocation): ToolResult {
+        val manager = memoryManager ?: return ToolResult(invocation.id, invocation.name, false, "MemoryManager is not configured")
+        val query = invocation.arguments.optString("query").trim()
+        val limit = invocation.arguments.optInt("limit", 10).coerceIn(1, 50)
+        val payload = JSONObject()
+            .put("query", query)
+            .put("limit", limit)
+            .put("results", JSONArray().apply {
+                manager.searchMemories(query, limit).forEach { memory ->
+                    put(JSONObject()
+                        .put("id", memory.id)
+                        .put("label", memory.label)
+                        .put("description", memory.description)
+                        .put("attributes", JSONObject().apply { memory.attributes.forEach { (k, v) -> put(k, v) } }))
+                }
+            })
+        return ToolResult(invocation.id, invocation.name, true, payload.toString(), payload)
+    }
+
+    private fun memoryUpsert(invocation: ToolInvocation): ToolResult =
+        withMemoryManager(invocation) { manager ->
+            val args = invocation.arguments
+            val memoryId = args.optString("memory_id").trim()
+            val category = args.optString("category").lowercase()
+            val sensitivity = args.optString("sensitivity", "low").lowercase()
+            val policyViolation = enforceSensitivityPolicy(
+                invocation = invocation,
+                sensitivity = sensitivity,
+                allowHighSensitivity = args.optBoolean("allow_high_sensitivity", false)
+            )
+            if (policyViolation != null) return@withMemoryManager policyViolation
+
+            when (category) {
+                "profile" -> manager.upsertProfileMemory(
+                    key = memoryId,
+                    value = args.optString("value"),
+                    writingStyle = args.optString("writing_style").ifBlank { null },
+                    sensitivity = sensitivity
+                )
+                "semantic" -> manager.upsertSemanticMemory(
+                    MindNode(
+                        id = memoryId,
+                        label = args.optString("label").ifBlank { memoryId },
+                        type = NodeType.MEMORY,
+                        description = args.optString("value"),
+                        attributes = mutableMapOf(
+                            "semantic_subtype" to "semantic",
+                            "memory_category" to "semantic",
+                            "sensitivity" to sensitivity,
+                            "timestamp" to System.currentTimeMillis().toString(),
+                            "tags" to args.optString("tags")
+                        )
+                    )
+                )
+                else -> return@withMemoryManager ToolResult(
+                    invocation.id,
+                    invocation.name,
+                    false,
+                    "Unsupported category: $category"
+                )
+            }
+            val payload = JSONObject().put("status", "upserted").put("memory_id", memoryId).put("category", category)
+            ToolResult(invocation.id, invocation.name, true, payload.toString(), payload)
+        }
+
+    private fun memoryEdit(invocation: ToolInvocation): ToolResult =
+        withMemoryManager(invocation) { manager ->
+            val args = invocation.arguments
+            val memoryId = args.optString("memory_id").trim()
+            val existing = manager.getMemory(memoryId)
+                ?: return@withMemoryManager ToolResult(invocation.id, invocation.name, false, "Memory not found: $memoryId")
+            val sensitivity = args.optString("sensitivity").ifBlank { existing.attributes["sensitivity"] ?: "low" }.lowercase()
+            val policyViolation = enforceSensitivityPolicy(
+                invocation = invocation,
+                sensitivity = sensitivity,
+                allowHighSensitivity = args.optBoolean("allow_high_sensitivity", false)
+            )
+            if (policyViolation != null) return@withMemoryManager policyViolation
+
+            val edited = manager.editMemory(memoryId) { node ->
+                node.copy(
+                    label = args.optString("label").ifBlank { node.label },
+                    description = args.optString("value").ifBlank { node.description },
+                    attributes = node.attributes.toMutableMap().apply {
+                        if (args.has("tags")) put("tags", args.optString("tags"))
+                        if (args.has("writing_style")) put("writing_style", args.optString("writing_style"))
+                        if (args.has("sensitivity")) put("sensitivity", sensitivity)
+                        put("timestamp", System.currentTimeMillis().toString())
+                    }
+                )
+            }
+            val payload = JSONObject().put("status", if (edited) "edited" else "memory_not_found").put("memory_id", memoryId)
+            ToolResult(invocation.id, invocation.name, true, payload.toString(), payload)
+        }
+
+    private fun memoryDelete(invocation: ToolInvocation): ToolResult =
+        withMemoryManager(invocation) { manager ->
+            val memoryId = invocation.arguments.optString("memory_id").trim()
+            val existing = manager.getMemory(memoryId)
+                ?: return@withMemoryManager ToolResult(invocation.id, invocation.name, false, "Memory not found: $memoryId")
+            val sensitivity = existing.attributes["sensitivity"]?.lowercase() ?: "low"
+            val policyViolation = enforceSensitivityPolicy(
+                invocation = invocation,
+                sensitivity = sensitivity,
+                allowHighSensitivity = invocation.arguments.optBoolean("allow_high_sensitivity", false)
+            )
+            if (policyViolation != null) return@withMemoryManager policyViolation
+            val deleted = manager.deleteMemory(memoryId)
+            val payload = JSONObject().put("status", if (deleted) "deleted" else "memory_not_found").put("memory_id", memoryId)
+            ToolResult(invocation.id, invocation.name, true, payload.toString(), payload)
+        }
+
+    private fun memoryStatus(invocation: ToolInvocation): ToolResult {
+        val manager = memoryManager ?: return ToolResult(invocation.id, invocation.name, false, "MemoryManager is not configured")
+        val status = manager.status()
+        val payload = JSONObject()
+            .put("mode", status.mode.name.lowercase())
+            .put("session_turn_count", status.sessionTurnCount)
+            .put("profile_memory_count", status.profileMemoryCount)
+            .put("semantic_memory_count", status.semanticMemoryCount)
+        return ToolResult(invocation.id, invocation.name, true, payload.toString(), payload)
+    }
+
+    private fun withMemoryManager(invocation: ToolInvocation, block: (MemoryManager) -> ToolResult): ToolResult {
+        val manager = memoryManager ?: return ToolResult(invocation.id, invocation.name, false, "MemoryManager is not configured")
+        return block(manager)
+    }
+
+    private fun enforceSensitivityPolicy(
+        invocation: ToolInvocation,
+        sensitivity: String,
+        allowHighSensitivity: Boolean
+    ): ToolResult? {
+        return when (sensitivity.lowercase()) {
+            "restricted" -> ToolResult(
+                toolUseId = invocation.id,
+                isError = true,
+                contentJson = JSONObject()
+                    .put("error", "sensitivity_policy_violation")
+                    .put("message", "Mutating restricted memory is denied")
+                    .put("sensitivity", "restricted")
+            )
+            "high" -> if (!allowHighSensitivity) {
+                ToolResult(
+                    toolUseId = invocation.id,
+                    isError = true,
+                    contentJson = JSONObject()
+                        .put("error", "sensitivity_policy_violation")
+                        .put("message", "Mutating high-sensitivity memory requires allow_high_sensitivity=true")
+                        .put("sensitivity", "high")
+                )
+            } else null
+            else -> null
         }
     }
 

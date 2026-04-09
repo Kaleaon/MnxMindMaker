@@ -1,6 +1,7 @@
 package com.kaleaon.mnxmindmaker.tooling
 
 import com.kaleaon.mnxmindmaker.model.MindGraph
+import com.kaleaon.mnxmindmaker.util.memory.MemoryManager
 import com.kaleaon.mnxmindmaker.util.tooling.FoundationalTools
 import com.kaleaon.mnxmindmaker.util.tooling.PolicyDecisionType
 import com.kaleaon.mnxmindmaker.util.tooling.ToolInvocation
@@ -113,5 +114,68 @@ class FoundationalToolsTest {
 
         assertEquals("command_timeout", result.contentJson.getString("error"))
         assertEquals(15, result.contentJson.getInt("timeout_seconds"))
+    }
+
+    @Test
+    fun `memory upsert and search expose memory tools`() {
+        val root = createTempDir(prefix = "tooling-test")
+        val memoryManager = MemoryManager().apply {
+            setPolicy(
+                MemoryManager.MemoryPolicySettings(
+                    mode = MemoryManager.MemoryPolicyMode.PERSISTENT
+                )
+            )
+        }
+        val tools = FoundationalTools(appRoot = root, scopedDirectories = listOf(root), memoryManager = memoryManager)
+        val handlers = tools.handlers()
+
+        val upsert = handlers.getValue("memory_upsert").execute(
+            ToolInvocation(
+                "1",
+                "memory_upsert",
+                JSONObject()
+                    .put("memory_id", "m1")
+                    .put("category", "semantic")
+                    .put("value", "Loves Kotlin and typed APIs")
+                    .put("sensitivity", "low")
+            ),
+            MindGraph()
+        )
+        assertEquals("upserted", upsert.contentJson.getString("status"))
+
+        val search = handlers.getValue("memory_search").execute(
+            ToolInvocation("2", "memory_search", JSONObject().put("query", "Kotlin").put("limit", 5)),
+            MindGraph()
+        )
+        assertTrue(search.contentJson.getJSONArray("results").length() >= 1)
+    }
+
+    @Test
+    fun `memory mutating operations enforce sensitivity policy`() {
+        val root = createTempDir(prefix = "tooling-test")
+        val memoryManager = MemoryManager().apply {
+            setPolicy(
+                MemoryManager.MemoryPolicySettings(
+                    mode = MemoryManager.MemoryPolicyMode.PERSISTENT
+                )
+            )
+        }
+        val tools = FoundationalTools(appRoot = root, scopedDirectories = listOf(root), memoryManager = memoryManager)
+        val handlers = tools.handlers()
+
+        val denied = handlers.getValue("memory_upsert").execute(
+            ToolInvocation(
+                "1",
+                "memory_upsert",
+                JSONObject()
+                    .put("memory_id", "m2")
+                    .put("category", "profile")
+                    .put("value", "medical details")
+                    .put("sensitivity", "restricted")
+            ),
+            MindGraph()
+        )
+
+        assertEquals("sensitivity_policy_violation", denied.contentJson.getString("error"))
     }
 }
