@@ -1,18 +1,13 @@
 package com.kaleaon.mnxmindmaker.persona.runtime
 
-import com.kaleaon.mnxmindmaker.util.observability.InMemoryTraceStore
-import com.kaleaon.mnxmindmaker.util.observability.TraceEventType
-import org.junit.Assert.assertEquals
-import org.junit.Assert.assertTrue
-import org.junit.Test
 import com.kaleaon.mnxmindmaker.model.DataClassification
 import com.kaleaon.mnxmindmaker.model.LlmFallbackOrder
 import com.kaleaon.mnxmindmaker.model.LlmProvider
 import com.kaleaon.mnxmindmaker.model.LlmSettings
 import com.kaleaon.mnxmindmaker.model.PrivacyMode
+import com.kaleaon.mnxmindmaker.util.observability.InMemoryTraceStore
+import com.kaleaon.mnxmindmaker.util.observability.TraceEventType
 import com.kaleaon.mnxmindmaker.util.provider.ProviderRouter
-import com.kaleaon.mnxmindmaker.util.provider.RoutingPolicy
-import com.kaleaon.mnxmindmaker.util.tooling.ToolOrchestrator
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -21,24 +16,24 @@ import java.io.File
 class PersonaRuntimeManagerTest {
 
     @Test
-    fun `manager records deployment activation and invocation with correlation id`() {
+    fun `deployment tracer records deployment activation and invocation with correlation id`() {
         val store = InMemoryTraceStore()
-        val manager = PersonaRuntimeManager(store)
+        val tracer = PersonaDeploymentTracer(store)
 
-        val context = manager.deployPersona(
+        val context = tracer.deployPersona(
             requestId = "deploy-1",
             personaVersion = "v1.2.3",
             deploymentManifestHash = "manifest-abc",
             deployDurationMs = 425,
             shouldFail = false
         )
-        manager.activatePersona(
+        tracer.activatePersona(
             requestId = "activate-1",
             context = context,
             provider = "OPENAI",
             success = true
         )
-        manager.recordInvocation(
+        tracer.recordInvocation(
             requestId = "invoke-1",
             context = context,
             provider = "OPENAI",
@@ -63,11 +58,11 @@ class PersonaRuntimeManagerTest {
     }
 
     @Test
-    fun `manager records deploy and activation failure events`() {
+    fun `deployment tracer records deploy and activation failure events`() {
         val store = InMemoryTraceStore()
-        val manager = PersonaRuntimeManager(store)
+        val tracer = PersonaDeploymentTracer(store)
 
-        val context = manager.deployPersona(
+        val context = tracer.deployPersona(
             requestId = "deploy-err",
             personaVersion = "v2",
             deploymentManifestHash = "hash2",
@@ -75,7 +70,7 @@ class PersonaRuntimeManagerTest {
             shouldFail = true,
             failureReason = "upload timeout"
         )
-        manager.activatePersona(
+        tracer.activatePersona(
             requestId = "activate-err",
             context = context,
             provider = "LOCAL",
@@ -86,6 +81,9 @@ class PersonaRuntimeManagerTest {
         val allEvents = store.list().flatMap { it.events }
         assertTrue(allEvents.any { it.type == TraceEventType.DEPLOY_FAILED })
         assertTrue(allEvents.any { it.type == TraceEventType.ACTIVATION_FAILURE })
+    }
+
+    @Test
     fun `activate persona enforces manifest and governance`() {
         val settings = listOf(
             LlmSettings(
