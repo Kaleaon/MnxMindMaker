@@ -9,7 +9,10 @@ import java.util.UUID
 data class PromptPipelineRequest(
     val prompt: String,
     val task: String = "assist",
-    val retrievalLimit: Int = 8
+    val retrievalLimit: Int = 8,
+    val wakeUpContextEnabled: Boolean = false,
+    val wakeUpContextL0: String = "",
+    val wakeUpContextL1: String = ""
 )
 
 data class PromptPipelineResult(
@@ -26,6 +29,10 @@ class PromptPipelineEngine(
     private val traceStore: TraceStore,
     private val nowMs: () -> Long = { System.currentTimeMillis() }
 ) {
+    companion object {
+        private const val WAKE_UP_CONTEXT_MAX_CHARS = 1200
+        private const val DYNAMIC_RETRIEVED_CONTEXT_MAX_CHARS = 2000
+    }
 
     suspend fun execute(
         request: PromptPipelineRequest,
@@ -49,7 +56,41 @@ class PromptPipelineEngine(
             val retrievalContextText = hits.joinToString("\n") { node ->
                 "- ${node.label}: ${node.description.take(120)}"
             }
-            val systemPrompt = "$baseSystemPrompt\n\nRetrieved context:\n$retrievalContextText"
+
+            val systemPromptSections = mutableListOf<String>()
+            systemPromptSections += baseSystemPrompt
+            tracer.recordPromptPipeline("base_system_prompt_included", baseSystemPrompt)
+
+            if (request.wakeUpContextEnabled) {
+                val wakeUpContext = buildString {
+                    val l0 = request.wakeUpContextL0.trim()
+                    val l1 = request.wakeUpContextL1.trim()
+                    if (l0.isNotEmpty()) appendLine("L0: $l0")
+                    if (l1.isNotEmpty()) appendLine("L1: $l1")
+                }.trim()
+
+                if (wakeUpContext.isNotEmpty()) {
+                    tracer.recordPromptPipeline("wake_up_context_generated", wakeUpContext)
+                    val truncatedWakeUpContext = wakeUpContext.take(WAKE_UP_CONTEXT_MAX_CHARS)
+                    if (truncatedWakeUpContext.length < wakeUpContext.length) {
+                        tracer.recordPromptPipeline("wake_up_context_truncated", truncatedWakeUpContext)
+                    }
+                    systemPromptSections += "Wake-up context:\n$truncatedWakeUpContext"
+                } else {
+                    tracer.recordPromptPipeline("wake_up_context_skipped", "enabled_but_empty")
+                }
+            } else {
+                tracer.recordPromptPipeline("wake_up_context_skipped", "disabled")
+            }
+
+            tracer.recordPromptPipeline("dynamic_retrieved_context_generated", retrievalContextText)
+            val truncatedRetrievedContext = retrievalContextText.take(DYNAMIC_RETRIEVED_CONTEXT_MAX_CHARS)
+            if (truncatedRetrievedContext.length < retrievalContextText.length) {
+                tracer.recordPromptPipeline("dynamic_retrieved_context_truncated", truncatedRetrievedContext)
+            }
+            systemPromptSections += "Retrieved context:\n$truncatedRetrievedContext"
+
+            val systemPrompt = systemPromptSections.joinToString("\n\n")
             tracer.recordPromptPipeline("assembled_system_prompt", systemPrompt)
 
             val orchestrator = orchestratorFactory(tracer, settings)
