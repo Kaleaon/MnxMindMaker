@@ -3,14 +3,39 @@ package com.kaleaon.mnxmindmaker.tooling
 import com.kaleaon.mnxmindmaker.model.MindGraph
 import com.kaleaon.mnxmindmaker.util.memory.MemoryManager
 import com.kaleaon.mnxmindmaker.util.tooling.FoundationalTools
+import com.kaleaon.mnxmindmaker.util.tooling.PolicyDecisionType
 import com.kaleaon.mnxmindmaker.util.tooling.ToolInvocation
+import com.kaleaon.mnxmindmaker.util.tooling.ToolPolicyEngine
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 
 class FoundationalToolsTest {
+
+    @Test
+    fun `tool specs expose input schema and executable handlers with policy enforcement`() {
+        val root = createTempDir(prefix = "tooling-test")
+        val tools = FoundationalTools(appRoot = root, scopedDirectories = listOf(root), allowTerminal = false)
+        val specs = tools.specs()
+        val handlers = tools.handlers()
+        val policy = ToolPolicyEngine(specs.associateBy { it.name })
+
+        specs.forEach { spec ->
+            assertTrue(spec.inputSchema.optString("type", "object") == "object")
+            assertNotNull(handlers[spec.name])
+        }
+
+        val readDecision = policy.evaluate(ToolInvocation("r", "file_read"), MindGraph())
+        val writeDecision = policy.evaluate(ToolInvocation("w", "file_write"), MindGraph())
+        val terminalDecision = policy.evaluate(ToolInvocation("t", "terminal_execute"), MindGraph())
+
+        assertEquals(PolicyDecisionType.ALLOW, readDecision.type)
+        assertEquals(PolicyDecisionType.REQUIRE_USER_APPROVAL, writeDecision.type)
+        assertEquals(PolicyDecisionType.REQUIRE_USER_APPROVAL, terminalDecision.type)
+    }
 
     @Test
     fun `file write then read works within scoped directory`() {

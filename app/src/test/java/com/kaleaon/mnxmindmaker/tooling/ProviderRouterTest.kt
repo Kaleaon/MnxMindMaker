@@ -2,8 +2,10 @@ package com.kaleaon.mnxmindmaker.tooling
 
 import com.kaleaon.mnxmindmaker.model.LlmProvider
 import com.kaleaon.mnxmindmaker.model.LlmSettings
+import com.kaleaon.mnxmindmaker.model.LocalRuntimeControls
 import com.kaleaon.mnxmindmaker.util.provider.AssistantProvider
 import com.kaleaon.mnxmindmaker.util.provider.ProviderHealth
+import com.kaleaon.mnxmindmaker.util.provider.ProviderJsonAdapters
 import com.kaleaon.mnxmindmaker.util.provider.ProviderRequest
 import com.kaleaon.mnxmindmaker.util.provider.ProviderRouter
 import com.kaleaon.mnxmindmaker.util.provider.RoutingPolicy
@@ -83,6 +85,45 @@ class ProviderRouterTest {
     }
 
     @Test
+    fun `strict local only takes precedence over user preference in hierarchical routing`() {
+        val router = ProviderRouter(
+            providers = listOf(
+                StubProvider("edge") { it.provider == LlmProvider.LOCAL_ON_DEVICE },
+                StubProvider("openai") { it.provider == LlmProvider.OPENAI }
+            )
+        )
+
+        val turn = router.chat(
+            settingsChain = listOf(settings(LlmProvider.OPENAI), settings(LlmProvider.LOCAL_ON_DEVICE)),
+            systemPrompt = "system",
+            transcript = emptyList(),
+            policy = RoutingPolicy(
+                userPreference = LlmProvider.OPENAI,
+                strictLocalOnly = true
+            )
+        )
+
+        assertEquals("edge", turn.text)
+    }
+
+    @Test
+    fun `wake-up token cap is respected when provider request body is serialized`() {
+        val settings = settings(
+            provider = LlmProvider.OPENAI,
+            maxTokens = 192
+        )
+
+        val body = ProviderJsonAdapters.openAiBody(
+            settings = settings,
+            systemPrompt = "wake up and summarize",
+            transcript = listOf(JSONObject().put("role", "user").put("content", "hello")),
+            tools = emptyList()
+        )
+
+        assertEquals(192, body.getInt("max_tokens"))
+    }
+
+    @Test
     fun `default provider router includes llm edge adapter for local runtime`() {
         val health = ProviderRouter().healthCheck(settings(LlmProvider.LOCAL_ON_DEVICE))
 
@@ -99,10 +140,16 @@ class ProviderRouterTest {
         assertFalse(provider.supports(settings(LlmProvider.LOCAL_ON_DEVICE)))
     }
 
-    private fun settings(provider: LlmProvider, baseUrl: String = provider.baseUrl): LlmSettings = LlmSettings(
+    private fun settings(
+        provider: LlmProvider,
+        baseUrl: String = provider.baseUrl,
+        maxTokens: Int = 2048
+    ): LlmSettings = LlmSettings(
         provider = provider,
         enabled = true,
-        baseUrl = baseUrl
+        baseUrl = baseUrl,
+        maxTokens = maxTokens,
+        runtimeControls = LocalRuntimeControls(contextWindowTokens = 4096)
     )
 
     private class StubProvider(
