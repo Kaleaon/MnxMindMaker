@@ -15,6 +15,9 @@ object MemoryRetrievalService {
     data class RetrievalContext(
         val prompt: String = "",
         val task: String = "",
+        val roomHint: String? = null,
+        val hallHint: String? = null,
+        val wingHint: String? = null,
         val nowEpochMs: Long = System.currentTimeMillis()
     )
 
@@ -35,7 +38,21 @@ object MemoryRetrievalService {
         val confidence: Float,
         val recency: Float,
         val relevance: Float,
-        val riskPenalty: Float
+        val riskPenalty: Float,
+        val tier: RetrievalTier
+    )
+
+    private enum class RetrievalTier {
+        EXACT_ROOM,
+        HALL,
+        WING,
+        GLOBAL_FALLBACK
+    }
+
+    private data class RouteHints(
+        val room: String?,
+        val hall: String?,
+        val wing: String?
     )
 
     fun retrieve(
@@ -45,6 +62,8 @@ object MemoryRetrievalService {
         filters: RetrievalFilters = RetrievalFilters()
     ): List<MindNode> {
         if (limit <= 0 || memories.isEmpty()) return emptyList()
+
+        val routeHints = buildRouteHints(context)
 
         return memories
             .asSequence()
@@ -71,10 +90,15 @@ object MemoryRetrievalService {
                     confidence = confidence,
                     recency = recency,
                     relevance = relevance,
-                    riskPenalty = riskPenalty
+                    riskPenalty = riskPenalty,
+                    tier = classifyTier(node, routeHints)
                 )
             }
-            .sortedByDescending { it.score }
+            .sortedWith(
+                compareBy<ScoredMemory> { it.tier.ordinal }
+                    .thenByDescending { it.score }
+                    .thenBy { it.node.id }
+            )
             .take(limit)
             .onEach { updateRevalidationMetadata(it, context.nowEpochMs) }
             .map { it.node }
@@ -140,6 +164,37 @@ object MemoryRetrievalService {
         return (lexical * 0.65f + intrinsic * 0.35f).coerceIn(0f, 1f)
     }
 
+    private fun buildRouteHints(context: RetrievalContext): RouteHints {
+        val corpus = "${context.prompt} ${context.task}".lowercase()
+        val room = normalizeRouteHint(context.roomHint ?: extractNamedHint(corpus, "room"))
+        val hall = normalizeRouteHint(context.hallHint ?: extractNamedHint(corpus, "hall"))
+        val wing = normalizeRouteHint(context.wingHint ?: extractNamedHint(corpus, "wing"))
+        return RouteHints(room = room, hall = hall, wing = wing)
+    }
+
+    private fun classifyTier(node: MindNode, hints: RouteHints): RetrievalTier {
+        val nodeRoom = node.attributeNormalized("room")
+        val nodeHall = node.attributeNormalized("hall")
+        val nodeWing = node.attributeNormalized("wing")
+
+        return when {
+            hints.room != null && hints.room == nodeRoom -> RetrievalTier.EXACT_ROOM
+            hints.hall != null && hints.hall == nodeHall -> RetrievalTier.HALL
+            hints.wing != null && hints.wing == nodeWing -> RetrievalTier.WING
+            else -> RetrievalTier.GLOBAL_FALLBACK
+        }
+    }
+
+    private fun extractNamedHint(corpus: String, key: String): String? {
+        val regex = Regex("""\b$key\s*[:=]\s*([a-z0-9_-]+)\b""")
+        return regex.find(corpus)?.groupValues?.getOrNull(1)
+    }
+
+    private fun normalizeRouteHint(value: String?): String? = value
+        ?.trim()
+        ?.lowercase()
+        ?.takeIf { it.isNotEmpty() }
+
     private fun recencyScore(node: MindNode, nowEpochMs: Long): Float {
         val sourceTs = node.attributeAsLong("last_revalidated")
             ?: node.attributeAsLong("last_used")
@@ -193,6 +248,11 @@ object MemoryRetrievalService {
         attributes[key]?.toFloatOrNull()?.coerceIn(0f, 1f) ?: default
 
     private fun MindNode.attributeAsLong(key: String): Long? = attributes[key]?.toLongOrNull()
+
+    private fun MindNode.attributeNormalized(key: String): String? = attributes[key]
+        ?.trim()
+        ?.lowercase()
+        ?.takeIf { it.isNotEmpty() }
 
     private fun MindNode.sensitivityLevel(): SensitivityLevel {
         return when (attributes["sensitivity"]?.lowercase()) {
