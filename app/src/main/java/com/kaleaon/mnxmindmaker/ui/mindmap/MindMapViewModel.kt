@@ -458,7 +458,7 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
     private fun providerToChoice(provider: LlmProvider): ComposerProviderChoice = when (provider) {
         LlmProvider.LOCAL_ON_DEVICE -> ComposerProviderChoice.LOCAL
         LlmProvider.ANTHROPIC -> ComposerProviderChoice.CLAUDE
-        LlmProvider.OPENAI -> ComposerProviderChoice.CHATGPT
+        LlmProvider.OPENAI, LlmProvider.OPENAI_COMPATIBLE_SELF_HOSTED -> ComposerProviderChoice.CHATGPT
         LlmProvider.GEMINI -> ComposerProviderChoice.GEMINI
         LlmProvider.VLLM_GEMMA4 -> ComposerProviderChoice.VLLM
     }
@@ -550,8 +550,9 @@ internal object MindMapProviderSelection {
     private fun fallbackProviderRank(provider: LlmProvider): Int = when (provider) {
         LlmProvider.LOCAL_ON_DEVICE -> 0
         LlmProvider.VLLM_GEMMA4 -> 1
-        LlmProvider.GEMINI -> 2
-        LlmProvider.OPENAI -> 3
-        LlmProvider.ANTHROPIC -> 4
+        LlmProvider.OPENAI_COMPATIBLE_SELF_HOSTED -> 2
+        LlmProvider.GEMINI -> 3
+        LlmProvider.OPENAI -> 4
+        LlmProvider.ANTHROPIC -> 5
     }
 }

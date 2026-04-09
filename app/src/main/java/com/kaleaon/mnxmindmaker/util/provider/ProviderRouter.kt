@@ -45,6 +45,7 @@ class ProviderRouter(
 
         var lastError: Exception? = null
         for (settings in ordered) {
+            ProviderSettingsValidator.validateOrThrow(settings)
             val provider = providers.firstOrNull { it.supports(settings) }
             if (provider == null) {
                 lastError = LlmApiException("No provider adapter for ${settings.provider.displayName}")
@@ -106,6 +107,7 @@ class ProviderRouter(
     }
 
     fun healthCheck(settings: LlmSettings): ProviderHealth {
+        ProviderSettingsValidator.validate(settings)?.let { return ProviderHealth(false, it) }
         val provider = providers.firstOrNull { it.supports(settings) }
             ?: return ProviderHealth(false, "No adapter for ${settings.provider.displayName}")
         return provider.healthCheck(settings)
@@ -140,14 +142,14 @@ class ProviderRouter(
     }
 
     private fun costRank(provider: LlmProvider): Int = when (provider) {
-        LlmProvider.LOCAL_ON_DEVICE, LlmProvider.VLLM_GEMMA4 -> 0
+        LlmProvider.LOCAL_ON_DEVICE, LlmProvider.VLLM_GEMMA4, LlmProvider.OPENAI_COMPATIBLE_SELF_HOSTED -> 0
         LlmProvider.GEMINI -> 1
         LlmProvider.OPENAI -> 2
         LlmProvider.ANTHROPIC -> 3
     }
 
     private fun latencyRank(provider: LlmProvider): Int = when (provider) {
-        LlmProvider.LOCAL_ON_DEVICE, LlmProvider.VLLM_GEMMA4 -> 0
+        LlmProvider.LOCAL_ON_DEVICE, LlmProvider.VLLM_GEMMA4, LlmProvider.OPENAI_COMPATIBLE_SELF_HOSTED -> 0
         LlmProvider.OPENAI -> 1
         LlmProvider.ANTHROPIC -> 2
         LlmProvider.GEMINI -> 3
