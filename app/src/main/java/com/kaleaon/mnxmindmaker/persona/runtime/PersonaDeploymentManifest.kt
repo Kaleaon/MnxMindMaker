@@ -1,6 +1,17 @@
 package com.kaleaon.mnxmindmaker.persona.runtime
 
+import com.kaleaon.mnxmindmaker.model.DataClassification
+import com.kaleaon.mnxmindmaker.model.LlmFallbackOrder
+import com.kaleaon.mnxmindmaker.model.LlmProvider
+import com.kaleaon.mnxmindmaker.model.PrivacyMode
+
 data class PersonaDeploymentManifest(
+    val personaId: String = "unknown",
+    val allowedProviders: Set<LlmProvider> = emptySet(),
+    val maxOutboundClassification: DataClassification = DataClassification.SENSITIVE,
+    val enforcedPrivacyMode: PrivacyMode? = null,
+    val fallbackOrder: LlmFallbackOrder? = null,
+    val allowTools: Boolean = true,
     val target: RuntimeTarget = RuntimeTarget(),
     val inference: InferenceParams = InferenceParams(),
     val toolPolicy: ToolPolicy = ToolPolicy(),

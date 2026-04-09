@@ -5,18 +5,6 @@ import com.kaleaon.mnxmindmaker.model.LlmFallbackOrder
 import com.kaleaon.mnxmindmaker.model.LlmProvider
 import com.kaleaon.mnxmindmaker.model.PrivacyMode
 
-/**
- * Deployment-time constraints that must be honored by persona execution.
- */
-data class PersonaDeploymentManifest(
-    val personaId: String,
-    val allowedProviders: Set<LlmProvider> = emptySet(),
-    val maxOutboundClassification: DataClassification = DataClassification.SENSITIVE,
-    val enforcedPrivacyMode: PrivacyMode? = null,
-    val fallbackOrder: LlmFallbackOrder? = null,
-    val allowTools: Boolean = true
-)
-
 enum class PersonaRuntimePhase {
     IDLE,
     ACTIVATING,
