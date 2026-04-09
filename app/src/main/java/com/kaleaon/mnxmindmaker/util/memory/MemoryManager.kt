@@ -7,7 +7,9 @@ import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.sqrt
 
-class MemoryManager {
+class MemoryManager(
+    private val storage: MemoryStorage = InMemoryMemoryStorage()
+) {
 
     enum class MemoryPolicyMode {
         OFF,
@@ -60,6 +62,17 @@ class MemoryManager {
 
     private data class PurgeSelection(val expiredIds: List<String>, val malformedTimestampCount: Int)
 
+    data class PersistedMemorySnapshot(
+        val sessionTurns: List<SessionTurn> = emptyList(),
+        val profileMemories: List<MindNode> = emptyList(),
+        val semanticMemories: List<MindNode> = emptyList()
+    )
+
+    interface MemoryStorage {
+        fun loadSnapshot(): PersistedMemorySnapshot
+        fun saveSnapshot(snapshot: PersistedMemorySnapshot)
+    }
+
     private val sessionTurns = mutableListOf<SessionTurn>()
     private val profileMemories = ConcurrentHashMap<String, MindNode>()
     private val semanticIndex = SemanticMemoryVectorIndex()
@@ -82,6 +95,8 @@ class MemoryManager {
         this.persistenceStore = persistenceStore
         this.expiryTelemetry = expiryTelemetry
         MemoryCategory.entries.forEach { expiryPurgeCounters[it] = 0 }
+    init {
+        restoreFromStorage()
     }
 
     fun setPolicy(settings: MemoryPolicySettings) {
@@ -95,11 +110,13 @@ class MemoryManager {
     fun appendSessionTurn(turn: SessionTurn) {
         if (policySettings.mode == MemoryPolicyMode.OFF) return
         sessionTurns.add(turn)
+        persistAndRefresh()
     }
 
     fun upsertSemanticMemory(node: MindNode) {
         if (policySettings.mode != MemoryPolicyMode.PERSISTENT) return
         semanticIndex.upsert(node)
+        persistAndRefresh()
     }
 
     fun upsertProfileMemory(
@@ -126,15 +143,18 @@ class MemoryManager {
             }
         )
         profileMemories[key] = node
+        persistAndRefresh()
     }
 
     fun editMemory(memoryId: String, update: (MindNode) -> MindNode): Boolean {
         semanticIndex.get(memoryId)?.let {
             semanticIndex.upsert(update(it))
+            persistAndRefresh()
             return true
         }
         profileMemories[memoryId]?.let {
             profileMemories[memoryId] = update(it)
+            persistAndRefresh()
             return true
         }
         return false
@@ -143,11 +163,19 @@ class MemoryManager {
     fun deleteMemory(memoryId: String): Boolean {
         val semanticRemoved = semanticIndex.delete(memoryId)
         val profileRemoved = profileMemories.remove(memoryId) != null
+        if (semanticRemoved || profileRemoved) {
+            persistAndRefresh()
+        }
         return semanticRemoved || profileRemoved
     }
 
-    fun clearSession() {
+    fun clearSession(clearAllCategories: Boolean = false) {
         sessionTurns.clear()
+        if (clearAllCategories) {
+            profileMemories.clear()
+            semanticIndex.clearAll()
+        }
+        persistAndRefresh()
     }
 
     fun retrieveForPromptInjection(
@@ -207,6 +235,12 @@ class MemoryManager {
             )
         }?.let { expiredIds ->
             semanticIndex.deleteMany(expiredIds)
+        var shouldPersist = false
+
+        val sessionExpiry = expiryMap[MemoryCategory.SESSION]
+        if (sessionExpiry != null) {
+            val removed = sessionTurns.removeAll { nowEpochMs - it.timestampMs > sessionExpiry }
+            if (removed) shouldPersist = true
         }
     }
 
@@ -220,6 +254,13 @@ class MemoryManager {
         if (selection.expiredIds.isEmpty()) {
             expiryTelemetry.onExpiredRemoved(category, 0, selection.malformedTimestampCount)
             return emptyList()
+        val profileExpiry = expiryMap[MemoryCategory.PROFILE]
+        if (profileExpiry != null) {
+            val toRemove = profileMemories.values
+                .filter { nowEpochMs - (it.attributes["timestamp"]?.toLongOrNull() ?: nowEpochMs) > profileExpiry }
+                .map { it.id }
+            toRemove.forEach { profileMemories.remove(it) }
+            if (toRemove.isNotEmpty()) shouldPersist = true
         }
         persistenceStore.deleteExpired(category, selection.expiredIds)
         expiryPurgeCounters.compute(category) { _, count -> (count ?: 0) + selection.expiredIds.size }
@@ -239,6 +280,36 @@ class MemoryManager {
 
     private fun parseTimestamp(rawTimestamp: String?): Long? {
         return rawTimestamp?.toLongOrNull()
+        val semanticPurged = semanticIndex.purgeExpired(nowEpochMs, expiryMap[MemoryCategory.SEMANTIC])
+        if (semanticPurged) shouldPersist = true
+
+        if (shouldPersist) {
+            persistAndRefresh()
+        }
+    }
+
+    private fun restoreFromStorage() {
+        val snapshot = storage.loadSnapshot()
+        sessionTurns.clear()
+        sessionTurns.addAll(snapshot.sessionTurns)
+        profileMemories.clear()
+        snapshot.profileMemories.forEach { profileMemories[it.id] = it }
+        semanticIndex.replaceAll(snapshot.semanticMemories)
+    }
+
+    private fun persistSnapshot() {
+        storage.saveSnapshot(
+            PersistedMemorySnapshot(
+                sessionTurns = sessionTurns.toList(),
+                profileMemories = profileMemories.values.toList(),
+                semanticMemories = semanticIndex.allMemories()
+            )
+        )
+    }
+
+    private fun persistAndRefresh() {
+        persistSnapshot()
+        restoreFromStorage()
     }
 
     private fun SessionTurn.toMindNode(): MindNode {
@@ -258,6 +329,17 @@ class MemoryManager {
     }
 }
 
+private class InMemoryMemoryStorage : MemoryManager.MemoryStorage {
+    @Volatile
+    private var snapshot: MemoryManager.PersistedMemorySnapshot = MemoryManager.PersistedMemorySnapshot()
+
+    override fun loadSnapshot(): MemoryManager.PersistedMemorySnapshot = snapshot
+
+    override fun saveSnapshot(snapshot: MemoryManager.PersistedMemorySnapshot) {
+        this.snapshot = snapshot
+    }
+}
+
 private class SemanticMemoryVectorIndex {
     private val memories = ConcurrentHashMap<String, MindNode>()
     private val vectors = ConcurrentHashMap<String, Map<String, Float>>()
@@ -273,6 +355,18 @@ private class SemanticMemoryVectorIndex {
         val removed = memories.remove(id) != null
         vectors.remove(id)
         return removed
+    }
+
+    fun clearAll() {
+        memories.clear()
+        vectors.clear()
+    }
+
+    fun allMemories(): List<MindNode> = memories.values.toList()
+
+    fun replaceAll(nodes: List<MindNode>) {
+        clearAll()
+        nodes.forEach { upsert(it) }
     }
 
     fun query(prompt: String, topK: Int): List<MindNode> {
@@ -299,12 +393,21 @@ private class SemanticMemoryVectorIndex {
     }
 
     fun memories(): Collection<MindNode> = memories.values.toList()
+    fun purgeExpired(nowEpochMs: Long, maxAgeMs: Long?): Boolean {
+        if (maxAgeMs == null) return false
+        val expiredIds = memories.values
+            .filter { memory ->
+                val ts = memory.attributes["timestamp"]?.toLongOrNull() ?: nowEpochMs
+                nowEpochMs - ts > maxAgeMs
+            }
+            .map { it.id }
 
     fun deleteMany(ids: List<String>) {
         ids.forEach {
             memories.remove(it)
             vectors.remove(it)
         }
+        return expiredIds.isNotEmpty()
     }
 
     private fun tokenizeToUnitVector(text: String): Map<String, Float> {
