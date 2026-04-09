@@ -41,6 +41,66 @@ class MemoryManagerTest {
     }
 
     @Test
+    fun `persistent memories can be rehydrated after manager re-instantiation`() {
+        val now = 150_000L
+        val firstManager = MemoryManager().apply {
+            setPolicy(
+                MemoryManager.MemoryPolicySettings(mode = MemoryManager.MemoryPolicyMode.PERSISTENT)
+            )
+            appendSessionTurn(
+                MemoryManager.SessionTurn(role = "user", content = "ephemeral", timestampMs = 99_000L)
+            )
+            upsertProfileMemory(key = "tone", value = "concise", timestampMs = 100_000L)
+            upsertSemanticMemory(
+                MindNode(
+                    id = "semantic-persisted",
+                    label = "Release checklist",
+                    type = NodeType.MEMORY,
+                    description = "Always run smoke tests",
+                    attributes = mutableMapOf(
+                        "timestamp" to "100000",
+                        "current_relevance" to "0.9"
+                    )
+                )
+            )
+        }
+
+        val persistedNodes = firstManager.retrieveForPromptInjection(
+            prompt = "release smoke tests",
+            task = "remember",
+            limit = 10,
+            nowEpochMs = now
+        ).filterNot { it.attributes["semantic_subtype"] == "session" }
+
+        val secondManager = MemoryManager().apply {
+            setPolicy(MemoryManager.MemoryPolicySettings(mode = MemoryManager.MemoryPolicyMode.PERSISTENT))
+            persistedNodes.forEach { node ->
+                when (node.attributes["semantic_subtype"]) {
+                    "profile" -> upsertProfileMemory(
+                        key = node.id,
+                        value = node.description,
+                        sensitivity = node.attributes["sensitivity"] ?: "low",
+                        timestampMs = node.attributes["timestamp"]?.toLongOrNull() ?: now
+                    )
+
+                    else -> upsertSemanticMemory(node)
+                }
+            }
+        }
+
+        val roundTripped = secondManager.retrieveForPromptInjection(
+            prompt = "release smoke tests",
+            task = "remember",
+            limit = 10,
+            nowEpochMs = now
+        )
+
+        assertTrue(roundTripped.any { it.id == "semantic-persisted" })
+        assertTrue(roundTripped.any { it.id == "tone" })
+        assertFalse(roundTripped.any { it.attributes["semantic_subtype"] == "session" })
+    }
+
+    @Test
     fun `persistent policy applies sensitivity and supports edit delete`() {
         val manager = MemoryManager()
         manager.setPolicy(
@@ -98,7 +158,7 @@ class MemoryManagerTest {
     }
 
     @Test
-    fun `auto expiry purges memories by category`() {
+    fun `auto expiry purges memories by category and keeps fresh entries`() {
         val manager = MemoryManager()
         val now = 50_000L
         manager.setPolicy(
@@ -115,10 +175,18 @@ class MemoryManagerTest {
         manager.appendSessionTurn(
             MemoryManager.SessionTurn(role = "user", content = "old session", timestampMs = 1_000L)
         )
+        manager.appendSessionTurn(
+            MemoryManager.SessionTurn(role = "user", content = "fresh session", timestampMs = 49_500L)
+        )
         manager.upsertProfileMemory(
-            key = "tone",
+            key = "tone-old",
             value = "friendly",
             timestampMs = 1_000L
+        )
+        manager.upsertProfileMemory(
+            key = "tone-fresh",
+            value = "direct",
+            timestampMs = 49_900L
         )
         manager.upsertSemanticMemory(
             MindNode(
@@ -129,14 +197,26 @@ class MemoryManagerTest {
                 attributes = mutableMapOf("timestamp" to "1000", "current_relevance" to "0.8")
             )
         )
+        manager.upsertSemanticMemory(
+            MindNode(
+                id = "semantic-fresh",
+                label = "Fresh semantic",
+                type = NodeType.MEMORY,
+                description = "fresh",
+                attributes = mutableMapOf("timestamp" to "49500", "current_relevance" to "0.8")
+            )
+        )
 
         val retrieved = manager.retrieveForPromptInjection(
-            prompt = "any",
+            prompt = "fresh",
             task = "any",
             limit = 10,
             nowEpochMs = now
         )
 
-        assertEquals(0, retrieved.size)
+        assertFalse(retrieved.any { it.id == "semantic-old" || it.id == "tone-old" || it.description == "old session" })
+        assertTrue(retrieved.any { it.id == "semantic-fresh" })
+        assertTrue(retrieved.any { it.id == "tone-fresh" })
+        assertEquals(3, retrieved.size)
     }
 }
