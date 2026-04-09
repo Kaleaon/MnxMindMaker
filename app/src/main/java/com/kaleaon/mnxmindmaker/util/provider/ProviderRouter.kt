@@ -29,6 +29,7 @@ class ProviderRouter(
         LlmEdgeProvider(),
         LocalProvider(),
         ClaudeProvider(),
+        GeminiProvider(),
         ChatGPTProvider()
     )
 ) {

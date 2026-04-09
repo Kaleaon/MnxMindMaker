@@ -61,6 +61,35 @@ internal object ProviderJsonAdapters {
         }
     }
 
+    fun geminiBody(
+        settings: LlmSettings,
+        systemPrompt: String,
+        transcript: List<JSONObject>,
+        tools: List<ToolSpec>
+    ): JSONObject {
+        return JSONObject().apply {
+            put(
+                "system_instruction",
+                JSONObject().put("parts", JSONArray().put(JSONObject().put("text", systemPrompt)))
+            )
+            put(
+                "generationConfig",
+                JSONObject()
+                    .put("temperature", settings.temperature.toDouble())
+                    .put("maxOutputTokens", settings.maxTokens)
+            )
+            put("contents", geminiContents(transcript))
+            if (tools.isNotEmpty()) {
+                put(
+                    "tools",
+                    JSONArray().put(
+                        JSONObject().put("functionDeclarations", geminiFunctionDeclarations(tools))
+                    )
+                )
+            }
+        }
+    }
+
     fun anthropicTools(tools: List<ToolSpec>): JSONArray {
         return JSONArray().apply {
             tools.forEach { spec ->
@@ -78,6 +107,42 @@ internal object ProviderJsonAdapters {
         return JSONArray().apply {
             transcript.forEach { msg ->
                 put(JSONObject().put("role", msg.optString("role", "user")).put("content", msg.opt("content") ?: ""))
+            }
+        }
+    }
+
+    fun geminiContents(transcript: List<JSONObject>): JSONArray {
+        return JSONArray().apply {
+            transcript.forEach { msg ->
+                when (msg.optString("role", "user")) {
+                    "assistant" -> put(JSONObject().put("role", "model").put("parts", JSONArray().put(JSONObject().put("text", msg.optString("content")))))
+                    "tool" -> {
+                        val content = msg.optJSONArray("content") ?: JSONArray()
+                        for (i in 0 until content.length()) {
+                            val toolResult = content.optJSONObject(i) ?: continue
+                            put(
+                                JSONObject()
+                                    .put("role", "user")
+                                    .put(
+                                        "parts",
+                                        JSONArray().put(
+                                            JSONObject().put(
+                                                "functionResponse",
+                                                JSONObject()
+                                                    .put("name", toolResult.optString("name", "tool_result"))
+                                                    .put(
+                                                        "response",
+                                                        toolResult.optJSONObject("result")
+                                                            ?: safeJsonObject(toolResult.toString())
+                                                    )
+                                            )
+                                        )
+                                    )
+                            )
+                        }
+                    }
+                    else -> put(JSONObject().put("role", "user").put("parts", JSONArray().put(JSONObject().put("text", msg.optString("content")))))
+                }
             }
         }
     }
@@ -114,6 +179,49 @@ internal object ProviderJsonAdapters {
             }
         }
         return AssistantTurn(text = textParts.joinToString("\n").trim(), toolInvocations = invocations, raw = response)
+    }
+
+    fun parseGeminiTurn(response: JSONObject): AssistantTurn {
+        val candidates = response.optJSONArray("candidates") ?: JSONArray()
+        val first = candidates.optJSONObject(0) ?: JSONObject()
+        val content = first.optJSONObject("content") ?: JSONObject()
+        val parts = content.optJSONArray("parts") ?: JSONArray()
+        val textParts = mutableListOf<String>()
+        val invocations = mutableListOf<ToolInvocation>()
+        for (i in 0 until parts.length()) {
+            val part = parts.optJSONObject(i) ?: continue
+            val text = part.optString("text")
+            if (text.isNotBlank()) textParts += text
+
+            val functionCall = part.optJSONObject("functionCall")
+            if (functionCall != null) {
+                val argsAny = functionCall.opt("args")
+                val args = when (argsAny) {
+                    is JSONObject -> argsAny
+                    is String -> safeJsonObject(argsAny)
+                    else -> JSONObject()
+                }
+                invocations += ToolInvocation(
+                    id = UUID.randomUUID().toString(),
+                    toolName = functionCall.optString("name"),
+                    argumentsJson = args
+                )
+            }
+        }
+        return AssistantTurn(text = textParts.joinToString("\n").trim(), toolInvocations = invocations, raw = response)
+    }
+
+    private fun geminiFunctionDeclarations(tools: List<ToolSpec>): JSONArray {
+        return JSONArray().apply {
+            tools.forEach { spec ->
+                put(
+                    JSONObject()
+                        .put("name", spec.name)
+                        .put("description", spec.description)
+                        .put("parameters", spec.inputSchema.takeIf { it.length() > 0 } ?: JSONObject().put("type", "object"))
+                )
+            }
+        }
     }
 
     fun safeJsonObject(raw: String): JSONObject {
