@@ -5,6 +5,7 @@ import com.kaleaon.mnxmindmaker.model.NodeType
 import com.kaleaon.mnxmindmaker.util.MemoryRetrievalService
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -49,6 +50,33 @@ class MemoryRetrievalServiceTest {
 
         assertFalse(retrieved.any { it.id == "restricted-room" })
         assertTrue(retrieved.any { it.id == "safe-global" })
+    }
+
+    @Test
+    fun `repeated retrieval is deterministic and metadata is only applied on explicit write step`() {
+        val now = 1_700_000_000_000L
+        val context = MemoryRetrievalService.RetrievalContext(
+            prompt = "project release planning",
+            task = "planning",
+            nowEpochMs = now
+        )
+
+        val memoryA = memory("a", relevance = "0.7", confidence = "0.6")
+        val memoryB = memory("b", relevance = "0.8", confidence = "0.7")
+        val memories = listOf(memoryA, memoryB)
+
+        val first = MemoryRetrievalService.retrieveWithSuggestions(memories, context, limit = 2)
+        val second = MemoryRetrievalService.retrieveWithSuggestions(memories, context, limit = 2)
+
+        assertEquals(first.memories.map { it.id }, second.memories.map { it.id })
+        assertEquals(first.suggestedUpdates, second.suggestedUpdates)
+        assertNull(memoryA.attributes["last_revalidated"])
+        assertNull(memoryB.attributes["last_revalidated"])
+
+        MemoryRetrievalService.applyRevalidationUpdates(memories, first.suggestedUpdates)
+
+        assertEquals(now.toString(), memoryA.attributes["last_revalidated"])
+        assertEquals(now.toString(), memoryB.attributes["last_revalidated"])
     }
 
     private fun memory(

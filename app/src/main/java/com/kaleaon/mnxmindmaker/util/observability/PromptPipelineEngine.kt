@@ -50,7 +50,13 @@ class PromptPipelineEngine(
                 task = request.task,
                 nowEpochMs = nowMs()
             )
-            val hits = MemoryRetrievalService.retrieve(memoryNodes, retrievalContext, request.retrievalLimit)
+            val retrievalResult = MemoryRetrievalService.retrieveWithSuggestions(
+                memories = memoryNodes,
+                context = retrievalContext,
+                limit = request.retrievalLimit
+            )
+            // Prompt composition is read-only; persistence decisions belong to explicit write workflows.
+            val hits = retrievalResult.memories
             tracer.recordRetrievalHits(hits)
 
             val retrievalContextText = hits.joinToString("\n") { node ->

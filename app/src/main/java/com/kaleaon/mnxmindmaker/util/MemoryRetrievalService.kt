@@ -5,6 +5,16 @@ import kotlin.math.abs
 
 object MemoryRetrievalService {
 
+    data class SuggestedNodeUpdate(
+        val nodeId: String,
+        val deltas: Map<String, String>
+    )
+
+    data class RetrievalResult(
+        val memories: List<MindNode>,
+        val suggestedUpdates: List<SuggestedNodeUpdate> = emptyList()
+    )
+
     enum class SensitivityLevel {
         LOW,
         MEDIUM,
@@ -60,12 +70,24 @@ object MemoryRetrievalService {
         context: RetrievalContext,
         limit: Int,
         filters: RetrievalFilters = RetrievalFilters()
-    ): List<MindNode> {
-        if (limit <= 0 || memories.isEmpty()) return emptyList()
+    ): List<MindNode> = retrieveWithSuggestions(
+        memories = memories,
+        context = context,
+        limit = limit,
+        filters = filters
+    ).memories
+
+    fun retrieveWithSuggestions(
+        memories: List<MindNode>,
+        context: RetrievalContext,
+        limit: Int,
+        filters: RetrievalFilters = RetrievalFilters()
+    ): RetrievalResult {
+        if (limit <= 0 || memories.isEmpty()) return RetrievalResult(memories = emptyList())
 
         val routeHints = buildRouteHints(context)
 
-        return memories
+        val scored = memories
             .asSequence()
             .mapNotNull { node ->
                 val relevance = relevanceScore(node, context)
@@ -100,9 +122,12 @@ object MemoryRetrievalService {
                     .thenBy { it.node.id }
             )
             .take(limit)
-            .onEach { updateRevalidationMetadata(it, context.nowEpochMs) }
-            .map { it.node }
             .toList()
+
+        return RetrievalResult(
+            memories = scored.map { it.node },
+            suggestedUpdates = buildRevalidationUpdates(scored, context.nowEpochMs)
+        )
     }
 
     /**
@@ -113,6 +138,21 @@ object MemoryRetrievalService {
         context: RetrievalContext,
         limit: Int
     ): List<MindNode> = retrieve(
+        memories = memories,
+        context = context,
+        limit = limit,
+        filters = RetrievalFilters(
+            minRelevance = 0.25f,
+            allowedSensitivity = setOf(SensitivityLevel.LOW, SensitivityLevel.MEDIUM),
+            allowSensitiveBoot = false
+        )
+    )
+
+    fun retrieveForPromptInjectionWithSuggestions(
+        memories: List<MindNode>,
+        context: RetrievalContext,
+        limit: Int
+    ): RetrievalResult = retrieveWithSuggestions(
         memories = memories,
         context = context,
         limit = limit,
@@ -219,7 +259,10 @@ object MemoryRetrievalService {
         return (confabRisk * 0.5f + (1f - sourceQuality) * 0.3f + uncertainty * 0.2f).coerceIn(0f, 1f) * 0.45f
     }
 
-    private fun updateRevalidationMetadata(scoredMemory: ScoredMemory, nowEpochMs: Long) {
+    private fun buildRevalidationUpdates(
+        scoredMemories: List<ScoredMemory>,
+        nowEpochMs: Long
+    ): List<SuggestedNodeUpdate> = scoredMemories.map { scoredMemory ->
         val node = scoredMemory.node
         val previousConfidence = node.attributeAsFloat("confidence", default = 0.55f)
         val targetConfidence = (
@@ -231,10 +274,29 @@ object MemoryRetrievalService {
 
         val confidenceDrift = (targetConfidence - previousConfidence)
 
-        node.attributes["last_revalidated"] = nowEpochMs.toString()
-        node.attributes["last_retrieval_score"] = "%.4f".format(scoredMemory.score)
-        node.attributes["confidence_drift"] = "%.4f".format(confidenceDrift)
-        node.attributes["confidence"] = "%.4f".format(targetConfidence)
+        SuggestedNodeUpdate(
+            nodeId = node.id,
+            deltas = mapOf(
+                "last_revalidated" to nowEpochMs.toString(),
+                "last_retrieval_score" to "%.4f".format(scoredMemory.score),
+                "confidence_drift" to "%.4f".format(confidenceDrift),
+                "confidence" to "%.4f".format(targetConfidence)
+            )
+        )
+    }
+
+    fun applyRevalidationUpdates(
+        nodes: List<MindNode>,
+        suggestedUpdates: List<SuggestedNodeUpdate>
+    ) {
+        if (nodes.isEmpty() || suggestedUpdates.isEmpty()) return
+        val byId = nodes.associateBy { it.id }
+        suggestedUpdates.forEach { update ->
+            val node = byId[update.nodeId] ?: return@forEach
+            update.deltas.forEach { (key, value) ->
+                node.attributes[key] = value
+            }
+        }
     }
 
     private fun tokenize(raw: String): Set<String> =

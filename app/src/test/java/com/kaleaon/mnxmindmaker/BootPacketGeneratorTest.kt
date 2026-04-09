@@ -44,7 +44,7 @@ class BootPacketGeneratorTest {
     }
 
     @Test
-    fun `memory retrieval skips restricted memories and updates revalidation metadata`() {
+    fun `memory retrieval skips restricted memories without mutating revalidation metadata`() {
         val safeMemory = MindNode(
             label = "Sprint planning notes",
             type = NodeType.MEMORY,
@@ -76,8 +76,8 @@ class BootPacketGeneratorTest {
 
         assertTrue(packet.memorySlice.any { it.id == safeMemory.id })
         assertTrue(packet.memorySlice.none { it.id == restrictedMemory.id })
-        assertTrue(safeMemory.attributes.containsKey("last_revalidated"))
-        assertTrue(safeMemory.attributes.containsKey("confidence_drift"))
+        assertFalse(safeMemory.attributes.containsKey("last_revalidated"))
+        assertFalse(safeMemory.attributes.containsKey("confidence_drift"))
     }
 
     @Test
