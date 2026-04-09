@@ -104,6 +104,12 @@
     <string name="continue_request">Continue Request</string>
     <string name="max_tokens_label">Max Tokens</string>
     <string name="temperature_label">Temperature (0–2)</string>
+    <string name="enable_wake_up_context_label">Enable wake-up context</string>
+    <string name="wake_up_token_budget_label">Wake-up token budget</string>
+    <string name="retrieval_mode_preference_label">Retrieval mode preference</string>
+    <string name="retrieval_mode_raw_verbatim">raw_verbatim</string>
+    <string name="retrieval_mode_summary">summary</string>
+    <string name="retrieval_mode_hierarchical">hierarchical</string>
     <string name="enabled_label">Enable this provider</string>
     <string name="save_settings">Save Settings</string>
     <string name="hint_local_model_path">Set the on-device model file path and runtime endpoint; no API key required.</string>

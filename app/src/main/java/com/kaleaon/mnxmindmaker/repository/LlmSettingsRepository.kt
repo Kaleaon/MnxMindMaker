@@ -4,25 +4,19 @@ import android.content.Context
 import android.content.SharedPreferences
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
+import com.kaleaon.mnxmindmaker.model.ComputeBackend
 import com.kaleaon.mnxmindmaker.model.DataClassification
 import com.kaleaon.mnxmindmaker.model.LlmFallbackOrder
 import com.kaleaon.mnxmindmaker.model.LlmProvider
 import com.kaleaon.mnxmindmaker.model.LlmRuntime
 import com.kaleaon.mnxmindmaker.model.LlmSettings
 import com.kaleaon.mnxmindmaker.model.LocalModelProfile
-import com.kaleaon.mnxmindmaker.model.ComputeBackend
 import com.kaleaon.mnxmindmaker.model.LocalRuntimeControls
 import com.kaleaon.mnxmindmaker.model.PrivacyMode
+import com.kaleaon.mnxmindmaker.model.RetrievalModePreference
 import com.kaleaon.mnxmindmaker.model.defaultModel
-import com.kaleaon.mnxmindmaker.security.SecureVault
 
 /**
- * Persists LLM API settings with secure encrypted storage for API keys and
- * plain preferences for non-secret tunables.
- */
-class LlmSettingsRepository(private val context: Context) {
-
-    private val secureVault = SecureVault(context)
  * Persists LLM + privacy settings in encrypted shared preferences.
  */
 class LlmSettingsRepository(private val context: Context) {
@@ -45,8 +39,6 @@ class LlmSettingsRepository(private val context: Context) {
 
     fun saveSettings(settings: LlmSettings) {
         val name = settings.provider.name
-        secureVault.putString("${name}_apiKey", settings.apiKey)
-        plainPrefs.edit()
         prefs.edit()
             .putString("${name}_apiKey", settings.apiKey)
             .putString("${name}_model", settings.model)
@@ -64,20 +56,14 @@ class LlmSettingsRepository(private val context: Context) {
             .putInt("${name}_maxVramMb", settings.runtimeControls.maxVramMb)
             .putString("${name}_classification", settings.outboundClassification.name)
             .putString("${name}_tlsPin", settings.tlsPinnedSpkiSha256)
+            .putBoolean("${name}_enableWakeUpContext", settings.enableWakeUpContext)
+            .putInt("${name}_wakeUpTokenBudget", settings.wakeUpTokenBudget)
+            .putString("${name}_retrievalModePreference", settings.retrievalModePreference.name)
             .apply()
     }
 
     fun loadSettings(provider: LlmProvider): LlmSettings {
         val name = provider.name
-        val apiKey = secureVault.getString("${name}_apiKey").orEmpty()
-        val model = plainPrefs.getString("${name}_model", provider.defaultModel())
-            ?: provider.defaultModel()
-        val baseUrl = plainPrefs.getString("${name}_baseUrl", provider.baseUrl) ?: provider.baseUrl
-        val enabled = plainPrefs.getBoolean("${name}_enabled", false)
-        val maxTokens = plainPrefs.getInt("${name}_maxTokens", 2048)
-        val temperature = plainPrefs.getFloat("${name}_temperature", 0.7f)
-        val localModelPath = plainPrefs.getString("${name}_localModelPath", "") ?: ""
-        val localProfile = plainPrefs.getString("${name}_localProfile", LocalModelProfile.BALANCED.name)
         val apiKey = prefs.getString("${name}_apiKey", "") ?: ""
         val model = prefs.getString("${name}_model", provider.defaultModel()) ?: provider.defaultModel()
         val baseUrl = prefs.getString("${name}_baseUrl", provider.baseUrl) ?: provider.baseUrl
@@ -91,20 +77,27 @@ class LlmSettingsRepository(private val context: Context) {
         val fallbackOrder = prefs.getString("${name}_fallbackOrder", LlmFallbackOrder.REMOTE_ONLY.name)
             ?.let { runCatching { LlmFallbackOrder.valueOf(it) }.getOrNull() }
             ?: LlmFallbackOrder.REMOTE_ONLY
-        val computeBackend = plainPrefs.getString("${name}_computeBackend", ComputeBackend.AUTO.name)
+        val computeBackend = prefs.getString("${name}_computeBackend", ComputeBackend.AUTO.name)
             ?.let { runCatching { ComputeBackend.valueOf(it) }.getOrNull() }
             ?: ComputeBackend.AUTO
         val runtimeControls = LocalRuntimeControls(
             computeBackend = computeBackend,
-            contextWindowTokens = plainPrefs.getInt("${name}_contextWindow", localProfile.contextWindowTokens),
-            quantizationProfile = plainPrefs.getString("${name}_quantProfile", "Q4_K_M") ?: "Q4_K_M",
-            maxRamMb = plainPrefs.getInt("${name}_maxRamMb", 4096),
-            maxVramMb = plainPrefs.getInt("${name}_maxVramMb", 2048)
+            contextWindowTokens = prefs.getInt("${name}_contextWindow", localProfile.contextWindowTokens),
+            quantizationProfile = prefs.getString("${name}_quantProfile", "Q4_K_M") ?: "Q4_K_M",
+            maxRamMb = prefs.getInt("${name}_maxRamMb", 4096),
+            maxVramMb = prefs.getInt("${name}_maxVramMb", 2048)
         )
         val classification = prefs.getString("${name}_classification", DataClassification.SENSITIVE.name)
             ?.let { runCatching { DataClassification.valueOf(it) }.getOrNull() }
             ?: DataClassification.SENSITIVE
         val tlsPin = prefs.getString("${name}_tlsPin", "") ?: ""
+        val enableWakeUpContext = prefs.getBoolean("${name}_enableWakeUpContext", true)
+        val wakeUpTokenBudget = prefs.getInt("${name}_wakeUpTokenBudget", 1024)
+        val retrievalModePreference = prefs.getString(
+            "${name}_retrievalModePreference",
+            RetrievalModePreference.SUMMARY.name
+        )?.let { runCatching { RetrievalModePreference.valueOf(it) }.getOrNull() }
+            ?: RetrievalModePreference.SUMMARY
 
         return LlmSettings(
             provider = provider,
@@ -117,9 +110,12 @@ class LlmSettingsRepository(private val context: Context) {
             localModelPath = localModelPath,
             localProfile = localProfile,
             fallbackOrder = fallbackOrder,
-            runtimeControls = runtimeControls
+            runtimeControls = runtimeControls,
             outboundClassification = classification,
-            tlsPinnedSpkiSha256 = tlsPin
+            tlsPinnedSpkiSha256 = tlsPin,
+            enableWakeUpContext = enableWakeUpContext,
+            wakeUpTokenBudget = wakeUpTokenBudget,
+            retrievalModePreference = retrievalModePreference
         )
     }
 
@@ -166,7 +162,6 @@ class LlmSettingsRepository(private val context: Context) {
     }
 
     companion object {
-        private const val PLAIN_PREFS_NAME = "mnx_llm_settings"
         private const val ENCRYPTED_PREFS_NAME = "mnx_secure_llm_settings"
         private const val KEY_PRIVACY_MODE = "global_privacy_mode"
     }
