@@ -33,6 +33,7 @@ import com.kaleaon.mnxmindmaker.model.defaultModel
 import com.kaleaon.mnxmindmaker.repository.AuthRepository
 import com.kaleaon.mnxmindmaker.repository.ExternalAccountRepository
 import com.kaleaon.mnxmindmaker.repository.LlmSettingsRepository
+import com.kaleaon.mnxmindmaker.util.provider.ProviderSettingsValidator
 import com.kaleaon.mnxmindmaker.repository.RefreshStatus
 import java.text.DateFormat
 import java.util.Date
@@ -412,6 +413,7 @@ class SettingsFragment : Fragment() {
         binding.tvApiKeyHint.text = when (provider) {
             LlmProvider.ANTHROPIC -> getString(R.string.hint_anthropic_key)
             LlmProvider.OPENAI -> getString(R.string.hint_openai_key)
+            LlmProvider.OPENAI_COMPATIBLE_SELF_HOSTED -> getString(R.string.hint_openai_compatible_self_hosted_key)
             LlmProvider.GEMINI -> getString(R.string.hint_gemini_key)
             LlmProvider.VLLM_GEMMA4 -> getString(R.string.hint_vllm_key)
             LlmProvider.LOCAL_ON_DEVICE -> getString(R.string.hint_local_model_path)
@@ -490,6 +492,21 @@ class SettingsFragment : Fragment() {
             wakeUpTokenBudget = wakeUpTokenBudget,
             retrievalModePreference = retrievalModePreference
         )
+
+        if (currentProvider.requiresApiKey && settings.apiKey.isBlank()) {
+            Snackbar.make(
+                binding.root,
+                getString(R.string.api_key_required_for_provider, currentProvider.displayName),
+                Snackbar.LENGTH_LONG
+            ).show()
+            binding.etApiKey.requestFocus()
+            return
+        }
+        ProviderSettingsValidator.validate(settings)?.let { message ->
+            Snackbar.make(binding.root, message, Snackbar.LENGTH_LONG).show()
+            binding.etBaseUrl.requestFocus()
+            return
+        }
         repository.saveSettings(settings)
 
         val idx = currentSettings.indexOfFirst { it.provider == currentProvider }

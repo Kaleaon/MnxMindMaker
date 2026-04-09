@@ -18,7 +18,8 @@ class LocalProvider(
     override val id: String = "local"
 
     override fun supports(settings: LlmSettings): Boolean =
-        settings.provider == LlmProvider.VLLM_GEMMA4 || isOpenAiCompatibleSelfHosted(settings)
+        settings.provider == LlmProvider.VLLM_GEMMA4 ||
+            settings.provider == LlmProvider.OPENAI_COMPATIBLE_SELF_HOSTED
 
     override fun chat(request: ProviderRequest) = runCatching {
         val apiKey = request.settings.apiKey.ifBlank { "EMPTY" }
@@ -58,13 +59,6 @@ class LocalProvider(
         } catch (e: Exception) {
             ProviderHealth(false, "Health check exception: ${e.message}")
         }
-    }
-
-
-    private fun isOpenAiCompatibleSelfHosted(settings: LlmSettings): Boolean {
-        if (settings.provider != LlmProvider.OPENAI) return false
-        val normalized = settings.baseUrl.lowercase()
-        return !normalized.contains("api.openai.com")
     }
 
     companion object {

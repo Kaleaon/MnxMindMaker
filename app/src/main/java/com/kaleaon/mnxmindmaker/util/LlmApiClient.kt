@@ -7,6 +7,7 @@ import com.kaleaon.mnxmindmaker.util.provider.ChatGPTProvider
 import com.kaleaon.mnxmindmaker.util.provider.ClaudeProvider
 import com.kaleaon.mnxmindmaker.util.provider.GeminiProvider
 import com.kaleaon.mnxmindmaker.util.provider.LocalProvider
+import com.kaleaon.mnxmindmaker.util.provider.ProviderSettingsValidator
 import com.kaleaon.mnxmindmaker.util.provider.ProviderRequest
 import com.kaleaon.mnxmindmaker.util.tooling.AssistantTurn
 import com.kaleaon.mnxmindmaker.util.tooling.ToolSpec
@@ -37,6 +38,7 @@ class LlmApiClient(
         transcript: List<JSONObject>,
         tools: List<ToolSpec>
     ): AssistantTurn {
+        ProviderSettingsValidator.validateOrThrow(settings)
         val provider = providers.firstOrNull { it.supports(settings) }
             ?: throw LlmApiException("No provider adapter for ${settings.provider.displayName}")
 
