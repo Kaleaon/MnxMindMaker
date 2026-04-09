@@ -429,26 +429,38 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
 
     private fun loadUsableSettings(provider: LlmProvider): LlmSettings? {
         val settings = llmRepository.loadSettings(provider)
-        if (!settings.enabled) return null
+        return settings.takeIf { it.enabled && isUsable(it) }
+    }
+
+    private fun loadAllUsableSettings(): List<LlmSettings> {
+        return llmRepository.loadAllSettings().filter { it.enabled && isUsable(it) }
+    }
+
+    private fun isUsable(settings: LlmSettings): Boolean {
         return when {
-            provider.requiresApiKey && settings.apiKey.isBlank() -> null
-            provider == LlmProvider.LOCAL_ON_DEVICE && settings.localModelPath.isBlank() -> null
-            else -> settings
+            settings.provider.requiresApiKey && settings.apiKey.isBlank() -> false
+            settings.provider == LlmProvider.LOCAL_ON_DEVICE && settings.localModelPath.isBlank() -> false
+            else -> true
         }
     }
 
     private fun pickAlternativeProvider(current: LlmProvider): LlmProvider? {
-        val prioritized = listOf(LlmProvider.OPENAI, LlmProvider.ANTHROPIC, LlmProvider.LOCAL_ON_DEVICE)
-        return prioritized.firstOrNull { provider ->
-            provider != current && loadUsableSettings(provider) != null
-        }
+        val governedChain = llmRepository.getInvocationChain()
+            .filter { isUsable(it) }
+        val allUsable = loadAllUsableSettings()
+        return MindMapProviderSelection.orderRetryCandidates(
+            current = current,
+            governedChain = governedChain,
+            allUsable = allUsable
+        ).firstOrNull()?.provider
     }
 
     private fun providerToChoice(provider: LlmProvider): ComposerProviderChoice = when (provider) {
         LlmProvider.LOCAL_ON_DEVICE -> ComposerProviderChoice.LOCAL
         LlmProvider.ANTHROPIC -> ComposerProviderChoice.CLAUDE
         LlmProvider.OPENAI -> ComposerProviderChoice.CHATGPT
-        else -> ComposerProviderChoice.AUTO
+        LlmProvider.GEMINI -> ComposerProviderChoice.GEMINI
+        LlmProvider.VLLM_GEMMA4 -> ComposerProviderChoice.VLLM
     }
 
     private fun ComposerProviderChoice.toProvider(): LlmProvider = when (this) {
@@ -456,6 +468,8 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
         ComposerProviderChoice.LOCAL -> LlmProvider.LOCAL_ON_DEVICE
         ComposerProviderChoice.CLAUDE -> LlmProvider.ANTHROPIC
         ComposerProviderChoice.CHATGPT -> LlmProvider.OPENAI
+        ComposerProviderChoice.GEMINI -> LlmProvider.GEMINI
+        ComposerProviderChoice.VLLM -> LlmProvider.VLLM_GEMMA4
     }
 
     private fun extractPromptTokens(raw: JSONObject?): Int? {
@@ -501,5 +515,43 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
             dimensions = DimensionMapper.defaultDimensions(NodeType.IDENTITY)
         )
         return MindGraph(name = "New Mind", nodes = mutableListOf(identity), edges = mutableListOf())
+    }
+}
+
+internal object MindMapProviderSelection {
+    fun orderRetryCandidates(
+        current: LlmProvider,
+        governedChain: List<LlmSettings>,
+        allUsable: List<LlmSettings>
+    ): List<LlmSettings> {
+        val chainIndex = governedChain
+            .filter { it.provider != current }
+            .mapIndexed { index, settings -> settings.provider to index }
+            .toMap()
+        val allIndex = allUsable
+            .filter { it.provider != current }
+            .mapIndexed { index, settings -> settings.provider to index }
+            .toMap()
+
+        return allUsable
+            .asSequence()
+            .filter { it.provider != current }
+            .distinctBy { it.provider }
+            .sortedWith(
+                compareBy<LlmSettings>(
+                    { chainIndex[it.provider] ?: Int.MAX_VALUE },
+                    { allIndex[it.provider] ?: Int.MAX_VALUE },
+                    { fallbackProviderRank(it.provider) }
+                ).thenBy { it.provider.name }
+            )
+            .toList()
+    }
+
+    private fun fallbackProviderRank(provider: LlmProvider): Int = when (provider) {
+        LlmProvider.LOCAL_ON_DEVICE -> 0
+        LlmProvider.VLLM_GEMMA4 -> 1
+        LlmProvider.GEMINI -> 2
+        LlmProvider.OPENAI -> 3
+        LlmProvider.ANTHROPIC -> 4
     }
 }
