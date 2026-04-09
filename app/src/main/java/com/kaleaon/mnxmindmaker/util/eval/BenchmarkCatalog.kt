@@ -29,6 +29,13 @@ object BenchmarkCatalog {
                 requiredToolNames = setOf("get_graph_summary")
             ),
             BenchmarkTask(
+                id = "retrieval-01",
+                type = BenchmarkTaskType.RETRIEVAL,
+                prompt = "Retrieve memories about deployment rollback checklist.",
+                expectedMemoryIds = setOf("mem-deploy-rollback"),
+                retrievalCutoffs = setOf(1, 3, 5)
+            ),
+            BenchmarkTask(
                 id = "offline-parity-01",
                 type = BenchmarkTaskType.OFFLINE_PARITY_VS_ONLINE,
                 prompt = "Summarize the graph constraints in two lines."
