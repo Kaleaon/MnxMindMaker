@@ -178,6 +178,56 @@ class MemoryManager(
         return semanticRemoved || profileRemoved
     }
 
+    fun getMemory(memoryId: String): MindNode? =
+        semanticIndex.get(memoryId) ?: profileMemories[memoryId]
+
+    fun searchMemories(query: String, limit: Int): List<MindNode> {
+        if (query.isBlank() || limit <= 0) return emptyList()
+        val sessionNodes = sessionTurns.map { it.toMindNode() }
+        val profileNodes = profileMemories.values.toList()
+        val semanticNodes = if (policySettings.mode == MemoryPolicyMode.PERSISTENT) {
+            semanticIndex.query(query, topK = limit * 3)
+        } else {
+            emptyList()
+        }
+        val all = sessionNodes + profileNodes + semanticNodes
+        return MemoryRetrievalService.retrieve(
+            memories = all,
+            context = MemoryRetrievalService.RetrievalContext(prompt = query, task = "memory_search"),
+            limit = limit,
+            filters = MemoryRetrievalService.RetrievalFilters(
+                minRelevance = 0f,
+                allowedSensitivity = setOf(
+                    MemoryRetrievalService.SensitivityLevel.LOW,
+                    MemoryRetrievalService.SensitivityLevel.MEDIUM,
+                    MemoryRetrievalService.SensitivityLevel.HIGH,
+                    MemoryRetrievalService.SensitivityLevel.RESTRICTED
+                ),
+                allowSensitiveBoot = true
+            )
+        )
+    }
+
+    fun status(nowEpochMs: Long = System.currentTimeMillis()): MemoryStatus {
+        purgeExpired(nowEpochMs)
+        return MemoryStatus(
+            mode = policySettings.mode,
+            sessionTurnCount = sessionTurns.size,
+            profileMemoryCount = profileMemories.size,
+            semanticMemoryCount = semanticIndex.size(),
+            expiryByCategoryMs = policySettings.expiryByCategoryMs
+        )
+    }
+
+    data class MemoryStatus(
+        val mode: MemoryPolicyMode,
+        val sessionTurnCount: Int,
+        val profileMemoryCount: Int,
+        val semanticMemoryCount: Int,
+        val expiryByCategoryMs: Map<MemoryCategory, Long>
+    )
+
+    fun clearSession() {
     fun clearSession(clearAllCategories: Boolean = false) {
         sessionTurns.clear()
         if (clearAllCategories) {
@@ -430,6 +480,8 @@ private class SemanticMemoryVectorIndex {
         }
         return expiredIds.isNotEmpty()
     }
+
+    fun size(): Int = memories.size
 
     private fun tokenizeToUnitVector(text: String): Map<String, Float> {
         val counts = text.lowercase()
