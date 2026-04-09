@@ -398,7 +398,7 @@
                 android:id="@+id/et_tls_pin"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:hint="sha256/..."
+                android:hint="@string/tls_pin_hint"
                 android:textColor="@color/colorOnPrimary" />
         </com.google.android.material.textfield.TextInputLayout>
 

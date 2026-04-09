@@ -11,7 +11,7 @@ import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
 class ClaudeProvider(
-    private val httpClient: OkHttpClient = defaultClient(),
+    private val baseHttpClient: OkHttpClient = defaultClient(),
     private val jsonMediaType: okhttp3.MediaType = "application/json; charset=utf-8".toMediaType()
 ) : AssistantProvider {
 
@@ -36,6 +36,7 @@ class ClaudeProvider(
             .addHeader("content-type", "application/json")
             .build()
 
+        val httpClient = HttpClientFactory.clientFor(request.settings, baseHttpClient)
         httpClient.newCall(httpRequest).execute().use { response ->
             val responseBody = response.body?.string() ?: throw LlmApiException("Empty response from Anthropic")
             if (!response.isSuccessful) throw LlmApiException("Anthropic error ${response.code}: $responseBody")

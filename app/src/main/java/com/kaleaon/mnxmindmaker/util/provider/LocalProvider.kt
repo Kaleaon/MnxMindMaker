@@ -11,7 +11,7 @@ import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
 class LocalProvider(
-    private val httpClient: OkHttpClient = defaultClient(),
+    private val baseHttpClient: OkHttpClient = defaultClient(),
     private val jsonMediaType: okhttp3.MediaType = "application/json; charset=utf-8".toMediaType()
 ) : AssistantProvider {
 
@@ -36,6 +36,7 @@ class LocalProvider(
             .addHeader("content-type", "application/json")
             .build()
 
+        val httpClient = HttpClientFactory.clientFor(request.settings, baseHttpClient)
         httpClient.newCall(httpRequest).execute().use { response ->
             val responseBody = response.body?.string() ?: throw LlmApiException("Empty response from local provider")
             if (!response.isSuccessful) throw LlmApiException("Local provider error ${response.code}: $responseBody")
@@ -49,6 +50,7 @@ class LocalProvider(
         if (!supports(settings)) return ProviderHealth(false, "Unsupported settings for LocalProvider")
         return try {
             val request = Request.Builder().url("${settings.baseUrl}/models").get().build()
+            val httpClient = HttpClientFactory.clientFor(settings, baseHttpClient)
             httpClient.newCall(request).execute().use { response ->
                 if (response.isSuccessful) ProviderHealth(true, "Local runtime reachable")
                 else ProviderHealth(false, "Health check failed with HTTP ${response.code}")

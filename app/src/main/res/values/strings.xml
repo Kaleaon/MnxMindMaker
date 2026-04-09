@@ -100,6 +100,8 @@
     <string name="base_url_label">Base URL</string>
     <string name="classification_label">Outbound Classification</string>
     <string name="tls_pin_label">TLS Pin (SPKI sha256)</string>
+    <string name="tls_pin_hint">Base64 SHA-256 hash (43 chars + =)</string>
+    <string name="tls_pin_validation_error">TLS pin must be a base64 SHA-256 SPKI hash (43 chars + =), without the sha256/ prefix.</string>
     <string name="data_use_panel_title">Data Use Transparency</string>
     <string name="continue_request">Continue Request</string>
     <string name="max_tokens_label">Max Tokens</string>
