@@ -7,6 +7,9 @@ import com.kaleaon.mnxmindmaker.model.IdentityMode
 import com.kaleaon.mnxmindmaker.model.ProviderCapabilityMetadata
 import com.kaleaon.mnxmindmaker.security.SecureVault
 import com.kaleaon.mnxmindmaker.util.ProviderCapabilityDetector
+import okhttp3.FormBody
+import okhttp3.OkHttpClient
+import okhttp3.Request
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
@@ -17,6 +20,7 @@ class ExternalAccountRepository(context: Context) {
     private val vault = SecureVault(context)
     private val detector = ProviderCapabilityDetector()
     private val authRepository = AuthRepository(context)
+    private val httpClient = OkHttpClient()
 
     fun linkAccount(
         provider: ExternalProvider,
@@ -40,18 +44,34 @@ class ExternalAccountRepository(context: Context) {
     }
 
     fun refreshAccessToken(provider: ExternalProvider): Boolean {
-        val refresh = vault.getString(refreshKey(provider)) ?: return false
-        if (refresh.isBlank()) return false
+        return refreshAccessTokenDetailed(provider) == RefreshStatus.SUCCESS
+    }
 
-        val rotated = "${provider.name.lowercase()}_access_${System.currentTimeMillis()}"
-        vault.putString(accessKey(provider), rotated)
-        prefs.edit()
-            .putLong(expiryKey(provider), System.currentTimeMillis() + TimeUnit.HOURS.toMillis(1))
-            .apply()
+    fun refreshAccessTokenDetailed(provider: ExternalProvider): RefreshStatus {
+        val refresh = vault.getString(refreshKey(provider)) ?: return RefreshStatus.MISSING_REFRESH_TOKEN
+        if (refresh.isBlank()) return RefreshStatus.MISSING_REFRESH_TOKEN
+        val config = TOKEN_REFRESH_CONFIGS[provider] ?: return RefreshStatus.INVALID_RESPONSE
+
+        val refreshHttpResult = executeRefreshRequest(config, refresh)
+        val responseBody = when (refreshHttpResult) {
+            is RefreshHttpResult.Success -> refreshHttpResult.body
+            RefreshHttpResult.ProviderRejected -> return RefreshStatus.PROVIDER_REJECTED
+            RefreshHttpResult.TransportFailure -> return RefreshStatus.NETWORK_ERROR
+        }
+        val payload = parseTokenRefreshResponse(responseBody) ?: return RefreshStatus.INVALID_RESPONSE
+        if (payload.accessToken.isBlank()) return RefreshStatus.INVALID_RESPONSE
+
+        vault.putString(accessKey(provider), payload.accessToken)
+        if (!payload.refreshToken.isNullOrBlank()) {
+            vault.putString(refreshKey(provider), payload.refreshToken)
+        }
+        payload.expiresInSeconds?.let { seconds ->
+            prefs.edit().putLong(expiryKey(provider), expiryFromNow(System.currentTimeMillis(), seconds)).apply()
+        }
 
         val metadata = detector.detect(provider)
         persistCapabilities(provider, metadata)
-        return true
+        return RefreshStatus.SUCCESS
     }
 
     fun revoke(provider: ExternalProvider) {
@@ -105,7 +125,99 @@ class ExternalAccountRepository(context: Context) {
     private fun expiryKey(provider: ExternalProvider) = "${provider.name}_expiry"
     private fun capsKey(provider: ExternalProvider) = "${provider.name}_caps"
 
+    private fun executeRefreshRequest(config: TokenRefreshConfig, refreshToken: String): RefreshHttpResult {
+        val clientId = vault.getString(config.clientIdKey)
+        val clientSecret = vault.getString(config.clientSecretKey)
+        if (clientId.isNullOrBlank() || clientSecret.isNullOrBlank()) return RefreshHttpResult.TransportFailure
+
+        val formBody = FormBody.Builder()
+            .add("grant_type", config.grantType)
+            .add("refresh_token", refreshToken)
+            .add("client_id", clientId)
+            .add("client_secret", clientSecret)
+            .build()
+
+        val request = Request.Builder()
+            .url(config.tokenUrl)
+            .post(formBody)
+            .header("Accept", "application/json")
+            .build()
+
+        return runCatching {
+            httpClient.newCall(request).execute().use { response ->
+                if (response.code in 400..499) {
+                    return RefreshHttpResult.ProviderRejected
+                }
+                if (!response.isSuccessful) return RefreshHttpResult.TransportFailure
+                val body = response.body?.string() ?: return RefreshHttpResult.TransportFailure
+                RefreshHttpResult.Success(body)
+            }
+        }.getOrElse { RefreshHttpResult.TransportFailure }
+    }
+
     companion object {
         private const val PREFS_NAME = "mnx_external_accounts"
+        private val TOKEN_REFRESH_CONFIGS: Map<ExternalProvider, TokenRefreshConfig> = mapOf(
+            ExternalProvider.CLAUDE to TokenRefreshConfig(
+                tokenUrl = "https://api.anthropic.com/oauth/token",
+                grantType = "refresh_token",
+                clientIdKey = "CLAUDE_client_id",
+                clientSecretKey = "CLAUDE_client_secret"
+            ),
+            ExternalProvider.CHATGPT to TokenRefreshConfig(
+                tokenUrl = "https://api.openai.com/v1/oauth/token",
+                grantType = "refresh_token",
+                clientIdKey = "CHATGPT_client_id",
+                clientSecretKey = "CHATGPT_client_secret"
+            )
+        )
+
+        internal fun parseTokenRefreshResponse(responseBody: String): RefreshedTokenPayload? {
+            return runCatching {
+                val json = JSONObject(responseBody)
+                val accessToken = json.optString("access_token", "").trim()
+                val refreshToken = json.optString("refresh_token", "").trim().ifBlank { null }
+                val expiresIn = when {
+                    json.has("expires_in") -> json.optLong("expires_in", -1L).takeIf { it > 0 }
+                    else -> null
+                }
+                RefreshedTokenPayload(
+                    accessToken = accessToken,
+                    refreshToken = refreshToken,
+                    expiresInSeconds = expiresIn
+                )
+            }.getOrNull()
+        }
+
+        internal fun expiryFromNow(nowEpochMs: Long, expiresInSeconds: Long): Long {
+            return nowEpochMs + TimeUnit.SECONDS.toMillis(expiresInSeconds)
+        }
     }
+}
+
+enum class RefreshStatus {
+    SUCCESS,
+    MISSING_REFRESH_TOKEN,
+    PROVIDER_REJECTED,
+    NETWORK_ERROR,
+    INVALID_RESPONSE
+}
+
+data class TokenRefreshConfig(
+    val tokenUrl: String,
+    val grantType: String,
+    val clientIdKey: String,
+    val clientSecretKey: String
+)
+
+data class RefreshedTokenPayload(
+    val accessToken: String,
+    val refreshToken: String?,
+    val expiresInSeconds: Long?
+)
+
+private sealed interface RefreshHttpResult {
+    data class Success(val body: String) : RefreshHttpResult
+    data object ProviderRejected : RefreshHttpResult
+    data object TransportFailure : RefreshHttpResult
 }

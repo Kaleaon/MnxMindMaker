@@ -34,6 +34,7 @@ import com.kaleaon.mnxmindmaker.repository.AuthRepository
 import com.kaleaon.mnxmindmaker.repository.ExternalAccountRepository
 import com.kaleaon.mnxmindmaker.repository.LlmSettingsRepository
 import com.kaleaon.mnxmindmaker.util.provider.ProviderSettingsValidator
+import com.kaleaon.mnxmindmaker.repository.RefreshStatus
 import java.text.DateFormat
 import java.util.Date
 
@@ -269,12 +270,12 @@ class SettingsFragment : Fragment() {
     }
 
     private fun refreshLinkedAccount(provider: ExternalProvider) {
-        val refreshed = externalAccountRepository.refreshAccessToken(provider)
+        val status = externalAccountRepository.refreshAccessTokenDetailed(provider)
         updateLinkedAccountsStatus()
-        val message = if (refreshed) {
-            getString(R.string.link_refresh_success, provider.displayName)
-        } else {
-            getString(R.string.link_refresh_failed, provider.displayName)
+        val message = when (status) {
+            RefreshStatus.SUCCESS -> getString(R.string.link_refresh_success, provider.displayName)
+            RefreshStatus.PROVIDER_REJECTED -> getString(R.string.link_refresh_provider_rejected, provider.displayName)
+            else -> getString(R.string.link_refresh_failed, provider.displayName)
         }
         Snackbar.make(binding.root, message, Snackbar.LENGTH_SHORT).show()
     }

@@ -133,6 +133,14 @@ class ProviderRouterTest {
 
     @Test
     fun `local provider supports explicit self hosted providers only`() {
+    fun `default provider router includes gemini adapter`() {
+        val health = ProviderRouter().healthCheck(settings(LlmProvider.GEMINI))
+
+        assertFalse(health.message.contains("No adapter"))
+    }
+
+    @Test
+    fun `local provider supports vllm and self hosted openai but not official openai`() {
         val provider = com.kaleaon.mnxmindmaker.util.provider.LocalProvider()
 
         assertTrue(provider.supports(settings(LlmProvider.VLLM_GEMMA4)))
