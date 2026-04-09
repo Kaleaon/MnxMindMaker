@@ -112,4 +112,36 @@ class BootPacketGeneratorTest {
         assertTrue(json.contains("continuity_audit"))
         assertEquals(packet.continuityAudit.summary.totalFindings, packet.continuityAudit.findings.size)
     }
+
+    @Test
+    fun `boot packet retrieval payload retains chunk metadata attributes`() {
+        val sessionChunk = MindNode(
+            id = "memory-chunk-1",
+            label = "Assistant chunk",
+            type = NodeType.MEMORY,
+            description = "Partial response chunk",
+            attributes = mutableMapOf(
+                "conversation_id" to "conv-abc",
+                "turn_index" to "5",
+                "chunk_span" to "5:0-128",
+                "source" to "assistant",
+                "current_relevance" to "0.95"
+            )
+        )
+        val graph = MindGraph(nodes = mutableListOf(sessionChunk))
+
+        val packet = BootPacketGenerator.generate(
+            graph = graph,
+            mode = BootPacketGenerator.Mode.FULL,
+            prompt = "assistant chunk",
+            task = "audit retrieval payload"
+        )
+        val json = packet.toJson()
+
+        assertTrue(packet.memorySlice.any { it.id == "memory-chunk-1" })
+        assertTrue(json.contains("\"conversation_id\": \"conv-abc\""))
+        assertTrue(json.contains("\"turn_index\": \"5\""))
+        assertTrue(json.contains("\"chunk_span\": \"5:0-128\""))
+        assertTrue(json.contains("\"source\": \"assistant\""))
+    }
 }

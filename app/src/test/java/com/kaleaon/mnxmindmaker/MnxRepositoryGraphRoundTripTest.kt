@@ -55,6 +55,24 @@ class MnxRepositoryGraphRoundTripTest {
                     attributes = mutableMapOf("priority" to "high"),
                     isExpanded = true,
                     dimensions = mapOf("confidence" to 0.81f, "revisability" to 0.22f)
+                ),
+                MindNode(
+                    id = "node-memory-session",
+                    label = "Session chunk",
+                    type = NodeType.MEMORY,
+                    description = "Captured assistant response chunk",
+                    x = 260f,
+                    y = 620f,
+                    parentId = "node-identity",
+                    attributes = mutableMapOf(
+                        "conversation_id" to "conv-77",
+                        "turn_index" to "12",
+                        "chunk_span" to "12:200-399",
+                        "source" to "assistant",
+                        "semantic_subtype" to "session"
+                    ),
+                    isExpanded = true,
+                    dimensions = mapOf("recency" to 0.91f)
                 )
             ),
             edges = mutableListOf(
