@@ -46,7 +46,11 @@ class ProviderRouter(
 
         var lastError: Exception? = null
         for (settings in ordered) {
-            ProviderSettingsValidator.validateOrThrow(settings)
+            val validationError = ProviderSettingsValidator.validate(settings)
+            if (validationError != null) {
+                lastError = LlmApiException("${settings.provider.displayName}: $validationError")
+                continue
+            }
             val provider = providers.firstOrNull { it.supports(settings) }
             if (provider == null) {
                 lastError = LlmApiException("No provider adapter for ${settings.provider.displayName}")
