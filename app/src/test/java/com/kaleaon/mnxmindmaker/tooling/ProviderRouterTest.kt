@@ -132,7 +132,6 @@ class ProviderRouterTest {
     }
 
     @Test
-    fun `local provider supports explicit self hosted providers only`() {
     fun `default provider router includes gemini adapter`() {
         val health = ProviderRouter().healthCheck(settings(LlmProvider.GEMINI))
 
@@ -183,6 +182,27 @@ class ProviderRouterTest {
         )
 
         assertEquals("local", turn.text)
+    }
+
+    @Test
+    fun `chat skips invalid first provider and succeeds with second valid provider`() {
+        val router = ProviderRouter(
+            providers = listOf(
+                StubProvider("openai") { it.provider == LlmProvider.OPENAI },
+                StubProvider("anthropic") { it.provider == LlmProvider.ANTHROPIC }
+            )
+        )
+
+        val turn = router.chat(
+            settingsChain = listOf(
+                settings(LlmProvider.OPENAI, baseUrl = "http://10.0.2.2:9000/v1"),
+                settings(LlmProvider.ANTHROPIC)
+            ),
+            systemPrompt = "system",
+            transcript = emptyList()
+        )
+
+        assertEquals("anthropic", turn.text)
     }
 
     @Test
