@@ -5,8 +5,6 @@ import com.kaleaon.mnxmindmaker.model.LlmSettings
 import com.kaleaon.mnxmindmaker.model.PrivacyMode
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
-private val tlsPinPattern = Regex("^[A-Za-z0-9+/]{43}=$")
-
 enum class ValidationSeverity {
     WARNING,
     CRITICAL
@@ -78,14 +76,13 @@ fun validate(settings: LlmSettings, privacyMode: PrivacyMode?): List<ValidationI
         )
     }
 
-    val tlsPin = settings.tlsPinnedSpkiSha256.trim()
-    if (tlsPin.startsWith("sha256/", ignoreCase = true) ||
-        (tlsPin.isNotBlank() && !tlsPinPattern.matches(tlsPin))
-    ) {
+    try {
+        TlsPinParser.normalizeOrThrow(settings.tlsPinnedSpkiSha256)
+    } catch (_: IllegalArgumentException) {
         issues += ValidationIssue(
             ValidationSeverity.CRITICAL,
             "tlsPinnedSpkiSha256",
-            "TLS pin must be a base64 SHA-256 SPKI hash (43 chars + '=') without 'sha256/' prefix."
+            TlsPinParser.VALIDATION_MESSAGE
         )
     }
 

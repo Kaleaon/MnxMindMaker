@@ -60,4 +60,33 @@ class LlmSettingsValidatorTest {
         assertTrue(validateRuntimeEndpoint("ftp://example.com").isNotEmpty())
         assertTrue(validateRuntimeEndpoint("https://example.com").isEmpty())
     }
+
+    @Test
+    fun `validate accepts unprefixed tls pin hash`() {
+        val settings = LlmSettings(
+            provider = LlmProvider.OPENAI,
+            enabled = true,
+            apiKey = "token",
+            tlsPinnedSpkiSha256 = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+        )
+
+        val issues = validate(settings, PrivacyMode.HYBRID)
+
+        assertTrue(issues.none { it.field == "tlsPinnedSpkiSha256" })
+    }
+
+    @Test
+    fun `validate accepts sha256 prefixed tls pin hash`() {
+        val settings = LlmSettings(
+            provider = LlmProvider.OPENAI,
+            enabled = true,
+            apiKey = "token",
+            tlsPinnedSpkiSha256 = "sha256/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+        )
+
+        val issues = validate(settings, PrivacyMode.HYBRID)
+
+        assertTrue(issues.none { it.field == "tlsPinnedSpkiSha256" })
+    }
+
 }
