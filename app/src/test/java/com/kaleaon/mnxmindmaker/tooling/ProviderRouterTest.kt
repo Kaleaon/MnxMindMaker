@@ -139,6 +139,14 @@ class ProviderRouterTest {
     }
 
     @Test
+    fun `local provider supports explicit self hosted providers only`() {
+        val provider = com.kaleaon.mnxmindmaker.util.provider.LocalProvider()
+
+        assertTrue(provider.supports(settings(LlmProvider.OPENAI_COMPATIBLE_SELF_HOSTED, baseUrl = "http://10.0.2.2:9000/v1")))
+        assertFalse(provider.supports(settings(LlmProvider.OPENAI)))
+    }
+
+    @Test
     fun `local provider supports vllm and self hosted openai but not official openai`() {
         val provider = com.kaleaon.mnxmindmaker.util.provider.LocalProvider()
 
