@@ -49,8 +49,16 @@ class MainActivity : AppCompatActivity() {
         val cs = theme.colorScheme
         val surface = KthemeManager.parseColor(cs.surface)
         val onSurface = KthemeManager.parseColor(cs.onSurface)
+        val onSurfaceVariant = KthemeManager.parseColor(cs.onSurfaceVariant)
         val background = KthemeManager.parseColor(cs.background)
         val primary = KthemeManager.parseColor(cs.primary)
+        val bottomNavItemTint = ColorStateList(
+            arrayOf(
+                intArrayOf(android.R.attr.state_checked),
+                intArrayOf(-android.R.attr.state_checked),
+            ),
+            intArrayOf(primary, onSurfaceVariant),
+        )
 
         // Toolbar / AppBar
         binding.toolbar.setBackgroundColor(surface)
@@ -59,8 +67,8 @@ class MainActivity : AppCompatActivity() {
 
         // Bottom navigation
         binding.bottomNav.setBackgroundColor(surface)
-        binding.bottomNav.itemIconTintList = ColorStateList.valueOf(onSurface)
-        binding.bottomNav.itemTextColor = ColorStateList.valueOf(onSurface)
+        binding.bottomNav.itemIconTintList = bottomNavItemTint
+        binding.bottomNav.itemTextColor = bottomNavItemTint
         binding.bottomNav.itemActiveIndicatorColor = ColorStateList.valueOf(primary)
 
         // Root background
