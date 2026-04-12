@@ -227,22 +227,23 @@ class MindMapFragment : Fragment() {
             Snackbar.make(binding.root, "Retry this message first to compare responses.", Snackbar.LENGTH_SHORT).show()
             return
         }
-        val panel = LinearLayout(requireContext()).apply {
-            orientation = LinearLayout.HORIZONTAL
-            setPadding(24, 12, 24, 12)
-            val left = TextView(context).apply {
-                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-                text = "${message.provenance.provider.displayName} / ${message.provenance.model}\n\n${message.response}"
-            }
-            val right = TextView(context).apply {
-                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-                text = "${candidate.provider.displayName} / ${candidate.model}\n\n${candidate.response}"
-            }
-            addView(left)
-            addView(right)
-        }
+
+        val panel = LayoutInflater.from(requireContext()).inflate(R.layout.dialog_provider_compare, null)
+        val leftHeader = panel.findViewById<TextView>(R.id.tv_compare_left_header)
+        val leftContent = panel.findViewById<TextView>(R.id.tv_compare_left_content)
+        val rightHeader = panel.findViewById<TextView>(R.id.tv_compare_right_header)
+        val rightContent = panel.findViewById<TextView>(R.id.tv_compare_right_content)
+
+        leftHeader.text = "${message.provenance.provider.displayName} / ${message.provenance.model}"
+        rightHeader.text = "${candidate.provider.displayName} / ${candidate.model}"
+        leftContent.text = message.response
+        rightContent.text = candidate.response
+
+        leftContent.setTextIsSelectable(true)
+        rightContent.setTextIsSelectable(true)
+
         AlertDialog.Builder(requireContext())
-            .setTitle("Side-by-side provider compare")
+            .setTitle(R.string.side_by_side_provider_compare_title)
             .setView(panel)
             .setPositiveButton(R.string.ok, null)
             .show()
