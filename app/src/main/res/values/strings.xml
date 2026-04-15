@@ -42,6 +42,8 @@
     <string name="compare_side_by_side">Compare</string>
     <string name="chat_assistant_title">AI Chat Assistant</string>
     <string name="side_by_side_provider_compare_title">Side-by-side provider compare</string>
+    <string name="new_thread">New Thread</string>
+    <string name="chat_thread_meta">Created %1$s • Updated %2$s • Provider %3$s</string>
     <string name="provider_auto">Auto</string>
     <string name="provider_local">Local</string>
     <string name="provider_claude">Claude</string>
@@ -79,7 +81,7 @@
     <string name="deploy_step_summary_title">Step 4: Deployment Summary</string>
     <string name="deploy_env_hint">Environment (e.g., staging, prod)</string>
     <string name="deploy_endpoint_hint">Runtime endpoint URL</string>
-    <string name="deploy_release_channel_hint">Release channel (canary/stable)</string>
+    <string name="deploy_release_channel_hint">Publish channel (dev/stage/prod)</string>
     <string name="deploy_notes_hint">Deployment notes</string>
     <string name="deploy_ops_title">Ops Runtime Health</string>
     <string name="deploy_ops_runtime_health_label">Runtime health</string>
@@ -131,6 +133,7 @@
     <string name="preflight_result_idle">Preflight diagnostics idle.</string>
     <string name="preflight_running">Running preflight diagnostics…</string>
     <string name="preflight_blocked_validation">Preflight blocked: fix critical validation issues first.</string>
+    <string name="skill_pack_diagnostics_idle">Skill pack diagnostics idle.</string>
     <string name="api_key_required_for_provider">%1$s requires an API key.</string>
     <string name="hint_local_model_path">Set the on-device model file path and runtime endpoint; no API key required.</string>
     <string name="local_model_path_label">Local Model Path</string>

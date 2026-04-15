@@ -31,7 +31,7 @@ class DeployFragment : Fragment() {
             viewModel.updateRuntimeConfig(
                 environment = binding.etDeployEnvironment.text?.toString().orEmpty().trim(),
                 endpoint = binding.etDeployEndpoint.text?.toString().orEmpty().trim(),
-                releaseChannel = binding.etDeployReleaseChannel.text?.toString().orEmpty().trim(),
+                publishChannel = binding.etDeployReleaseChannel.text?.toString().orEmpty().trim(),
                 notes = binding.etDeployNotes.text?.toString().orEmpty().trim()
             )
             viewModel.confirmDeployment()
@@ -68,7 +68,7 @@ class DeployFragment : Fragment() {
         if (binding.etDeployEnvironment.text.isNullOrBlank()) {
             binding.etDeployEnvironment.setText(state.runtimeConfig.environment)
             binding.etDeployEndpoint.setText(state.runtimeConfig.endpoint)
-            binding.etDeployReleaseChannel.setText(state.runtimeConfig.releaseChannel)
+            binding.etDeployReleaseChannel.setText(state.runtimeConfig.publishChannel)
             binding.etDeployNotes.setText(state.runtimeConfig.notes)
         }
 
@@ -79,10 +79,14 @@ class DeployFragment : Fragment() {
         binding.tvOpsPolicyViolationsValue.text = state.opsSnapshot.policyViolations.toString()
 
         binding.tvDeploySummary.text = state.manifestPreview?.let { manifest ->
-            "Deployment ${manifest.deploymentId.take(8)}\n" +
+                "Deployment ${manifest.deploymentId.take(8)}\n" +
                 "Graph: ${manifest.graphName}\n" +
-                "Runtime: ${manifest.runtimeConfig.environment} / ${manifest.runtimeConfig.releaseChannel}\n" +
+                "Runtime: ${manifest.runtimeConfig.environment} / ${manifest.runtimeConfig.publishChannel}\n" +
+                "Promotion approval: ${if (manifest.runtimeConfig.requiresPromotionApproval) "required" else "not required"}\n" +
+                "Rollback channel: ${manifest.runtimeConfig.rollbackChannel}\n" +
                 "Endpoint: ${manifest.runtimeConfig.endpoint.ifBlank { "(none)" }}\n" +
+                "Compatibility constraints: ${manifest.runtimeConfig.compatibilityConstraints.joinToString()}\n" +
+                "History events: ${manifest.deploymentHistory.size}\n" +
                 "Findings: ${manifest.findingCount} total, ${manifest.criticalFindingCount} critical\n" +
                 manifest.summary
         } ?: "Summary unavailable until graph sources are loaded."

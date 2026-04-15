@@ -24,6 +24,7 @@ class DeployViewModel(application: Application) : AndroidViewModel(application) 
 
     private val _uiState = MutableLiveData(DeployUiState())
     val uiState: LiveData<DeployUiState> = _uiState
+    private val deploymentHistory = mutableListOf<DeploymentHistoryEntry>()
 
     init {
         refreshFromSources()
@@ -47,12 +48,16 @@ class DeployViewModel(application: Application) : AndroidViewModel(application) 
         updateManifestPreview()
     }
 
-    fun updateRuntimeConfig(environment: String, endpoint: String, releaseChannel: String, notes: String) {
+    fun updateRuntimeConfig(environment: String, endpoint: String, publishChannel: String, notes: String) {
+        val normalizedChannel = normalizeChannel(publishChannel)
         _uiState.value = _uiState.value?.copy(
             runtimeConfig = DeploymentRuntimeConfig(
                 environment = environment,
                 endpoint = endpoint,
-                releaseChannel = releaseChannel,
+                publishChannel = normalizedChannel,
+                requiresPromotionApproval = normalizedChannel != "dev",
+                rollbackChannel = if (normalizedChannel == "dev") "dev" else previousChannel(normalizedChannel),
+                compatibilityConstraints = defaultCompatibilityConstraints(environment, normalizedChannel),
                 notes = notes
             ),
             opsSnapshot = buildOpsSnapshot(
@@ -129,7 +134,22 @@ class DeployViewModel(application: Application) : AndroidViewModel(application) 
                             updatedAt = System.currentTimeMillis()
                         )
                     )
+                    val promotionAction = if (manifest.runtimeConfig.requiresPromotionApproval) {
+                        "promotion_approved"
+                    } else {
+                        "published"
+                    }
+                    deploymentHistory.add(
+                        DeploymentHistoryEntry(
+                            action = promotionAction,
+                            channel = manifest.runtimeConfig.publishChannel,
+                            approvedBy = if (manifest.runtimeConfig.requiresPromotionApproval) "release-manager" else "self-service",
+                            createdAt = System.currentTimeMillis(),
+                            detail = "Publish to ${manifest.runtimeConfig.publishChannel} with rollback target ${manifest.runtimeConfig.rollbackChannel}"
+                        )
+                    )
                     deploymentRepository.persistManifest(manifest)
+                    deploymentRepository.persistDeploymentHistory(deploymentId, deploymentHistory)
                 }
                 _uiState.value = _uiState.value?.copy(
                     isSaving = false,
@@ -204,6 +224,7 @@ class DeployViewModel(application: Application) : AndroidViewModel(application) 
             findingCount = audit.summary.totalFindings,
             criticalFindingCount = audit.summary.criticalCount,
             runtimeConfig = runtimeConfig,
+            deploymentHistory = deploymentHistory.toList(),
             summary = summary
         )
     }
@@ -250,6 +271,28 @@ class DeployViewModel(application: Application) : AndroidViewModel(application) 
             jobStatus = jobStatus,
             syncState = syncState,
             policyViolations = criticalCount
+    private fun normalizeChannel(raw: String): String {
+        val normalized = raw.trim().lowercase()
+        return when (normalized) {
+            "dev", "development" -> "dev"
+            "stage", "staging" -> "stage"
+            "prod", "production" -> "prod"
+            else -> "dev"
+        }
+    }
+
+    private fun previousChannel(channel: String): String = when (channel) {
+        "prod" -> "stage"
+        "stage" -> "dev"
+        else -> "dev"
+    }
+
+    private fun defaultCompatibilityConstraints(environment: String, channel: String): List<String> {
+        return listOf(
+            "mnx_meta_manifest_required",
+            "runtime_endpoint_must_validate",
+            "environment=$environment",
+            "channel=$channel"
         )
     }
 }
