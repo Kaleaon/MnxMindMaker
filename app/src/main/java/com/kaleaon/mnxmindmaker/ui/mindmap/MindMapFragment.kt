@@ -41,6 +41,9 @@ class MindMapFragment : Fragment() {
 
     private var chatDialog: AlertDialog? = null
     private var chatAdapter: ChatMessageAdapter? = null
+    private var chatThreadAdapter: ArrayAdapter<String>? = null
+    private var threadSpinner: Spinner? = null
+    private var threadMetaView: TextView? = null
     private var displayedToolApprovalRequestId: String? = null
 
     private val openMnxFile = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -115,6 +118,22 @@ class MindMapFragment : Fragment() {
         viewModel.chatMessages.observe(viewLifecycleOwner) { messages ->
             chatAdapter?.submit(messages)
         }
+        viewModel.chatSessions.observe(viewLifecycleOwner) { sessions ->
+            val labels = sessions.map { session ->
+                "${session.displayName} (${session.messageCount})"
+            }
+            chatThreadAdapter?.let { adapter ->
+                adapter.clear()
+                adapter.addAll(labels)
+                adapter.notifyDataSetChanged()
+            }
+            syncThreadSelection()
+            refreshThreadMetaLabel()
+        }
+        viewModel.activeChatSessionId.observe(viewLifecycleOwner) {
+            syncThreadSelection()
+            refreshThreadMetaLabel()
+        }
 
         viewModel.compareCandidateMessageId.observe(viewLifecycleOwner) { messageId ->
             val id = messageId ?: return@observe
@@ -180,6 +199,9 @@ class MindMapFragment : Fragment() {
     private fun showChatDialog() {
         val dialogView = LayoutInflater.from(requireContext()).inflate(R.layout.dialog_chat_assistant, null)
         val list = dialogView.findViewById<ListView>(R.id.lv_chat_messages)
+        val threadSpinnerControl = dialogView.findViewById<Spinner>(R.id.spinner_chat_threads)
+        val newThreadButton = dialogView.findViewById<MaterialButton>(R.id.btn_new_chat_thread)
+        val threadMetaLabel = dialogView.findViewById<TextView>(R.id.tv_chat_thread_meta)
         val providerSpinner = dialogView.findViewById<Spinner>(R.id.spinner_chat_provider)
         val promptInput = dialogView.findViewById<EditText>(R.id.et_chat_prompt)
         val sendButton = dialogView.findViewById<MaterialButton>(R.id.btn_send_chat)
@@ -188,13 +210,40 @@ class MindMapFragment : Fragment() {
             ComposerProviderChoice.AUTO,
             ComposerProviderChoice.LOCAL,
             ComposerProviderChoice.CLAUDE,
-            ComposerProviderChoice.CHATGPT
+            ComposerProviderChoice.CHATGPT,
+            ComposerProviderChoice.GEMINI,
+            ComposerProviderChoice.VLLM
         )
         providerSpinner.adapter = ArrayAdapter(
             requireContext(),
             android.R.layout.simple_spinner_dropdown_item,
             providerOptions.map { it.label }
         )
+        threadSpinner = threadSpinnerControl
+        threadMetaView = threadMetaLabel
+        chatThreadAdapter = ArrayAdapter(
+            requireContext(),
+            android.R.layout.simple_spinner_dropdown_item,
+            viewModel.chatSessions.value.orEmpty().map { "${it.displayName} (${it.messageCount})" }
+        ).also { threadSpinnerControl.adapter = it }
+        syncThreadSelection()
+        refreshThreadMetaLabel()
+
+        threadSpinnerControl.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: View?, position: Int, id: Long) {
+                val session = viewModel.chatSessions.value.orEmpty().getOrNull(position) ?: return
+                if (session.sessionId != viewModel.activeChatSessionId.value) {
+                    viewModel.switchChatSession(session.sessionId)
+                }
+            }
+
+            override fun onNothingSelected(parent: android.widget.AdapterView<*>?) = Unit
+        }
+
+        newThreadButton.setOnClickListener {
+            val selectedChoice = providerOptions[providerSpinner.selectedItemPosition]
+            viewModel.createNewChatSession(providerChoice = selectedChoice)
+        }
 
         chatAdapter = ChatMessageAdapter(
             inflater = LayoutInflater.from(requireContext()),
@@ -220,6 +269,28 @@ class MindMapFragment : Fragment() {
             .setView(dialogView)
             .setNegativeButton(R.string.cancel, null)
             .show()
+    }
+
+    private fun syncThreadSelection() {
+        val spinner = threadSpinner ?: return
+        val sessions = viewModel.chatSessions.value.orEmpty()
+        val activeId = viewModel.activeChatSessionId.value ?: return
+        val selectedIdx = sessions.indexOfFirst { it.sessionId == activeId }
+        if (selectedIdx >= 0 && spinner.selectedItemPosition != selectedIdx) {
+            spinner.setSelection(selectedIdx, false)
+        }
+    }
+
+    private fun refreshThreadMetaLabel() {
+        val metaView = threadMetaView ?: return
+        val activeId = viewModel.activeChatSessionId.value ?: return
+        val session = viewModel.chatSessions.value.orEmpty().firstOrNull { it.sessionId == activeId } ?: return
+        val formatter = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US)
+        val createdAt = formatter.format(Date(session.createdTimestamp))
+        val updatedAt = formatter.format(Date(session.updatedTimestamp))
+        val provider = listOf(session.providerLabel, session.modelLabel).filter { it.isNotBlank() }.joinToString(" / ")
+            .ifBlank { "Auto" }
+        metaView.text = getString(R.string.chat_thread_meta, createdAt, updatedAt, provider)
     }
 
     private fun showCompareDialog(message: ChatMessage) {
@@ -447,6 +518,9 @@ class MindMapFragment : Fragment() {
     override fun onDestroyView() {
         super.onDestroyView()
         chatDialog?.dismiss()
+        threadSpinner = null
+        threadMetaView = null
+        chatThreadAdapter = null
         _binding = null
     }
 }
