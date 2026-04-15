@@ -81,6 +81,16 @@
     <string name="deploy_endpoint_hint">Runtime endpoint URL</string>
     <string name="deploy_release_channel_hint">Release channel (canary/stable)</string>
     <string name="deploy_notes_hint">Deployment notes</string>
+    <string name="deploy_ops_title">Ops Runtime Health</string>
+    <string name="deploy_ops_runtime_health_label">Runtime health</string>
+    <string name="deploy_ops_queue_depth_label">Queue depth</string>
+    <string name="deploy_ops_job_status_label">Job status</string>
+    <string name="deploy_ops_sync_state_label">Sync state</string>
+    <string name="deploy_ops_policy_violations_label">Policy violations</string>
+    <string name="deploy_ops_quick_actions_label">Quick actions</string>
+    <string name="deploy_ops_restart">Restart</string>
+    <string name="deploy_ops_reindex">Reindex</string>
+    <string name="deploy_ops_retry">Retry</string>
 
     <string name="settings_title">Settings</string>
     <string name="settings_saved">%1$s settings saved</string>
