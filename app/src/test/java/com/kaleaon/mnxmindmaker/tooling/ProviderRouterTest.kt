@@ -10,6 +10,7 @@ import com.kaleaon.mnxmindmaker.util.provider.ProviderRequest
 import com.kaleaon.mnxmindmaker.util.provider.ProviderRouter
 import com.kaleaon.mnxmindmaker.util.provider.RoutingPolicy
 import com.kaleaon.mnxmindmaker.util.tooling.AssistantTurn
+import com.kaleaon.mnxmindmaker.util.tooling.OutboundOperationQueue
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -105,6 +106,54 @@ class ProviderRouterTest {
         )
 
         assertEquals("edge", turn.text)
+    }
+
+
+    @Test
+    fun `offline mode queues remote request and returns non failing assistant turn`() {
+        val queue = OutboundOperationQueue()
+        val router = ProviderRouter(
+            providers = listOf(
+                StubProvider("openai") { it.provider == LlmProvider.OPENAI }
+            ),
+            outboundOperationQueue = queue,
+            isNetworkAvailable = { false }
+        )
+
+        val turn = router.chat(
+            settingsChain = listOf(settings(LlmProvider.OPENAI)),
+            systemPrompt = "system",
+            transcript = emptyList()
+        )
+
+        assertTrue(turn.text.contains("Offline mode"))
+        assertEquals(1, queue.pending("provider_chat").size)
+    }
+
+    @Test
+    fun `online chat reconciles queued provider operations`() {
+        val queue = OutboundOperationQueue().apply {
+            enqueue(
+                kind = "provider_chat",
+                payload = JSONObject().put("provider", LlmProvider.OPENAI.name)
+            )
+        }
+        val router = ProviderRouter(
+            providers = listOf(
+                StubProvider("openai") { it.provider == LlmProvider.OPENAI }
+            ),
+            outboundOperationQueue = queue,
+            isNetworkAvailable = { true }
+        )
+
+        val turn = router.chat(
+            settingsChain = listOf(settings(LlmProvider.OPENAI)),
+            systemPrompt = "system",
+            transcript = emptyList()
+        )
+
+        assertEquals("openai", turn.text)
+        assertEquals(0, queue.pending("provider_chat").size)
     }
 
     @Test
