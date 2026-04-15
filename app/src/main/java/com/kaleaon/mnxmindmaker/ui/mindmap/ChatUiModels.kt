@@ -15,6 +15,7 @@ data class MessageProvenance(
     val provider: LlmProvider,
     val model: String,
     val toolCalls: List<String> = emptyList(),
+    val failoverEvents: List<FailoverEvent> = emptyList(),
     val latencyMs: Long? = null,
     val promptTokens: Int? = null,
     val completionTokens: Int? = null,
@@ -26,6 +27,10 @@ enum class ChatRole {
     MIND,
     SYSTEM
 }
+data class FailoverEvent(
+    val reasonCode: String,
+    val message: String
+)
 
 data class ChatMessage(
     val id: String,
