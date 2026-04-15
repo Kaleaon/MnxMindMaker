@@ -214,6 +214,48 @@ class ProviderRouterTest {
     }
 
     @Test
+    fun `router records failover events with reason codes when rerouting succeeds`() {
+        val router = ProviderRouter(
+            providers = listOf(
+                FailingProvider("openai") { it.provider == LlmProvider.OPENAI },
+                StubProvider("anthropic") { it.provider == LlmProvider.ANTHROPIC }
+            )
+        )
+
+        val turn = router.chat(
+            settingsChain = listOf(settings(LlmProvider.OPENAI), settings(LlmProvider.ANTHROPIC)),
+            systemPrompt = "system",
+            transcript = emptyList()
+        )
+
+        val events = turn.raw?.optJSONArray("failover_events")
+        assertEquals("anthropic", turn.text)
+        assertEquals(1, events?.length())
+        assertEquals("PROVIDER_ERROR", events?.optJSONObject(0)?.optString("reason_code"))
+    }
+
+    @Test
+    fun `router includes reason codes in final failure message`() {
+        val router = ProviderRouter(
+            providers = listOf(
+                FailingProvider("openai") { it.provider == LlmProvider.OPENAI },
+                FailingProvider("anthropic") { it.provider == LlmProvider.ANTHROPIC }
+            )
+        )
+
+        try {
+            router.chat(
+                settingsChain = listOf(settings(LlmProvider.OPENAI), settings(LlmProvider.ANTHROPIC)),
+                systemPrompt = "system",
+                transcript = emptyList()
+            )
+            fail("Expected fallback chain to fail")
+        } catch (e: Exception) {
+            assertTrue(e.message.orEmpty().contains("Reason codes: [PROVIDER_ERROR,PROVIDER_ERROR]"))
+        }
+    }
+
+    @Test
     fun `misconfigured openai url fails fast with actionable message`() {
         val router = ProviderRouter(
             providers = listOf(
@@ -276,5 +318,18 @@ class ProviderRouterTest {
         override fun chat(request: ProviderRequest): AssistantTurn = AssistantTurn(text = id, raw = JSONObject())
 
         override fun healthCheck(settings: LlmSettings): ProviderHealth = ProviderHealth(true, "ok")
+    }
+
+    private class FailingProvider(
+        override val id: String,
+        private val supportsPredicate: (LlmSettings) -> Boolean
+    ) : AssistantProvider {
+        override fun supports(settings: LlmSettings): Boolean = supportsPredicate(settings)
+
+        override fun chat(request: ProviderRequest): AssistantTurn {
+            throw IllegalStateException("$id unavailable")
+        }
+
+        override fun healthCheck(settings: LlmSettings): ProviderHealth = ProviderHealth(false, "unavailable")
     }
 }

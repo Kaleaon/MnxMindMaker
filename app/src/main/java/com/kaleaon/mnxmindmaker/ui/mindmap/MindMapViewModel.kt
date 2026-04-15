@@ -376,6 +376,7 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
         }
 
         var lastError: String? = null
+        val failoverEvents = mutableListOf<FailoverEvent>()
         for (settings in chain) {
             val systemPrompt = buildSystemPrompt(settings)
             val start = System.currentTimeMillis()
@@ -399,6 +400,7 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
                         provider = settings.provider,
                         model = turn.raw?.optString("model").takeUnless { it.isNullOrBlank() } ?: settings.model,
                         toolCalls = turn.toolInvocations.map { it.toolName },
+                        failoverEvents = failoverEvents.toList(),
                         latencyMs = latency,
                         promptTokens = extractPromptTokens(turn.raw),
                         completionTokens = extractCompletionTokens(turn.raw),
@@ -406,6 +408,10 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
                     )
                 )
             } catch (e: LlmApiException) {
+                failoverEvents += FailoverEvent(
+                    reasonCode = reasonCodeFor(e),
+                    message = e.message.orEmpty().ifBlank { "Provider request failed" }
+                )
                 lastError = "${settings.provider.displayName}: ${e.message}"
             }
         }
@@ -413,6 +419,19 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
         _llmStatusBadge.postValue("REMOTE ERROR")
         _error.postValue("AI request failed across provider chain. $lastError")
         return null
+    }
+
+    private fun reasonCodeFor(error: LlmApiException): String {
+        val message = error.message.orEmpty().lowercase()
+        return when {
+            message.contains("api key") -> "AUTH_INVALID"
+            message.contains("timeout") -> "UPSTREAM_TIMEOUT"
+            message.contains("429") || message.contains("rate limit") -> "RATE_LIMITED"
+            message.contains("503") || message.contains("unavailable") -> "UPSTREAM_UNAVAILABLE"
+            message.contains("must use") || message.contains("misconfigured") || message.contains("cannot use") -> "CONFIG_INVALID"
+            message.contains("no adapter") -> "ADAPTER_UNAVAILABLE"
+            else -> "PROVIDER_ERROR"
+        }
     }
 
     private fun buildSystemPrompt(settings: LlmSettings): String {
