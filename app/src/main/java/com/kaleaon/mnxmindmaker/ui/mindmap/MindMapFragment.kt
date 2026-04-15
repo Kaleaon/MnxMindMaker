@@ -210,7 +210,9 @@ class MindMapFragment : Fragment() {
             ComposerProviderChoice.AUTO,
             ComposerProviderChoice.LOCAL,
             ComposerProviderChoice.CLAUDE,
-            ComposerProviderChoice.CHATGPT
+            ComposerProviderChoice.CHATGPT,
+            ComposerProviderChoice.GEMINI,
+            ComposerProviderChoice.VLLM
         )
         providerSpinner.adapter = ArrayAdapter(
             requireContext(),

@@ -24,9 +24,19 @@ import com.kaleaon.mnxmindmaker.repository.PersistedChatStore
 import com.kaleaon.mnxmindmaker.util.ContinuityAuditResult
 import com.kaleaon.mnxmindmaker.util.DimensionMapper
 import com.kaleaon.mnxmindmaker.util.tooling.ToolApprovalRequest
+import com.kaleaon.mnxmindmaker.util.observability.InMemoryTraceStore
+import com.kaleaon.mnxmindmaker.util.observability.PromptPipelineEngine
+import com.kaleaon.mnxmindmaker.util.observability.PromptPipelineRequest
+import com.kaleaon.mnxmindmaker.util.observability.RequestTrace
+import com.kaleaon.mnxmindmaker.util.observability.TraceEventType
+import com.kaleaon.mnxmindmaker.util.provider.ProviderRouter
 import com.kaleaon.mnxmindmaker.util.LlmApiClient
 import com.kaleaon.mnxmindmaker.util.LlmApiException
+import com.kaleaon.mnxmindmaker.util.tooling.ToolOrchestrator
+import com.kaleaon.mnxmindmaker.util.tooling.ToolPolicyEngine
+import com.kaleaon.mnxmindmaker.util.tooling.ToolRegistry
 import com.kaleaon.mnxmindmaker.util.run_continuity_audit
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -34,6 +44,7 @@ import org.json.JSONObject
 import java.io.File
 import java.io.InputStream
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 
 class MindMapViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -42,6 +53,9 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
     private val continuityManager = ContinuityManager(application)
     private val llmClient = LlmApiClient()
     private val chatSessionRepository = ChatSessionRepository(application)
+    private val traceStore = InMemoryTraceStore()
+    private val promptPipelineEngine = PromptPipelineEngine(traceStore = traceStore)
+    private val pendingApprovalResolvers = ConcurrentHashMap<String, CompletableDeferred<Boolean>>()
 
     private val _graph = MutableLiveData(newDefaultGraph())
     val graph: LiveData<MindGraph> get() = _graph
@@ -371,6 +385,7 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
 
     fun resolveToolApproval(requestId: String, approved: Boolean) {
         val resolution = interactionPolicy.resolveToolApproval(requestId, approved) ?: return
+        pendingApprovalResolvers.remove(requestId)?.complete(approved)
         _pendingToolApprovalRequest.value = interactionPolicy.peekPendingToolApprovalRequest()
         _lastToolApprovalResolution.value = resolution
     }
@@ -427,44 +442,123 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
         }
 
         var lastError: String? = null
-        for (settings in chain) {
-            val systemPrompt = buildSystemPrompt(settings)
-            val start = System.currentTimeMillis()
+        val primarySettings = chain.first()
+        val systemPrompt = buildSystemPrompt(primarySettings)
+        val pipelineRequest = PromptPipelineRequest(prompt = prompt, task = "mindmap_assist")
+        val graphNodes = _graph.value?.nodes.orEmpty()
+
+        try {
+            val pipelineResult = promptPipelineEngine.execute(
+                request = pipelineRequest,
+                settings = primarySettings,
+                memoryNodes = graphNodes,
+                baseSystemPrompt = systemPrompt
+            ) { tracer, _ ->
+                val toolRegistry = ToolRegistry(
+                    getGraph = { _graph.value ?: newDefaultGraph() },
+                    setGraph = { updated -> _graph.postValue(updated) }
+                )
+                ToolOrchestrator(
+                    providerRouter = ProviderRouter(),
+                    settingsChain = chain,
+                    registry = toolRegistry,
+                    policy = ToolPolicyEngine(toolRegistry.specs().associateBy { it.name }),
+                    requestApproval = { request -> awaitToolApprovalDecision(request) },
+                    tracer = tracer
+                )
+            }
+
+            val trace = pipelineResult.trace
+            val provider = resolveProviderFromTrace(trace, primarySettings.provider)
+            _llmStatusBadge.postValue(
+                if (provider.runtime == LlmRuntime.LOCAL_ON_DEVICE) "LOCAL FALLBACK" else "REMOTE"
+            )
+
+            return ChatMessage(
+                id = UUID.randomUUID().toString(),
+                prompt = prompt,
+                response = pipelineResult.responseText,
+                providerChoice = choice,
+                provenance = MessageProvenance(
+                    provider = provider,
+                    model = primarySettings.model,
+                    toolCalls = extractToolCallMetadata(trace),
+                    latencyMs = trace.durationMs,
+                    totalTokens = null
+                )
+            )
+        } catch (orchestratedError: Exception) {
+            val traceAwareMessage = "Orchestrated Ask-AI failed (${orchestratedError.message ?: "unknown error"}). Falling back to text-only response."
+            lastError = traceAwareMessage
             try {
-                val turn = llmClient.completeAssistantTurn(
-                    settings = settings,
+                val start = System.currentTimeMillis()
+                val fallbackTurn = llmClient.completeAssistantTurn(
+                    settings = primarySettings,
                     systemPrompt = systemPrompt,
                     transcript = listOf(JSONObject().put("role", "user").put("content", prompt)),
                     tools = emptyList()
                 )
                 val latency = System.currentTimeMillis() - start
                 _llmStatusBadge.postValue(
-                    if (settings.provider.runtime == LlmRuntime.LOCAL_ON_DEVICE) "LOCAL FALLBACK" else "REMOTE"
+                    if (primarySettings.provider.runtime == LlmRuntime.LOCAL_ON_DEVICE) "LOCAL FALLBACK" else "REMOTE"
                 )
                 return ChatMessage(
                     id = UUID.randomUUID().toString(),
                     prompt = prompt,
                     response = turn.text,
                     createdTimestamp = System.currentTimeMillis(),
+                    response = "[Fallback mode] $traceAwareMessage\n\n${fallbackTurn.text}",
                     providerChoice = choice,
                     provenance = MessageProvenance(
-                        provider = settings.provider,
-                        model = turn.raw?.optString("model").takeUnless { it.isNullOrBlank() } ?: settings.model,
-                        toolCalls = turn.toolInvocations.map { it.toolName },
+                        provider = primarySettings.provider,
+                        model = fallbackTurn.raw?.optString("model").takeUnless { it.isNullOrBlank() } ?: primarySettings.model,
+                        toolCalls = listOf("orchestrator_error: ${orchestratedError::class.java.simpleName}"),
                         latencyMs = latency,
-                        promptTokens = extractPromptTokens(turn.raw),
-                        completionTokens = extractCompletionTokens(turn.raw),
-                        totalTokens = extractTotalTokens(turn.raw)
+                        promptTokens = extractPromptTokens(fallbackTurn.raw),
+                        completionTokens = extractCompletionTokens(fallbackTurn.raw),
+                        totalTokens = extractTotalTokens(fallbackTurn.raw)
                     )
                 )
-            } catch (e: LlmApiException) {
-                lastError = "${settings.provider.displayName}: ${e.message}"
+            } catch (fallbackError: LlmApiException) {
+                lastError = "$traceAwareMessage Fallback failed: ${fallbackError.message}"
             }
         }
 
         _llmStatusBadge.postValue("REMOTE ERROR")
         _error.postValue("AI request failed across provider chain. $lastError")
         return null
+    }
+
+    private suspend fun awaitToolApprovalDecision(request: ToolApprovalRequest): Boolean {
+        val deferred = CompletableDeferred<Boolean>()
+        pendingApprovalResolvers[request.id] = deferred
+        requestToolApproval(request)
+        return try {
+            deferred.await()
+        } finally {
+            pendingApprovalResolvers.remove(request.id)
+        }
+    }
+
+    private fun resolveProviderFromTrace(trace: RequestTrace, fallback: LlmProvider): LlmProvider {
+        val providerName = trace.events
+            .asReversed()
+            .firstOrNull { it.type == TraceEventType.PROVIDER_RESPONSE }
+            ?.payload
+            ?.get("provider")
+            ?: return fallback
+        return runCatching { LlmProvider.valueOf(providerName) }.getOrDefault(fallback)
+    }
+
+    private fun extractToolCallMetadata(trace: RequestTrace): List<String> {
+        return trace.events
+            .filter { it.type == TraceEventType.TOOL_CALL }
+            .map { event ->
+                val name = event.payload["tool_name"].orEmpty().ifBlank { "unknown_tool" }
+                val latencyMs = event.payload["latency_ms"].orEmpty().ifBlank { "?" }
+                val success = event.payload["success"].orEmpty()
+                "$name (${latencyMs}ms, success=$success)"
+            }
     }
 
     private fun buildSystemPrompt(settings: LlmSettings): String {

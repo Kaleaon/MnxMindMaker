@@ -22,7 +22,24 @@ interface MemoryStore {
     fun deleteRecord(category: MemoryCategory, id: String): Boolean
 
     fun clearAll()
+
+    fun syncFromRemote(): Boolean = false
+
+    fun syncToRemote(): Boolean = false
 }
+
+interface RemoteMemorySyncLayer {
+    fun pullSnapshot(): RemoteMemorySnapshot?
+
+    fun pushSnapshot(snapshot: RemoteMemorySnapshot)
+}
+
+data class RemoteMemorySnapshot(
+    val graphStore: GraphMemoryStore,
+    val semanticStore: SemanticMemoryStore,
+    val episodicStore: EpisodicTimelineStore,
+    val metadataIndex: MetadataIndexStore
+)
 
 fun interface MemoryStoreMigration {
     /**
