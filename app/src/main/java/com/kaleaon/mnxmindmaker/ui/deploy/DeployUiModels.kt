@@ -13,7 +13,10 @@ enum class DeployWizardStep {
 data class DeploymentRuntimeConfig(
     val environment: String = "staging",
     val endpoint: String = "",
-    val releaseChannel: String = "canary",
+    val publishChannel: String = "dev",
+    val requiresPromotionApproval: Boolean = false,
+    val rollbackChannel: String = "dev",
+    val compatibilityConstraints: List<String> = emptyList(),
     val notes: String = ""
 )
 
@@ -34,7 +37,16 @@ data class DeploymentManifest(
     val findingCount: Int,
     val criticalFindingCount: Int,
     val runtimeConfig: DeploymentRuntimeConfig,
+    val deploymentHistory: List<DeploymentHistoryEntry>,
     val summary: String
+)
+
+data class DeploymentHistoryEntry(
+    val action: String,
+    val channel: String,
+    val approvedBy: String,
+    val createdAt: Long,
+    val detail: String
 )
 
 data class DeployUiState(
