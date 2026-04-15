@@ -9,6 +9,7 @@ import com.kaleaon.mnxmindmaker.mnx.MnxIdentity
 import com.kaleaon.mnxmindmaker.mnx.MnxMeta
 import com.kaleaon.mnxmindmaker.mnx.mnxDeserialize
 import com.kaleaon.mnxmindmaker.mnx.mnxSerialize
+import com.kaleaon.mnxmindmaker.interchange.MindInterchangeFormat
 import com.kaleaon.mnxmindmaker.model.MindEdge
 import com.kaleaon.mnxmindmaker.model.MindGraph
 import com.kaleaon.mnxmindmaker.model.MindNode
@@ -397,6 +398,47 @@ class MnxRepository(private val context: Context) {
         }
         val meta = MnxCodec.deserializeMeta(mnxFile.sections[MnxFormat.MnxSectionType.META]!!)
         return manifestFromMeta(meta)
+    }
+
+    fun exportToInterchangeJson(
+        graph: MindGraph,
+        metadata: Map<String, String> = emptyMap(),
+        compatibilityHooks: MindInterchangeFormat.CompatibilityHooks =
+            MindInterchangeFormat.CompatibilityHooks()
+    ): File {
+        val outDir = File(context.filesDir, "interchange_exports").also { it.mkdirs() }
+        val safeName = graph.name.replace(Regex("[^a-zA-Z0-9_-]"), "_")
+        val outFile = File(outDir, "${safeName}_${System.currentTimeMillis()}.mnxj")
+        val json = MindInterchangeFormat.exportJson(graph, compatibilityHooks, metadata)
+        outFile.writeText(json)
+        return outFile
+    }
+
+    fun importFromInterchangeJson(stream: InputStream): MindGraph {
+        val json = stream.bufferedReader().use { it.readText() }
+        return MindInterchangeFormat.importJson(json)
+    }
+
+    fun exportToInterchangeBundle(
+        graph: MindGraph,
+        blobs: Map<String, ByteArray> = emptyMap(),
+        metadata: Map<String, String> = emptyMap(),
+        compatibilityHooks: MindInterchangeFormat.CompatibilityHooks =
+            MindInterchangeFormat.CompatibilityHooks()
+    ): File {
+        val outDir = File(context.filesDir, "interchange_exports").also { it.mkdirs() }
+        val safeName = graph.name.replace(Regex("[^a-zA-Z0-9_-]"), "_")
+        val outFile = File(outDir, "${safeName}_${System.currentTimeMillis()}.mnxb")
+        val bytes = MindInterchangeFormat.exportBundle(
+            MindInterchangeFormat.BundlePayload(graph = graph, blobs = blobs, metadata = metadata),
+            compatibilityHooks
+        )
+        outFile.writeBytes(bytes)
+        return outFile
+    }
+
+    fun importFromInterchangeBundle(stream: InputStream): MindInterchangeFormat.BundlePayload {
+        return MindInterchangeFormat.importBundle(stream.readBytes())
     }
 
     fun getMnxExportsDir(): File = File(context.filesDir, "mnx_exports").also { it.mkdirs() }
