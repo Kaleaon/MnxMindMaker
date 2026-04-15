@@ -94,3 +94,35 @@ tasks.register('prepareComplianceAssets', Copy) {
 tasks.named('preBuild') {
     dependsOn(tasks.named('prepareComplianceAssets'))
 }
+
+
+tasks.register('gateReleaseOnDurability') {
+    group = 'verification'
+    description = 'Ensures durability integration tests pass before release artifacts are built.'
+    dependsOn(tasks.named('testDebugUnitTest'))
+
+    doLast {
+        def resultFiles = fileTree("$buildDir/test-results/testDebugUnitTest") {
+            include '**/TEST-*DurabilityIntegrationTest.xml'
+        }.files
+
+        if (resultFiles.isEmpty()) {
+            throw new GradleException('Durability release gate failed: durability integration test results were not found.')
+        }
+
+        def failingSuites = resultFiles.findAll { file ->
+            def suite = new XmlSlurper().parse(file)
+            (suite.@failures.text().toInteger() + suite.@errors.text().toInteger()) > 0
+        }
+
+        if (!failingSuites.isEmpty()) {
+            throw new GradleException(
+                "Durability release gate failed: ${failingSuites.size()} durability test suite(s) reported failures."
+            )
+        }
+    }
+}
+
+tasks.matching { it.name in ['assembleRelease', 'bundleRelease'] }.configureEach {
+    dependsOn(tasks.named('gateReleaseOnDurability'))
+}
