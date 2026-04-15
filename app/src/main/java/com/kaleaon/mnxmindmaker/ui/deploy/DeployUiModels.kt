@@ -41,6 +41,18 @@ data class DeploymentManifest(
     val summary: String
 )
 
+enum class OpsQuickAction {
+    RESTART,
+    REINDEX,
+    RETRY_FAILED
+}
+
+data class DeployOpsSnapshot(
+    val runtimeHealth: String = "Unknown",
+    val queueDepth: Int = 0,
+    val jobStatus: String = "Idle",
+    val syncState: String = "Not started",
+    val policyViolations: Int = 0
 data class DeploymentHistoryEntry(
     val action: String,
     val channel: String,
@@ -54,6 +66,7 @@ data class DeployUiState(
     val graph: MindGraph? = null,
     val audit: ContinuityAuditResult? = null,
     val runtimeConfig: DeploymentRuntimeConfig = DeploymentRuntimeConfig(),
+    val opsSnapshot: DeployOpsSnapshot = DeployOpsSnapshot(),
     val manifestPreview: DeploymentManifest? = null,
     val isSaving: Boolean = false,
     val errorMessage: String? = null,

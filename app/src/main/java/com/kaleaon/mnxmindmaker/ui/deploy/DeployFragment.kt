@@ -36,6 +36,9 @@ class DeployFragment : Fragment() {
             )
             viewModel.confirmDeployment()
         }
+        binding.btnOpsRestart.setOnClickListener { viewModel.runOpsQuickAction(OpsQuickAction.RESTART) }
+        binding.btnOpsReindex.setOnClickListener { viewModel.runOpsQuickAction(OpsQuickAction.REINDEX) }
+        binding.btnOpsRetry.setOnClickListener { viewModel.runOpsQuickAction(OpsQuickAction.RETRY_FAILED) }
 
         viewModel.uiState.observe(viewLifecycleOwner) { state ->
             renderState(state)
@@ -68,6 +71,12 @@ class DeployFragment : Fragment() {
             binding.etDeployReleaseChannel.setText(state.runtimeConfig.publishChannel)
             binding.etDeployNotes.setText(state.runtimeConfig.notes)
         }
+
+        binding.tvOpsRuntimeHealthValue.text = state.opsSnapshot.runtimeHealth
+        binding.tvOpsQueueDepthValue.text = state.opsSnapshot.queueDepth.toString()
+        binding.tvOpsJobStatusValue.text = state.opsSnapshot.jobStatus
+        binding.tvOpsSyncStateValue.text = state.opsSnapshot.syncState
+        binding.tvOpsPolicyViolationsValue.text = state.opsSnapshot.policyViolations.toString()
 
         binding.tvDeploySummary.text = state.manifestPreview?.let { manifest ->
                 "Deployment ${manifest.deploymentId.take(8)}\n" +
