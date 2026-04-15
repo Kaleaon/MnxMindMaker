@@ -81,7 +81,7 @@
     <string name="deploy_step_summary_title">Step 4: Deployment Summary</string>
     <string name="deploy_env_hint">Environment (e.g., staging, prod)</string>
     <string name="deploy_endpoint_hint">Runtime endpoint URL</string>
-    <string name="deploy_release_channel_hint">Release channel (canary/stable)</string>
+    <string name="deploy_release_channel_hint">Publish channel (dev/stage/prod)</string>
     <string name="deploy_notes_hint">Deployment notes</string>
 
     <string name="settings_title">Settings</string>
