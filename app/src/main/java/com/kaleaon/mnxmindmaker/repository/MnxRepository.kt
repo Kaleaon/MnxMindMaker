@@ -34,6 +34,7 @@ class MnxRepository(private val context: Context) {
 
     companion object {
         internal const val GRAPH_PAYLOAD_SECTION_TYPE: Short = (-1).toShort()
+        internal const val WORKSPACE_PACK_SECTION_TYPE: Short = (-2).toShort()
         internal const val META_PERSONA_DEPLOYMENT_KEY = "persona.deployment.v1"
 
         internal fun serializeGraphPayload(graph: MindGraph): ByteArray = mnxSerialize {
@@ -112,6 +113,65 @@ class MnxRepository(private val context: Context) {
                 createdAt = createdAt,
                 modifiedAt = modifiedAt
             )
+        }
+
+        internal fun serializeWorkspacePack(pack: MindWorkspacePack): ByteArray = mnxSerialize {
+            writeInt(pack.version)
+            writeLong(pack.exportedAt)
+            writeList(pack.workspaces) { workspace ->
+                writeString(workspace.id)
+                writeString(workspace.name)
+                writeString(workspace.ownership.name)
+                writeStringMap(workspace.attributes)
+                writeList(workspace.permissions) { permission ->
+                    writeString(permission.principalId)
+                    writeStringList(permission.scopes.map { it.name })
+                }
+                writeStringList(workspace.mindIds)
+            }
+            writeList(pack.minds) { namedMind ->
+                writeString(namedMind.id)
+                writeString(namedMind.name)
+                writeString(namedMind.workspaceId)
+                val graphPayload = serializeGraphPayload(namedMind.graph)
+                writeInt(graphPayload.size)
+                writeBytes(graphPayload)
+            }
+        }
+
+        internal fun deserializeWorkspacePack(data: ByteArray): MindWorkspacePack = mnxDeserialize(data) {
+            val version = readInt()
+            val exportedAt = readLong()
+            val workspaces = readList {
+                MindWorkspace(
+                    id = readString(),
+                    name = readString(),
+                    ownership = OwnershipBoundary.valueOf(readString()),
+                    attributes = readStringMap(),
+                    permissions = readList {
+                        WorkspacePermission(
+                            principalId = readString(),
+                            scopes = readStringList().mapNotNull {
+                                runCatching { WorkspaceScope.valueOf(it) }.getOrNull()
+                            }.toSet()
+                        )
+                    },
+                    mindIds = readStringList()
+                )
+            }
+            val minds = readList {
+                val mindId = readString()
+                val mindName = readString()
+                val workspaceId = readString()
+                val graph = deserializeGraphPayload(readBytes(readInt()))
+                NamedMind(
+                    id = mindId,
+                    name = mindName,
+                    workspaceId = workspaceId,
+                    graph = graph.copy(id = mindId, name = mindName)
+                )
+            }
+            MindWorkspacePack(version = version, exportedAt = exportedAt, workspaces = workspaces, minds = minds)
         }
 
         internal fun encodePersonaDeploymentManifest(
@@ -209,6 +269,49 @@ class MnxRepository(private val context: Context) {
         internal fun manifestFromMeta(meta: MnxMeta): PersonaDeploymentManifest =
             decodePersonaDeploymentManifest(meta.entries[META_PERSONA_DEPLOYMENT_KEY])
     }
+
+    enum class OwnershipBoundary {
+        PERSONAL,
+        TEAM,
+        DEVICE
+    }
+
+    enum class WorkspaceScope {
+        READ_MIND,
+        WRITE_MIND,
+        EXPORT_PACK,
+        IMPORT_PACK,
+        ADMIN
+    }
+
+    data class WorkspacePermission(
+        val principalId: String,
+        val scopes: Set<WorkspaceScope>
+    )
+
+    data class MindWorkspace(
+        val id: String,
+        val name: String,
+        val ownership: OwnershipBoundary,
+        val permissions: List<WorkspacePermission> = emptyList(),
+        val mindIds: List<String> = emptyList(),
+        val attributes: Map<String, String> = emptyMap()
+    )
+
+    data class NamedMind(
+        val id: String,
+        val name: String,
+        val workspaceId: String,
+        val graph: MindGraph
+    )
+
+    data class MindWorkspacePack(
+        val version: Int = 1,
+        val exportedAt: Long = System.currentTimeMillis(),
+        val workspaces: List<MindWorkspace>,
+        val minds: List<NamedMind>
+    )
+
     data class ContinuityMetadata(
         val snapshotId: String,
         val parentSnapshotId: String?,
@@ -309,8 +412,7 @@ class MnxRepository(private val context: Context) {
         val safeName = graph.name.replace(Regex("[^a-zA-Z0-9_-]"), "_")
         val outFile = File(outDir, "${safeName}_${System.currentTimeMillis()}.mnx")
         MnxCodec.encodeToFile(mnxFile, outFile)
-        return outFile
-        return MnxFile(header = MnxHeader(), sections = sections)
+        return mnxFile
     }
 
     /**
@@ -404,6 +506,42 @@ class MnxRepository(private val context: Context) {
     fun listExportedFiles(): List<File> =
         getMnxExportsDir().listFiles { f -> f.extension == "mnx" }
             ?.sortedByDescending { it.lastModified() } ?: emptyList()
+
+    fun exportWorkspacePack(pack: MindWorkspacePack, fileName: String? = null): File {
+        val outDir = File(context.filesDir, "workspace_packs").also { it.mkdirs() }
+        val output = if (fileName.isNullOrBlank()) {
+            File(outDir, "workspace_pack_${System.currentTimeMillis()}.mnx")
+        } else {
+            File(outDir, if (fileName.endsWith(".mnx")) fileName else "$fileName.mnx")
+        }
+        val sections = mapOf(
+            MnxFormat.MnxSectionType.META to MnxCodec.serializeMeta(
+                MnxMeta(
+                    mapOf(
+                        "app" to "MnxMindMaker",
+                        "pack_type" to "workspace_pack",
+                        "pack_version" to pack.version.toString(),
+                        "workspace_count" to pack.workspaces.size.toString(),
+                        "mind_count" to pack.minds.size.toString()
+                    )
+                )
+            )
+        )
+        val rawSections = mapOf(WORKSPACE_PACK_SECTION_TYPE to serializeWorkspacePack(pack))
+        MnxCodec.encodeToFile(MnxFile(header = MnxHeader(), sections = sections, rawSections = rawSections), output)
+        return output
+    }
+
+    fun importWorkspacePack(stream: InputStream): MindWorkspacePack {
+        val mnxFile = MnxCodec.decode(stream)
+        if (mnxFile.hasRawSection(WORKSPACE_PACK_SECTION_TYPE)) {
+            return deserializeWorkspacePack(mnxFile.rawSections[WORKSPACE_PACK_SECTION_TYPE]!!)
+        }
+
+        throw IllegalArgumentException(
+            "MNX file does not contain a workspace pack raw section (type=$WORKSPACE_PACK_SECTION_TYPE)"
+        )
+    }
 
     fun exportBootPacketJson(
         graph: MindGraph,
