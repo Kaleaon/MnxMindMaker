@@ -116,6 +116,7 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
     val compareCandidateMessageId: LiveData<String?> get() = _compareCandidateMessageId
 
     private val interactionPolicy = MindMapInteractionPolicy()
+    private val mentionParser = ChatMentionParser()
 
     private val _pendingToolApprovalRequest = MutableLiveData<ToolApprovalRequest?>()
     val pendingToolApprovalRequest: LiveData<ToolApprovalRequest?> get() = _pendingToolApprovalRequest
@@ -311,11 +312,18 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
             loadPersistedChatSessions()
             _activeChatSessionId.value
         } ?: return
+
+        val mentionCandidates = buildMentionCandidates(_graph.value?.nodes.orEmpty())
+        val parseResult = mentionParser.parse(prompt, mentionCandidates)
+        val cleanedPrompt = parseResult.cleanedMessageContent.ifBlank { prompt.trim() }
+        val dispatchPrompt = buildDispatchPrompt(cleanedPrompt, parseResult.addressedIdentities)
+
         viewModelScope.launch {
             _isLoading.value = true
             try {
-                val result = withContext(Dispatchers.IO) { runSingleChat(prompt, choice) }
+                val result = withContext(Dispatchers.IO) { runSingleChat(dispatchPrompt, choice) }
                 if (result != null) {
+                    val nextMessages = _chatMessages.value.orEmpty() + result.copy(prompt = cleanedPrompt)
                     val userMessageId = UUID.randomUUID().toString()
                     val userMessage = ChatMessage(
                         id = userMessageId,
@@ -596,6 +604,38 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
         _llmStatusBadge.postValue("REMOTE ERROR")
         _error.postValue("AI request failed across provider chain. $lastError")
         return null
+    }
+
+    private fun buildMentionCandidates(nodes: List<MindNode>): List<ChatMentionParser.IdentityCandidate> {
+        return nodes.map { node ->
+            ChatMentionParser.IdentityCandidate(
+                id = node.id,
+                label = node.label,
+                aliases = extractAliases(node)
+            )
+        }
+    }
+
+    private fun extractAliases(node: MindNode): Set<String> {
+        val aliasKeys = listOf("aliases", "alias", "mention_aliases")
+        return aliasKeys
+            .mapNotNull { key -> node.attributes[key] }
+            .flatMap { raw -> raw.split(',', ';', '|') }
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .toSet()
+    }
+
+    private fun buildDispatchPrompt(
+        cleanedPrompt: String,
+        addressedIdentities: List<ChatMentionParser.AddressedIdentity>
+    ): String {
+        if (addressedIdentities.isEmpty()) return cleanedPrompt
+
+        val addressedLine = addressedIdentities.joinToString(", ") { identity ->
+            "${identity.label} [${identity.id}]"
+        }
+        return "Addressed minds: $addressedLine\n$cleanedPrompt"
     }
 
     private fun reasonCodeFor(error: LlmApiException): String {
