@@ -572,8 +572,14 @@ private class ChatMessageAdapter(
         } else {
             "n/a"
         }
+        val failover = if (p.failoverEvents.isEmpty()) {
+            "none"
+        } else {
+            p.failoverEvents.joinToString(" -> ") { it.reasonCode }
+        }
         return "Provider: ${p.provider.displayName} | Model: ${p.model}\n" +
             "Tools: $tools\n" +
-            "Latency: $latency | Tokens: $usage"
+            "Latency: $latency | Tokens: $usage\n" +
+            "Failover: $failover"
     }
 }
