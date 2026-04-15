@@ -8,6 +8,7 @@ import com.kaleaon.mnxmindmaker.model.LlmSettings
 import com.kaleaon.mnxmindmaker.model.PrivacyMode
 import com.kaleaon.mnxmindmaker.util.LlmApiException
 import com.kaleaon.mnxmindmaker.util.tooling.AssistantTurn
+import com.kaleaon.mnxmindmaker.util.tooling.OutboundOperationQueue
 import com.kaleaon.mnxmindmaker.util.tooling.ToolSpec
 import org.json.JSONObject
 
@@ -44,7 +45,9 @@ class ProviderRouter(
         ClaudeProvider(),
         GeminiProvider(),
         ChatGPTProvider()
-    )
+    ),
+    private val outboundOperationQueue: OutboundOperationQueue? = null,
+    private val isNetworkAvailable: () -> Boolean = { true }
 ) {
 
     fun chat(
@@ -57,9 +60,30 @@ class ProviderRouter(
         val ordered = orderByPolicy(settingsChain, policy)
         if (ordered.isEmpty()) throw LlmApiException("No provider configuration available for routing")
 
+        val online = isNetworkAvailable()
+        if (online) {
+            outboundOperationQueue?.reconcile(kind = "provider_chat") { queued ->
+                JSONObject()
+                    .put("status", "reconciled")
+                    .put("note", "Deferred provider request requires an explicit user retry")
+                    .put("provider", queued.payload.optString("provider"))
+            }
+        }
+
         var lastError: Exception? = null
         val failoverEvents = mutableListOf<ProviderFailoverEvent>()
         for (settings in ordered) {
+            if (!online && settings.provider.runtime != LlmRuntime.LOCAL_ON_DEVICE) {
+                outboundOperationQueue?.enqueue(
+                    kind = "provider_chat",
+                    payload = JSONObject()
+                        .put("provider", settings.provider.name)
+                        .put("model", settings.model)
+                        .put("transcript_size", transcript.size)
+                        .put("tool_count", tools.size)
+                )
+                continue
+            }
             val validationError = ProviderSettingsValidator.validate(settings)
             if (validationError != null) {
                 lastError = LlmApiException("${settings.provider.displayName}: $validationError")
@@ -117,6 +141,15 @@ class ProviderRouter(
             }
         }
         val reasonCodes = failoverEvents.joinToString(",") { it.reasonCode.name }
+        if (!online) {
+            return AssistantTurn(
+                text = "Offline mode is active. Outbound provider requests were queued and will reconcile when connectivity returns.",
+                raw = JSONObject()
+                    .put("offline_mode", true)
+                    .put("queued_provider_requests", outboundOperationQueue?.pending("provider_chat")?.size ?: 0)
+            )
+        }
+
         throw LlmApiException(
             "All providers failed after policy-approved fallback chain. Reason codes: [$reasonCodes]. Last error: ${lastError?.message}",
             lastError

@@ -31,9 +31,20 @@ data class ChatMessage(
     val id: String,
     val prompt: String,
     val response: String,
+    val createdTimestamp: Long,
     val providerChoice: ComposerProviderChoice,
     val provenance: MessageProvenance,
     val compareCandidate: CompareCandidate? = null
+)
+
+data class ChatSessionSummary(
+    val sessionId: String,
+    val displayName: String,
+    val createdTimestamp: Long,
+    val updatedTimestamp: Long,
+    val providerLabel: String,
+    val modelLabel: String,
+    val messageCount: Int
 )
 
 data class CompareCandidate(
