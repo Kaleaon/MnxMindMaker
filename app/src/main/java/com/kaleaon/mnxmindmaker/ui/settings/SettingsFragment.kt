@@ -33,6 +33,10 @@ import com.kaleaon.mnxmindmaker.model.RetrievalModePreference
 import com.kaleaon.mnxmindmaker.repository.AuthRepository
 import com.kaleaon.mnxmindmaker.repository.ExternalAccountRepository
 import com.kaleaon.mnxmindmaker.repository.LlmSettingsRepository
+import com.kaleaon.mnxmindmaker.util.tooling.SkillManifestValidator
+import com.kaleaon.mnxmindmaker.util.tooling.SkillPackDiagnosticsStore
+import com.kaleaon.mnxmindmaker.util.tooling.SkillPackLoader
+import com.kaleaon.mnxmindmaker.util.tooling.ToolRegistry
 import com.kaleaon.mnxmindmaker.util.provider.PreflightDiagnosticsResult
 import com.kaleaon.mnxmindmaker.util.provider.ProviderPreflightDiagnostics
 import com.kaleaon.mnxmindmaker.util.provider.ValidationIssue
@@ -184,6 +188,8 @@ class SettingsFragment : Fragment() {
         binding.tvOpenAiInfo.text = getString(R.string.openai_api_info)
         binding.tvGeminiInfo.text = getString(R.string.gemini_api_info)
         binding.tvVllmInfo.text = getString(R.string.vllm_gemma4_info)
+
+        loadSkillPackDiagnostics()
     }
 
     private fun setupLocalAuthSection() {
@@ -555,6 +561,36 @@ class SettingsFragment : Fragment() {
                 ProviderPreflightDiagnostics.run(draft)
             }
             binding.tvPreflightResult.text = renderPreflightResult(result, issues)
+        }
+    }
+
+    private fun loadSkillPackDiagnostics() {
+        lifecycleScope.launch {
+            val report = withContext(Dispatchers.IO) {
+                val existing = SkillPackDiagnosticsStore.latestReport
+                if (existing.loadedPacks.isNotEmpty() || existing.disabledPacks.isNotEmpty() || existing.skippedPacks.isNotEmpty() || existing.validationIssues.isNotEmpty()) {
+                    existing
+                } else {
+                    val loader = SkillPackLoader(
+                        assets = requireContext().assets,
+                        validator = SkillManifestValidator(ToolRegistry.approvedHandlerIds())
+                    )
+                    loader.load().also { SkillPackDiagnosticsStore.update(it) }
+                }
+            }
+
+            val loaded = report.loadedPacks.joinToString(", ") { "${it.manifest.packId}@${it.manifest.version}" }.ifBlank { "none" }
+            val disabled = report.disabledPacks.joinToString(", ").ifBlank { "none" }
+            val skipped = report.skippedPacks.joinToString(", ").ifBlank { "none" }
+            val errors = report.validationIssues.take(8).joinToString("\n") { "- ${it.source}: ${it.message}" }
+                .ifBlank { "- none" }
+            binding.tvSkillPackDiagnostics.text = """
+                Skill packs loaded: $loaded
+                Disabled packs: $disabled
+                Skipped packs: $skipped
+                Validation errors:
+                $errors
+            """.trimIndent()
         }
     }
 
