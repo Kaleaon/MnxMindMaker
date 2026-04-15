@@ -14,8 +14,13 @@ import com.kaleaon.mnxmindmaker.model.MindGraph
 import com.kaleaon.mnxmindmaker.model.MindNode
 import com.kaleaon.mnxmindmaker.model.NodeType
 import com.kaleaon.mnxmindmaker.model.PrivacyMode
+import com.kaleaon.mnxmindmaker.model.defaultModel
+import com.kaleaon.mnxmindmaker.repository.ChatSessionRepository
 import com.kaleaon.mnxmindmaker.repository.LlmSettingsRepository
 import com.kaleaon.mnxmindmaker.repository.MnxRepository
+import com.kaleaon.mnxmindmaker.repository.PersistedChatMessage
+import com.kaleaon.mnxmindmaker.repository.PersistedChatSession
+import com.kaleaon.mnxmindmaker.repository.PersistedChatStore
 import com.kaleaon.mnxmindmaker.util.ContinuityAuditResult
 import com.kaleaon.mnxmindmaker.util.DimensionMapper
 import com.kaleaon.mnxmindmaker.util.tooling.ToolApprovalRequest
@@ -36,6 +41,7 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
     private val llmRepository = LlmSettingsRepository(application)
     private val continuityManager = ContinuityManager(application)
     private val llmClient = LlmApiClient()
+    private val chatSessionRepository = ChatSessionRepository(application)
 
     private val _graph = MutableLiveData(newDefaultGraph())
     val graph: LiveData<MindGraph> get() = _graph
@@ -66,6 +72,10 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
 
     private val _chatMessages = MutableLiveData<List<ChatMessage>>(emptyList())
     val chatMessages: LiveData<List<ChatMessage>> get() = _chatMessages
+    private val _chatSessions = MutableLiveData<List<ChatSessionSummary>>(emptyList())
+    val chatSessions: LiveData<List<ChatSessionSummary>> get() = _chatSessions
+    private val _activeChatSessionId = MutableLiveData<String>()
+    val activeChatSessionId: LiveData<String> get() = _activeChatSessionId
 
     private val _isPremiumUser = MutableLiveData(true)
     val isPremiumUser: LiveData<Boolean> get() = _isPremiumUser
@@ -89,6 +99,7 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
     init {
         refreshAudit()
         refreshSnapshotTimeline()
+        loadPersistedChatSessions()
     }
 
     fun addNode(label: String, type: NodeType, description: String = "") {
@@ -258,12 +269,18 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun askLlmForMindDesign(prompt: String, choice: ComposerProviderChoice = ComposerProviderChoice.AUTO) {
+        val activeSessionId = _activeChatSessionId.value ?: run {
+            loadPersistedChatSessions()
+            _activeChatSessionId.value
+        } ?: return
         viewModelScope.launch {
             _isLoading.value = true
             try {
                 val result = withContext(Dispatchers.IO) { runSingleChat(prompt, choice) }
                 if (result != null) {
-                    _chatMessages.value = _chatMessages.value.orEmpty() + result
+                    val nextMessages = _chatMessages.value.orEmpty() + result
+                    _chatMessages.value = nextMessages
+                    persistChatMessages(activeSessionId, nextMessages)
                 }
             } catch (e: LlmApiException) {
                 _llmStatusBadge.value = "REMOTE ERROR"
@@ -300,6 +317,7 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun retryWithAnotherProvider(messageId: String) {
+        val activeSessionId = _activeChatSessionId.value ?: return
         val existing = _chatMessages.value.orEmpty().firstOrNull { it.id == messageId } ?: return
         viewModelScope.launch {
             _isLoading.value = true
@@ -313,7 +331,7 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
                     runSingleChat(existing.prompt, providerToChoice(nextProvider), forcedProvider = nextProvider)
                 } ?: return@launch
 
-                _chatMessages.value = _chatMessages.value.orEmpty().map { msg ->
+                val updatedMessages = _chatMessages.value.orEmpty().map { msg ->
                     if (msg.id != messageId) {
                         msg
                     } else {
@@ -328,6 +346,8 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
                         )
                     }
                 }
+                _chatMessages.value = updatedMessages
+                persistChatMessages(activeSessionId, updatedMessages)
 
                 if (_isPremiumUser.value == true) {
                     _compareCandidateMessageId.value = messageId
@@ -357,6 +377,37 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
 
     fun clearToolApprovalResolution() {
         _lastToolApprovalResolution.value = null
+    }
+
+    fun createNewChatSession(displayName: String? = null, providerChoice: ComposerProviderChoice = ComposerProviderChoice.AUTO) {
+        val state = chatSessionRepository.createSession(displayName, providerChoice.label)
+        applyChatState(state)
+    }
+
+    fun switchChatSession(sessionId: String) {
+        val state = chatSessionRepository.setActiveSession(sessionId)
+        applyChatState(state)
+    }
+
+    private fun loadPersistedChatSessions() {
+        val state = chatSessionRepository.ensureDefaultSession()
+        applyChatState(state)
+    }
+
+    private fun applyChatState(state: PersistedChatStore) {
+        val orderedSessions = state.sessions.sortedBy { it.createdTimestamp }
+        val activeId = state.activeSessionId.ifBlank { orderedSessions.firstOrNull()?.sessionId.orEmpty() }
+        val activeSession = orderedSessions.firstOrNull { it.sessionId == activeId } ?: orderedSessions.firstOrNull()
+
+        _chatSessions.value = orderedSessions.map { it.toSummary() }
+        _activeChatSessionId.value = activeSession?.sessionId.orEmpty()
+        _chatMessages.value = activeSession?.messages?.map { persisted -> persisted.toUiMessage() }.orEmpty()
+    }
+
+    private fun persistChatMessages(sessionId: String, messages: List<ChatMessage>) {
+        val persistedMessages = messages.map { it.toPersistedMessage() }
+        val state = chatSessionRepository.replaceMessages(sessionId, persistedMessages)
+        applyChatState(state)
     }
 
     private fun runSingleChat(
@@ -394,6 +445,7 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
                     id = UUID.randomUUID().toString(),
                     prompt = prompt,
                     response = turn.text,
+                    createdTimestamp = System.currentTimeMillis(),
                     providerChoice = choice,
                     provenance = MessageProvenance(
                         provider = settings.provider,
@@ -490,6 +542,76 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
         if (raw == null) return null
         return raw.optJSONObject("usage")?.optInt("total_tokens")?.takeIf { it >= 0 }
             ?: raw.optJSONObject("usageMetadata")?.optInt("totalTokenCount")?.takeIf { it >= 0 }
+    }
+
+    private fun PersistedChatSession.toSummary(): ChatSessionSummary {
+        return ChatSessionSummary(
+            sessionId = sessionId,
+            displayName = displayName,
+            createdTimestamp = createdTimestamp,
+            updatedTimestamp = updatedTimestamp,
+            providerLabel = providerLabel,
+            modelLabel = modelLabel,
+            messageCount = messages.size
+        )
+    }
+
+    private fun PersistedChatMessage.toUiMessage(): ChatMessage {
+        val provider = enumValues<LlmProvider>().firstOrNull { it.name == this.provider } ?: LlmProvider.OPENAI
+        val choice = enumValues<ComposerProviderChoice>().firstOrNull { it.name == this.providerChoice }
+            ?: providerToChoice(provider)
+        val compareProviderValue = compareProvider?.let { candidate ->
+            enumValues<LlmProvider>().firstOrNull { it.name == candidate } ?: LlmProvider.OPENAI
+        }
+        return ChatMessage(
+            id = id,
+            prompt = prompt,
+            response = response,
+            createdTimestamp = createdTimestamp,
+            providerChoice = choice,
+            provenance = MessageProvenance(
+                provider = provider,
+                model = model.ifBlank { provider.defaultModel() },
+                toolCalls = toolCalls,
+                latencyMs = latencyMs,
+                promptTokens = promptTokens,
+                completionTokens = completionTokens,
+                totalTokens = totalTokens
+            ),
+            compareCandidate = if (compareProviderValue != null && !compareResponse.isNullOrBlank()) {
+                CompareCandidate(
+                    provider = compareProviderValue,
+                    model = compareModel.orEmpty(),
+                    response = compareResponse,
+                    latencyMs = compareLatencyMs,
+                    totalTokens = compareTotalTokens
+                )
+            } else {
+                null
+            }
+        )
+    }
+
+    private fun ChatMessage.toPersistedMessage(): PersistedChatMessage {
+        return PersistedChatMessage(
+            id = id,
+            prompt = prompt,
+            response = response,
+            createdTimestamp = createdTimestamp,
+            providerChoice = providerChoice.name,
+            provider = provenance.provider.name,
+            model = provenance.model,
+            toolCalls = provenance.toolCalls,
+            latencyMs = provenance.latencyMs,
+            promptTokens = provenance.promptTokens,
+            completionTokens = provenance.completionTokens,
+            totalTokens = provenance.totalTokens,
+            compareProvider = compareCandidate?.provider?.name,
+            compareModel = compareCandidate?.model,
+            compareResponse = compareCandidate?.response,
+            compareLatencyMs = compareCandidate?.latencyMs,
+            compareTotalTokens = compareCandidate?.totalTokens
+        )
     }
 
     private fun refreshAudit() {
