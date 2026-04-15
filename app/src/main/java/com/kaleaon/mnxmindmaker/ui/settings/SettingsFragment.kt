@@ -41,8 +41,12 @@ import com.kaleaon.mnxmindmaker.util.provider.PreflightDiagnosticsResult
 import com.kaleaon.mnxmindmaker.util.provider.ProviderPreflightDiagnostics
 import com.kaleaon.mnxmindmaker.util.provider.ValidationIssue
 import com.kaleaon.mnxmindmaker.util.provider.ValidationSeverity
+import com.kaleaon.mnxmindmaker.util.provider.runtime.LocalRuntimeConnectionReport
+import com.kaleaon.mnxmindmaker.util.provider.runtime.LocalRuntimeCoordinator
+import com.kaleaon.mnxmindmaker.util.provider.runtime.LocalRuntimeState
 import com.kaleaon.mnxmindmaker.util.provider.validate
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import com.kaleaon.mnxmindmaker.util.provider.ProviderSettingsValidator
@@ -59,6 +63,7 @@ class SettingsFragment : Fragment() {
     private lateinit var authRepository: AuthRepository
     private lateinit var externalAccountRepository: ExternalAccountRepository
     private lateinit var modelManager: ModelManager
+    private lateinit var localRuntimeCoordinator: LocalRuntimeCoordinator
     private var currentProvider: LlmProvider = LlmProvider.ANTHROPIC
     private var currentSettings: MutableList<LlmSettings> = mutableListOf()
 
@@ -74,7 +79,9 @@ class SettingsFragment : Fragment() {
         authRepository = AuthRepository(requireContext())
         externalAccountRepository = ExternalAccountRepository(requireContext())
         modelManager = ModelManager(requireContext())
+        localRuntimeCoordinator = LocalRuntimeCoordinator(scope = viewLifecycleOwner.lifecycleScope)
         currentSettings = repository.loadAllSettings().toMutableList()
+        observeLocalRuntimeState()
 
         binding.btnOpenDeploy.setOnClickListener {
             findNavController().navigate(R.id.action_settingsFragment_to_deployFragment)
@@ -557,10 +564,33 @@ class SettingsFragment : Fragment() {
 
         binding.tvPreflightResult.text = getString(R.string.preflight_running)
         lifecycleScope.launch {
-            val result = withContext(Dispatchers.IO) {
-                ProviderPreflightDiagnostics.run(draft)
+            if (draft.provider.runtime == LlmRuntime.LOCAL_ON_DEVICE) {
+                val report = localRuntimeCoordinator.runConnectionTest(draft, privacyMode)
+                if (report.state is LocalRuntimeState.Healthy) {
+                    localRuntimeCoordinator.beginMonitoring(draft, privacyMode)
+                }
+                binding.tvPreflightResult.text = renderLocalRuntimeConnectionReport(report, issues)
+            } else {
+                val result = withContext(Dispatchers.IO) {
+                    ProviderPreflightDiagnostics.run(draft)
+                }
+                binding.tvPreflightResult.text = renderPreflightResult(result, issues)
             }
-            binding.tvPreflightResult.text = renderPreflightResult(result, issues)
+        }
+    }
+
+    private fun observeLocalRuntimeState() {
+        viewLifecycleOwner.lifecycleScope.launch {
+            localRuntimeCoordinator.state.collectLatest { state ->
+                if (currentProvider.runtime != LlmRuntime.LOCAL_ON_DEVICE) return@collectLatest
+                val header = when (state) {
+                    is LocalRuntimeState.Initializing -> "Runtime state: Initializing"
+                    is LocalRuntimeState.Healthy -> "Runtime state: Healthy"
+                    is LocalRuntimeState.Degraded -> "Runtime state: Degraded"
+                    is LocalRuntimeState.Unreachable -> "Runtime state: Unreachable"
+                }
+                binding.tvPreflightResult.text = "$header\n${state.diagnostic.toUserMessage()}"
+            }
         }
     }
 
@@ -671,6 +701,20 @@ class SettingsFragment : Fragment() {
             "Status: $reachability (${result.statusCode ?: "n/a"})\n" +
             "Latency: ${result.latencyMs}ms\n" +
             "Detail: ${result.detail}"
+    }
+
+    private fun renderLocalRuntimeConnectionReport(
+        report: LocalRuntimeConnectionReport,
+        issues: List<ValidationIssue>
+    ): String {
+        val base = renderPreflightResult(report.preflight, issues)
+        val phase = when (report.state) {
+            is LocalRuntimeState.Initializing -> "Initializing"
+            is LocalRuntimeState.Healthy -> "Healthy"
+            is LocalRuntimeState.Degraded -> "Degraded"
+            is LocalRuntimeState.Unreachable -> "Unreachable"
+        }
+        return "$base\nLifecycle phase: $phase\n${report.state.diagnostic.toUserMessage()}"
     }
 
     override fun onDestroyView() {
