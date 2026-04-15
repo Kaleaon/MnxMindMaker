@@ -21,8 +21,15 @@ import com.kaleaon.mnxmindmaker.util.DimensionMapper
 import com.kaleaon.mnxmindmaker.util.tooling.ToolApprovalRequest
 import com.kaleaon.mnxmindmaker.util.LlmApiClient
 import com.kaleaon.mnxmindmaker.util.LlmApiException
+import com.kaleaon.mnxmindmaker.util.provider.runtime.LocalRuntimeCoordinator
+import com.kaleaon.mnxmindmaker.util.provider.runtime.LocalRuntimeState
+import com.kaleaon.mnxmindmaker.util.provider.runtime.RuntimeDiagnostic
 import com.kaleaon.mnxmindmaker.util.run_continuity_audit
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -36,6 +43,7 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
     private val llmRepository = LlmSettingsRepository(application)
     private val continuityManager = ContinuityManager(application)
     private val llmClient = LlmApiClient()
+    private val localRuntimeCoordinator = LocalRuntimeCoordinator(scope = viewModelScope)
 
     private val _graph = MutableLiveData(newDefaultGraph())
     val graph: LiveData<MindGraph> get() = _graph
@@ -51,6 +59,16 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
 
     private val _llmStatusBadge = MutableLiveData("REMOTE")
     val llmStatusBadge: LiveData<String> get() = _llmStatusBadge
+    private val _localRuntimeState = MutableStateFlow<LocalRuntimeState>(
+        LocalRuntimeState.Unreachable(
+            RuntimeDiagnostic(
+                summary = "Local runtime not ready",
+                detail = "No local runtime startup has run.",
+                suggestion = "Open Settings and run local runtime preflight."
+            )
+        )
+    )
+    val localRuntimeState: StateFlow<LocalRuntimeState> get() = _localRuntimeState.asStateFlow()
 
     private val _snapshotTimeline = MutableLiveData<List<ContinuityManager.SnapshotRecord>>(emptyList())
     val snapshotTimeline: LiveData<List<ContinuityManager.SnapshotRecord>> get() = _snapshotTimeline
@@ -89,6 +107,12 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
     init {
         refreshAudit()
         refreshSnapshotTimeline()
+        syncLocalRuntimeMonitoring()
+        viewModelScope.launch {
+            localRuntimeCoordinator.state.collect { state ->
+                _localRuntimeState.value = state
+            }
+        }
     }
 
     fun addNode(label: String, type: NodeType, description: String = "") {
@@ -364,14 +388,22 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
         choice: ComposerProviderChoice,
         forcedProvider: LlmProvider? = null
     ): ChatMessage? {
-        val chain = when {
+        syncLocalRuntimeMonitoring()
+        val rawChain = when {
             forcedProvider != null -> listOfNotNull(loadUsableSettings(forcedProvider))
             choice == ComposerProviderChoice.AUTO -> llmRepository.getInvocationChain()
             else -> listOfNotNull(loadUsableSettings(choice.toProvider()))
         }
+        val chain = rawChain.filter { isProviderReady(it, choice) }
 
         if (chain.isEmpty()) {
-            _error.postValue("No usable LLM configured. Add a provider in Settings.")
+            val localState = localRuntimeState.value
+            val reason = if (choice == ComposerProviderChoice.LOCAL || forcedProvider == LlmProvider.LOCAL_ON_DEVICE) {
+                "Local runtime is not ready. ${localState.diagnostic.toUserMessage()}"
+            } else {
+                "No usable LLM configured. Add a provider in Settings."
+            }
+            _error.postValue(reason)
             return null
         }
 
@@ -430,6 +462,36 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
     private fun loadUsableSettings(provider: LlmProvider): LlmSettings? {
         val settings = llmRepository.loadSettings(provider)
         return settings.takeIf { it.enabled && isUsable(it) }
+    }
+
+    private fun syncLocalRuntimeMonitoring() {
+        val localSettings = llmRepository.loadSettings(LlmProvider.LOCAL_ON_DEVICE)
+        if (localSettings.enabled && isUsable(localSettings)) {
+            localRuntimeCoordinator.beginMonitoring(localSettings, llmRepository.loadPrivacyMode())
+        } else {
+            localRuntimeCoordinator.stopMonitoring(
+                RuntimeDiagnostic(
+                    summary = "Local runtime unavailable",
+                    detail = "Local On-Device provider is disabled or invalid.",
+                    suggestion = "Enable Local On-Device provider and set model path."
+                )
+            )
+        }
+    }
+
+    private fun isProviderReady(settings: LlmSettings, choice: ComposerProviderChoice): Boolean {
+        if (settings.provider.runtime != LlmRuntime.LOCAL_ON_DEVICE) return true
+        return when (val state = localRuntimeState.value) {
+            is LocalRuntimeState.Healthy -> true
+            is LocalRuntimeState.Initializing,
+            is LocalRuntimeState.Degraded,
+            is LocalRuntimeState.Unreachable -> {
+                if (choice == ComposerProviderChoice.LOCAL) {
+                    _error.postValue("Local runtime blocked request. ${state.diagnostic.toUserMessage()}")
+                }
+                false
+            }
+        }
     }
 
     private fun loadAllUsableSettings(): List<LlmSettings> {
