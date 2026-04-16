@@ -8,8 +8,19 @@ import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.sqrt
 
 class MemoryManager(
-    private val storage: MemoryStorage = InMemoryMemoryStorage()
+    private val storage: MemoryStorage = InMemoryMemoryStorage(),
+    private val persistenceStore: MemoryPersistenceStore = NoOpMemoryPersistenceStore,
+    private val expiryTelemetry: MemoryExpiryTelemetry = StdoutMemoryExpiryTelemetry
 ) {
+
+    constructor(
+        persistenceStore: MemoryPersistenceStore,
+        expiryTelemetry: MemoryExpiryTelemetry = StdoutMemoryExpiryTelemetry
+    ) : this(
+        storage = InMemoryMemoryStorage(),
+        persistenceStore = persistenceStore,
+        expiryTelemetry = expiryTelemetry
+    )
 
     enum class MemoryPolicyMode {
         OFF,
@@ -23,13 +34,33 @@ class MemoryManager(
         PROFILE
     }
 
+    data class MemoryMaintenancePolicy(
+        val enabled: Boolean = true,
+        val cleanupIntervalMs: Long = 6L * 60 * 60 * 1000,
+        val archiveDormantAfterMs: Map<MemoryCategory, Long> = mapOf(
+            MemoryCategory.SESSION to 3L * 24 * 60 * 60 * 1000,
+            MemoryCategory.SEMANTIC to 120L * 24 * 60 * 60 * 1000,
+            MemoryCategory.PROFILE to 180L * 24 * 60 * 60 * 1000
+        ),
+        val retentionCountByCategory: Map<MemoryCategory, Int> = mapOf(
+            MemoryCategory.SESSION to 500,
+            MemoryCategory.SEMANTIC to 5_000,
+            MemoryCategory.PROFILE to 500
+        ),
+        val deleteArchivedAfterMs: Long = 365L * 24 * 60 * 60 * 1000,
+        val sessionCompactionEnabled: Boolean = true,
+        val sessionCompactionMinAgeMs: Long = 12L * 60 * 60 * 1000,
+        val maxCompactedSessionChars: Int = 4_000
+    )
+
     data class MemoryPolicySettings(
         val mode: MemoryPolicyMode = MemoryPolicyMode.SESSION_ONLY,
         val expiryByCategoryMs: Map<MemoryCategory, Long> = mapOf(
             MemoryCategory.SESSION to 12 * 60 * 60 * 1000L,
             MemoryCategory.SEMANTIC to 180L * 24 * 60 * 60 * 1000,
             MemoryCategory.PROFILE to 365L * 24 * 60 * 60 * 1000
-        )
+        ),
+        val maintenancePolicy: MemoryMaintenancePolicy = MemoryMaintenancePolicy()
     )
 
     data class SessionTurn(
@@ -42,6 +73,28 @@ class MemoryManager(
         val source: String = role,
         val timestampMs: Long = System.currentTimeMillis(),
         val sensitivity: String = "low"
+    )
+
+    data class ArchivedMemoryRecord(
+        val id: String,
+        val category: MemoryCategory,
+        val payload: MindNode,
+        val archivedAtMs: Long,
+        val reason: String
+    )
+
+    data class ColdStorageExport(
+        val exportedAtMs: Long,
+        val records: List<ArchivedMemoryRecord>,
+        val lineDelimitedJson: String
+    )
+
+    data class MaintenanceReport(
+        val runAtMs: Long,
+        val purgedByExpiry: Map<MemoryCategory, Int>,
+        val archivedByCategory: Map<MemoryCategory, Int>,
+        val compactedSessionTurns: Int,
+        val deletedArchivedCount: Int
     )
 
     interface MemoryPersistenceStore {
@@ -69,7 +122,9 @@ class MemoryManager(
     data class PersistedMemorySnapshot(
         val sessionTurns: List<SessionTurn> = emptyList(),
         val profileMemories: List<MindNode> = emptyList(),
-        val semanticMemories: List<MindNode> = emptyList()
+        val semanticMemories: List<MindNode> = emptyList(),
+        val archivedMemories: List<ArchivedMemoryRecord> = emptyList(),
+        val lastMaintenanceRunMs: Long? = null
     )
 
     interface MemoryStorage {
@@ -80,26 +135,17 @@ class MemoryManager(
     private val sessionTurns = mutableListOf<SessionTurn>()
     private val profileMemories = ConcurrentHashMap<String, MindNode>()
     private val semanticIndex = SemanticMemoryVectorIndex()
+    private val archivedMemories = ConcurrentHashMap<String, ArchivedMemoryRecord>()
     private val expiryPurgeCounters = ConcurrentHashMap<MemoryCategory, Int>()
-    private val persistenceStore: MemoryPersistenceStore
-    private val expiryTelemetry: MemoryExpiryTelemetry
 
     @Volatile
     private var policySettings: MemoryPolicySettings = MemoryPolicySettings()
 
-    constructor() : this(
-        persistenceStore = NoOpMemoryPersistenceStore,
-        expiryTelemetry = StdoutMemoryExpiryTelemetry
-    )
+    @Volatile
+    private var lastMaintenanceRunMs: Long? = null
 
-    constructor(
-        persistenceStore: MemoryPersistenceStore,
-        expiryTelemetry: MemoryExpiryTelemetry = StdoutMemoryExpiryTelemetry
-    ) {
-        this.persistenceStore = persistenceStore
-        this.expiryTelemetry = expiryTelemetry
-        MemoryCategory.entries.forEach { expiryPurgeCounters[it] = 0 }
     init {
+        MemoryCategory.entries.forEach { expiryPurgeCounters[it] = 0 }
         restoreFromStorage()
     }
 
@@ -121,7 +167,6 @@ class MemoryManager(
         if (policySettings.mode != MemoryPolicyMode.PERSISTENT) return
         val seedRoute = MemoryRouting.inferRoute(prompt = node.label, task = node.description)
         semanticIndex.upsert(MemoryRouting.applyCanonicalRoute(node, seedRoute))
-        semanticIndex.upsert(node)
         persistAndRefresh()
     }
 
@@ -143,7 +188,9 @@ class MemoryManager(
                 "preference_key" to key,
                 "sensitivity" to sensitivity,
                 "timestamp" to timestampMs.toString(),
-                "current_relevance" to "0.85"
+                "last_accessed_timestamp" to timestampMs.toString(),
+                "current_relevance" to "0.85",
+                "memory_category" to MemoryCategory.PROFILE.name.lowercase()
             ).apply {
                 put(MemoryRouting.KEY_MEMORY_WING, "self")
                 put(MemoryRouting.KEY_MEMORY_HALL, "preferences")
@@ -172,17 +219,19 @@ class MemoryManager(
     fun deleteMemory(memoryId: String): Boolean {
         val semanticRemoved = semanticIndex.delete(memoryId)
         val profileRemoved = profileMemories.remove(memoryId) != null
-        if (semanticRemoved || profileRemoved) {
+        val archivedRemoved = archivedMemories.remove(memoryId) != null
+        if (semanticRemoved || profileRemoved || archivedRemoved) {
             persistAndRefresh()
         }
-        return semanticRemoved || profileRemoved
+        return semanticRemoved || profileRemoved || archivedRemoved
     }
 
     fun getMemory(memoryId: String): MindNode? =
-        semanticIndex.get(memoryId) ?: profileMemories[memoryId]
+        semanticIndex.get(memoryId) ?: profileMemories[memoryId] ?: archivedMemories[memoryId]?.payload
 
-    fun searchMemories(query: String, limit: Int): List<MindNode> {
+    fun searchMemories(query: String, limit: Int, nowEpochMs: Long = System.currentTimeMillis()): List<MindNode> {
         if (query.isBlank() || limit <= 0) return emptyList()
+        runScheduledCleanup(nowEpochMs)
         val sessionNodes = sessionTurns.map { it.toMindNode() }
         val profileNodes = profileMemories.values.toList()
         val semanticNodes = if (policySettings.mode == MemoryPolicyMode.PERSISTENT) {
@@ -193,7 +242,7 @@ class MemoryManager(
         val all = sessionNodes + profileNodes + semanticNodes
         return MemoryRetrievalService.retrieveWithSuggestions(
             memories = all,
-            context = MemoryRetrievalService.RetrievalContext(prompt = query, task = "memory_search"),
+            context = MemoryRetrievalService.RetrievalContext(prompt = query, task = "memory_search", nowEpochMs = nowEpochMs),
             limit = limit,
             filters = MemoryRetrievalService.RetrievalFilters(
                 minRelevance = 0f,
@@ -209,13 +258,15 @@ class MemoryManager(
     }
 
     fun status(nowEpochMs: Long = System.currentTimeMillis()): MemoryStatus {
-        purgeExpired(nowEpochMs)
+        runScheduledCleanup(nowEpochMs)
         return MemoryStatus(
             mode = policySettings.mode,
             sessionTurnCount = sessionTurns.size,
             profileMemoryCount = profileMemories.size,
             semanticMemoryCount = semanticIndex.size(),
-            expiryByCategoryMs = policySettings.expiryByCategoryMs
+            archivedMemoryCount = archivedMemories.size,
+            expiryByCategoryMs = policySettings.expiryByCategoryMs,
+            lastMaintenanceRunMs = lastMaintenanceRunMs
         )
     }
 
@@ -224,15 +275,17 @@ class MemoryManager(
         val sessionTurnCount: Int,
         val profileMemoryCount: Int,
         val semanticMemoryCount: Int,
-        val expiryByCategoryMs: Map<MemoryCategory, Long>
+        val archivedMemoryCount: Int,
+        val expiryByCategoryMs: Map<MemoryCategory, Long>,
+        val lastMaintenanceRunMs: Long?
     )
 
-    fun clearSession() {
     fun clearSession(clearAllCategories: Boolean = false) {
         sessionTurns.clear()
         if (clearAllCategories) {
             profileMemories.clear()
             semanticIndex.clearAll()
+            archivedMemories.clear()
         }
         persistAndRefresh()
     }
@@ -243,7 +296,7 @@ class MemoryManager(
         limit: Int,
         nowEpochMs: Long = System.currentTimeMillis()
     ): List<MindNode> {
-        purgeExpired(nowEpochMs)
+        runScheduledCleanup(nowEpochMs)
         if (policySettings.mode == MemoryPolicyMode.OFF || limit <= 0) return emptyList()
 
         val context = MemoryRetrievalService.RetrievalContext(prompt = prompt, task = task, nowEpochMs = nowEpochMs)
@@ -266,15 +319,87 @@ class MemoryManager(
         val routedCandidates = rawCandidates.map { MemoryRouting.applyCanonicalRoute(it, route) }
         val tiered = MemoryRouting.tierCandidates(routedCandidates, route)
 
-        return MemoryRetrievalService.retrieveForPromptInjectionWithSuggestions(
+        val result = MemoryRetrievalService.retrieveForPromptInjectionWithSuggestions(
             memories = tiered.flattened(),
             context = context,
             limit = limit
         ).memories
+        touchLastAccess(result, nowEpochMs)
+        return result
     }
 
-    private fun purgeExpired(nowEpochMs: Long) {
+    fun runScheduledCleanup(nowEpochMs: Long = System.currentTimeMillis()): MaintenanceReport? {
+        val maintenancePolicy = policySettings.maintenancePolicy
+        if (!maintenancePolicy.enabled) return null
+        val shouldRun = lastMaintenanceRunMs == null ||
+            nowEpochMs - (lastMaintenanceRunMs ?: 0L) >= maintenancePolicy.cleanupIntervalMs
+        if (!shouldRun) return null
+        val report = runMaintenance(nowEpochMs)
+        lastMaintenanceRunMs = nowEpochMs
+        persistAndRefresh()
+        return report
+    }
+
+    fun runMaintenance(nowEpochMs: Long = System.currentTimeMillis()): MaintenanceReport {
+        val purgedByExpiry = purgeExpired(nowEpochMs)
+        val archivedByCategory = archiveDormantAndOverRetention(nowEpochMs)
+        val compacted = compactSessionTurns(nowEpochMs)
+        val deletedArchived = deleteExpiredArchived(nowEpochMs)
+        return MaintenanceReport(
+            runAtMs = nowEpochMs,
+            purgedByExpiry = purgedByExpiry,
+            archivedByCategory = archivedByCategory,
+            compactedSessionTurns = compacted,
+            deletedArchivedCount = deletedArchived
+        )
+    }
+
+    fun exportDormantMemoriesToColdStorage(
+        nowEpochMs: Long = System.currentTimeMillis(),
+        maxRecords: Int = 500
+    ): ColdStorageExport {
+        runScheduledCleanup(nowEpochMs)
+        val records = archivedMemories.values
+            .sortedBy { it.archivedAtMs }
+            .take(maxRecords)
+
+        val jsonLines = records.joinToString("\n") { record ->
+            val escapedLabel = record.payload.label.replace("\"", "\\\"")
+            val escapedDescription = record.payload.description.replace("\"", "\\\"")
+            "{" +
+                "\"id\":\"${record.id}\"," +
+                "\"category\":\"${record.category.name.lowercase()}\"," +
+                "\"archived_at_ms\":${record.archivedAtMs}," +
+                "\"reason\":\"${record.reason}\"," +
+                "\"label\":\"$escapedLabel\"," +
+                "\"description\":\"$escapedDescription\"" +
+                "}"
+        }
+
+        return ColdStorageExport(
+            exportedAtMs = nowEpochMs,
+            records = records,
+            lineDelimitedJson = jsonLines
+        )
+    }
+
+    private fun touchLastAccess(memories: List<MindNode>, nowEpochMs: Long) {
+        memories.forEach { memory ->
+            val updated = memory.copy(attributes = memory.attributes.toMutableMap().apply {
+                put("last_accessed_timestamp", nowEpochMs.toString())
+            })
+            if (semanticIndex.get(memory.id) != null) {
+                semanticIndex.upsert(updated)
+            } else if (profileMemories.containsKey(memory.id)) {
+                profileMemories[memory.id] = updated
+            }
+        }
+    }
+
+    private fun purgeExpired(nowEpochMs: Long): Map<MemoryCategory, Int> {
         val expiryMap = policySettings.expiryByCategoryMs
+        val removed = mutableMapOf<MemoryCategory, Int>()
+
         purgeExpiredByCategory(MemoryCategory.SESSION, expiryMap[MemoryCategory.SESSION]) { maxAgeMs ->
             PurgeSelection(
                 expiredIds = sessionTurns
@@ -284,6 +409,7 @@ class MemoryManager(
             )
         }?.let { expiredIds ->
             sessionTurns.removeAll { it.id in expiredIds.toSet() }
+            removed[MemoryCategory.SESSION] = expiredIds.size
         }
 
         purgeExpiredByCategory(MemoryCategory.PROFILE, expiryMap[MemoryCategory.PROFILE]) { maxAgeMs ->
@@ -293,6 +419,7 @@ class MemoryManager(
             )
         }?.let { expiredIds ->
             expiredIds.forEach { profileMemories.remove(it) }
+            removed[MemoryCategory.PROFILE] = expiredIds.size
         }
 
         purgeExpiredByCategory(MemoryCategory.SEMANTIC, expiryMap[MemoryCategory.SEMANTIC]) { maxAgeMs ->
@@ -302,13 +429,10 @@ class MemoryManager(
             )
         }?.let { expiredIds ->
             semanticIndex.deleteMany(expiredIds)
-        var shouldPersist = false
-
-        val sessionExpiry = expiryMap[MemoryCategory.SESSION]
-        if (sessionExpiry != null) {
-            val removed = sessionTurns.removeAll { nowEpochMs - it.timestampMs > sessionExpiry }
-            if (removed) shouldPersist = true
+            removed[MemoryCategory.SEMANTIC] = expiredIds.size
         }
+
+        return removed
     }
 
     private fun purgeExpiredByCategory(
@@ -318,17 +442,6 @@ class MemoryManager(
     ): List<String>? {
         if (maxAgeMs == null) return null
         val selection = selectExpired(maxAgeMs)
-        if (selection.expiredIds.isEmpty()) {
-            expiryTelemetry.onExpiredRemoved(category, 0, selection.malformedTimestampCount)
-            return emptyList()
-        val profileExpiry = expiryMap[MemoryCategory.PROFILE]
-        if (profileExpiry != null) {
-            val toRemove = profileMemories.values
-                .filter { nowEpochMs - (it.attributes["timestamp"]?.toLongOrNull() ?: nowEpochMs) > profileExpiry }
-                .map { it.id }
-            toRemove.forEach { profileMemories.remove(it) }
-            if (toRemove.isNotEmpty()) shouldPersist = true
-        }
         persistenceStore.deleteExpired(category, selection.expiredIds)
         expiryPurgeCounters.compute(category) { _, count -> (count ?: 0) + selection.expiredIds.size }
         expiryTelemetry.onExpiredRemoved(category, selection.expiredIds.size, selection.malformedTimestampCount)
@@ -345,15 +458,147 @@ class MemoryManager(
         return PurgeSelection(expiredIds = expiredIds, malformedTimestampCount = malformedTimestampCount)
     }
 
-    private fun parseTimestamp(rawTimestamp: String?): Long? {
-        return rawTimestamp?.toLongOrNull()
-        val semanticPurged = semanticIndex.purgeExpired(nowEpochMs, expiryMap[MemoryCategory.SEMANTIC])
-        if (semanticPurged) shouldPersist = true
+    private fun parseTimestamp(rawTimestamp: String?): Long? = rawTimestamp?.toLongOrNull()
 
-        if (shouldPersist) {
-            persistAndRefresh()
-        }
+    private fun archiveDormantAndOverRetention(nowEpochMs: Long): Map<MemoryCategory, Int> {
+        val policy = policySettings.maintenancePolicy
+        val archivedCounts = mutableMapOf<MemoryCategory, Int>()
+
+        val archivedSession = archiveSessionTurns(nowEpochMs, policy)
+        if (archivedSession > 0) archivedCounts[MemoryCategory.SESSION] = archivedSession
+
+        val archivedProfile = archiveMindNodeCategory(
+            category = MemoryCategory.PROFILE,
+            nowEpochMs = nowEpochMs,
+            nodes = profileMemories.values.toList(),
+            remove = { id -> profileMemories.remove(id) },
+            policy = policy
+        )
+        if (archivedProfile > 0) archivedCounts[MemoryCategory.PROFILE] = archivedProfile
+
+        val archivedSemantic = archiveMindNodeCategory(
+            category = MemoryCategory.SEMANTIC,
+            nowEpochMs = nowEpochMs,
+            nodes = semanticIndex.memories().toList(),
+            remove = { id -> semanticIndex.delete(id) },
+            policy = policy
+        )
+        if (archivedSemantic > 0) archivedCounts[MemoryCategory.SEMANTIC] = archivedSemantic
+
+        return archivedCounts
     }
+
+    private fun archiveSessionTurns(nowEpochMs: Long, policy: MemoryMaintenancePolicy): Int {
+        val maxCount = policy.retentionCountByCategory[MemoryCategory.SESSION] ?: Int.MAX_VALUE
+        val dormantAfterMs = policy.archiveDormantAfterMs[MemoryCategory.SESSION] ?: Long.MAX_VALUE
+
+        val sortedByAge = sessionTurns.sortedBy { it.timestampMs }
+        val overflow = (sortedByAge.size - maxCount).coerceAtLeast(0)
+        val byRetention = sortedByAge.take(overflow).map { it.id }.toSet()
+        val byDormancy = sortedByAge.filter { nowEpochMs - it.timestampMs > dormantAfterMs }.map { it.id }.toSet()
+        val toArchive = byRetention + byDormancy
+
+        if (toArchive.isEmpty()) return 0
+
+        val archiveRecords = sessionTurns
+            .filter { it.id in toArchive }
+            .map { turn ->
+                ArchivedMemoryRecord(
+                    id = turn.id,
+                    category = MemoryCategory.SESSION,
+                    payload = turn.toMindNode(),
+                    archivedAtMs = nowEpochMs,
+                    reason = if (turn.id in byRetention) "retention_limit" else "dormant"
+                )
+            }
+        archiveRecords.forEach { archivedMemories[it.id] = it }
+        sessionTurns.removeAll { it.id in toArchive }
+        return archiveRecords.size
+    }
+
+    private fun archiveMindNodeCategory(
+        category: MemoryCategory,
+        nowEpochMs: Long,
+        nodes: List<MindNode>,
+        remove: (String) -> Unit,
+        policy: MemoryMaintenancePolicy
+    ): Int {
+        val maxCount = policy.retentionCountByCategory[category] ?: Int.MAX_VALUE
+        val dormantAfterMs = policy.archiveDormantAfterMs[category] ?: Long.MAX_VALUE
+        val sortedByAge = nodes.sortedBy { resolveMemoryTimestamp(it) }
+
+        val overflow = (sortedByAge.size - maxCount).coerceAtLeast(0)
+        val byRetention = sortedByAge.take(overflow).map { it.id }.toSet()
+        val byDormancy = sortedByAge
+            .filter { node -> nowEpochMs - resolveLastTouchedTimestamp(node) > dormantAfterMs }
+            .map { it.id }
+            .toSet()
+
+        val toArchive = byRetention + byDormancy
+        if (toArchive.isEmpty()) return 0
+
+        sortedByAge.filter { it.id in toArchive }.forEach { node ->
+            archivedMemories[node.id] = ArchivedMemoryRecord(
+                id = node.id,
+                category = category,
+                payload = node,
+                archivedAtMs = nowEpochMs,
+                reason = if (node.id in byRetention) "retention_limit" else "dormant"
+            )
+            remove(node.id)
+        }
+        return toArchive.size
+    }
+
+    private fun compactSessionTurns(nowEpochMs: Long): Int {
+        val maintenance = policySettings.maintenancePolicy
+        if (!maintenance.sessionCompactionEnabled) return 0
+        val oldTurns = sessionTurns.filter { nowEpochMs - it.timestampMs >= maintenance.sessionCompactionMinAgeMs }
+        if (oldTurns.size < 3) return 0
+
+        val grouped = oldTurns.groupBy { "${it.conversationId.orEmpty()}::${it.role}" }
+        var compactedOut = 0
+        grouped.values.forEach { group ->
+            if (group.size < 3) return@forEach
+            val sorted = group.sortedBy { it.timestampMs }
+            val summaryText = sorted.joinToString("\n") { "[${it.role}] ${it.content}" }
+                .take(maintenance.maxCompactedSessionChars)
+            val first = sorted.first()
+            val compactedTurn = SessionTurn(
+                role = "system",
+                source = "maintenance_compaction",
+                content = "Compacted ${sorted.size} turns:\n$summaryText",
+                conversationId = first.conversationId,
+                turnIndex = first.turnIndex,
+                chunkSpan = "compacted",
+                timestampMs = first.timestampMs,
+                sensitivity = "low"
+            )
+            sessionTurns.removeAll { it.id in sorted.map { turn -> turn.id }.toSet() }
+            sessionTurns.add(compactedTurn)
+            compactedOut += (sorted.size - 1)
+        }
+        return compactedOut
+    }
+
+    private fun deleteExpiredArchived(nowEpochMs: Long): Int {
+        val maxArchivedAge = policySettings.maintenancePolicy.deleteArchivedAfterMs
+        if (maxArchivedAge <= 0) return 0
+        val toDelete = archivedMemories.values
+            .filter { nowEpochMs - it.archivedAtMs >= maxArchivedAge }
+            .map { it.id }
+
+        toDelete.forEach { archivedMemories.remove(it) }
+        return toDelete.size
+    }
+
+    private fun resolveMemoryTimestamp(node: MindNode): Long =
+        node.attributes["timestamp"]?.toLongOrNull() ?: Long.MAX_VALUE
+
+    private fun resolveLastTouchedTimestamp(node: MindNode): Long =
+        node.attributes["last_accessed_timestamp"]?.toLongOrNull()
+            ?: node.attributes["timestamp"]?.toLongOrNull()
+            ?: Long.MAX_VALUE
 
     private fun restoreFromStorage() {
         val snapshot = storage.loadSnapshot()
@@ -362,6 +607,9 @@ class MemoryManager(
         profileMemories.clear()
         snapshot.profileMemories.forEach { profileMemories[it.id] = it }
         semanticIndex.replaceAll(snapshot.semanticMemories)
+        archivedMemories.clear()
+        snapshot.archivedMemories.forEach { archivedMemories[it.id] = it }
+        lastMaintenanceRunMs = snapshot.lastMaintenanceRunMs
     }
 
     private fun persistSnapshot() {
@@ -369,7 +617,9 @@ class MemoryManager(
             PersistedMemorySnapshot(
                 sessionTurns = sessionTurns.toList(),
                 profileMemories = profileMemories.values.toList(),
-                semanticMemories = semanticIndex.allMemories()
+                semanticMemories = semanticIndex.allMemories(),
+                archivedMemories = archivedMemories.values.toList(),
+                lastMaintenanceRunMs = lastMaintenanceRunMs
             )
         )
     }
@@ -432,6 +682,13 @@ private class SemanticMemoryVectorIndex {
         return removed
     }
 
+    fun deleteMany(ids: List<String>) {
+        ids.forEach {
+            memories.remove(it)
+            vectors.remove(it)
+        }
+    }
+
     fun clearAll() {
         memories.clear()
         vectors.clear()
@@ -468,22 +725,6 @@ private class SemanticMemoryVectorIndex {
     }
 
     fun memories(): Collection<MindNode> = memories.values.toList()
-    fun purgeExpired(nowEpochMs: Long, maxAgeMs: Long?): Boolean {
-        if (maxAgeMs == null) return false
-        val expiredIds = memories.values
-            .filter { memory ->
-                val ts = memory.attributes["timestamp"]?.toLongOrNull() ?: nowEpochMs
-                nowEpochMs - ts > maxAgeMs
-            }
-            .map { it.id }
-
-    fun deleteMany(ids: List<String>) {
-        ids.forEach {
-            memories.remove(it)
-            vectors.remove(it)
-        }
-        return expiredIds.isNotEmpty()
-    }
 
     fun size(): Int = memories.size
 

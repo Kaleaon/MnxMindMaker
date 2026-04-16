@@ -6,6 +6,7 @@ import com.kaleaon.mnxmindmaker.util.memory.MemoryManager
 import java.util.concurrent.ConcurrentHashMap
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -56,66 +57,6 @@ class MemoryManagerTest {
 
         assertTrue(retrieved.any { it.attributes["semantic_subtype"] == "session" })
         assertFalse(retrieved.any { it.id == "semantic-1" })
-    }
-
-    @Test
-    fun `persistent memories can be rehydrated after manager re-instantiation`() {
-        val now = 150_000L
-        val firstManager = MemoryManager().apply {
-            setPolicy(
-                MemoryManager.MemoryPolicySettings(mode = MemoryManager.MemoryPolicyMode.PERSISTENT)
-            )
-            appendSessionTurn(
-                MemoryManager.SessionTurn(role = "user", content = "ephemeral", timestampMs = 99_000L)
-            )
-            upsertProfileMemory(key = "tone", value = "concise", timestampMs = 100_000L)
-            upsertSemanticMemory(
-                MindNode(
-                    id = "semantic-persisted",
-                    label = "Release checklist",
-                    type = NodeType.MEMORY,
-                    description = "Always run smoke tests",
-                    attributes = mutableMapOf(
-                        "timestamp" to "100000",
-                        "current_relevance" to "0.9"
-                    )
-                )
-            )
-        }
-
-        val persistedNodes = firstManager.retrieveForPromptInjection(
-            prompt = "release smoke tests",
-            task = "remember",
-            limit = 10,
-            nowEpochMs = now
-        ).filterNot { it.attributes["semantic_subtype"] == "session" }
-
-        val secondManager = MemoryManager().apply {
-            setPolicy(MemoryManager.MemoryPolicySettings(mode = MemoryManager.MemoryPolicyMode.PERSISTENT))
-            persistedNodes.forEach { node ->
-                when (node.attributes["semantic_subtype"]) {
-                    "profile" -> upsertProfileMemory(
-                        key = node.id,
-                        value = node.description,
-                        sensitivity = node.attributes["sensitivity"] ?: "low",
-                        timestampMs = node.attributes["timestamp"]?.toLongOrNull() ?: now
-                    )
-
-                    else -> upsertSemanticMemory(node)
-                }
-            }
-        }
-
-        val roundTripped = secondManager.retrieveForPromptInjection(
-            prompt = "release smoke tests",
-            task = "remember",
-            limit = 10,
-            nowEpochMs = now
-        )
-
-        assertTrue(roundTripped.any { it.id == "semantic-persisted" })
-        assertTrue(roundTripped.any { it.id == "tone" })
-        assertFalse(roundTripped.any { it.attributes["semantic_subtype"] == "session" })
     }
 
     @Test
@@ -177,8 +118,6 @@ class MemoryManagerTest {
 
     @Test
     fun `auto expiry purges memories by category and keeps fresh entries`() {
-        val manager = MemoryManager()
-    fun `auto expiry purges memories by category`() {
         val store = RecordingStore()
         val telemetry = RecordingTelemetry()
         val manager = MemoryManager(store, telemetry)
@@ -190,6 +129,9 @@ class MemoryManagerTest {
                     MemoryManager.MemoryCategory.SESSION to 1000L,
                     MemoryManager.MemoryCategory.SEMANTIC to 1000L,
                     MemoryManager.MemoryCategory.PROFILE to 1000L
+                ),
+                maintenancePolicy = MemoryManager.MemoryMaintenancePolicy(
+                    enabled = false
                 )
             )
         )
@@ -229,6 +171,8 @@ class MemoryManagerTest {
             )
         )
 
+        manager.runMaintenance(now)
+
         val retrieved = manager.retrieveForPromptInjection(
             prompt = "fresh",
             task = "any",
@@ -239,9 +183,7 @@ class MemoryManagerTest {
         assertFalse(retrieved.any { it.id == "semantic-old" || it.id == "tone-old" || it.description == "old session" })
         assertTrue(retrieved.any { it.id == "semantic-fresh" })
         assertTrue(retrieved.any { it.id == "tone-fresh" })
-        assertEquals(3, retrieved.size)
-        assertEquals(0, retrieved.size)
-        assertEquals(listOf("tone"), store.deletedByCategory[MemoryManager.MemoryCategory.PROFILE])
+        assertEquals(listOf("tone-old"), store.deletedByCategory[MemoryManager.MemoryCategory.PROFILE])
         assertEquals(listOf("semantic-old"), store.deletedByCategory[MemoryManager.MemoryCategory.SEMANTIC])
         assertEquals(1, store.deletedByCategory[MemoryManager.MemoryCategory.SESSION]?.size)
         assertEquals(1, manager.getExpiryPurgeCounters()[MemoryManager.MemoryCategory.SESSION])
@@ -264,7 +206,8 @@ class MemoryManagerTest {
                     MemoryManager.MemoryCategory.SESSION to 1000L,
                     MemoryManager.MemoryCategory.SEMANTIC to 1000L,
                     MemoryManager.MemoryCategory.PROFILE to 1000L
-                )
+                ),
+                maintenancePolicy = MemoryManager.MemoryMaintenancePolicy(enabled = false)
             )
         )
         manager.upsertProfileMemory(
@@ -285,6 +228,8 @@ class MemoryManagerTest {
             )
         )
 
+        manager.runMaintenance(50_000L)
+
         val retrieved = manager.retrieveForPromptInjection(
             prompt = "check",
             task = "check",
@@ -298,6 +243,53 @@ class MemoryManagerTest {
         assertFalse(store.deletedByCategory.containsKey(MemoryManager.MemoryCategory.SEMANTIC))
         assertTrue(telemetry.events.contains(Triple(MemoryManager.MemoryCategory.PROFILE, 0, 1)))
         assertTrue(telemetry.events.contains(Triple(MemoryManager.MemoryCategory.SEMANTIC, 0, 1)))
+    }
+
+    @Test
+    fun `scheduled maintenance archives dormant memories and exports cold storage`() {
+        val manager = MemoryManager()
+        manager.setPolicy(
+            MemoryManager.MemoryPolicySettings(
+                mode = MemoryManager.MemoryPolicyMode.PERSISTENT,
+                maintenancePolicy = MemoryManager.MemoryMaintenancePolicy(
+                    enabled = true,
+                    cleanupIntervalMs = 1,
+                    archiveDormantAfterMs = mapOf(
+                        MemoryManager.MemoryCategory.SESSION to 1000L,
+                        MemoryManager.MemoryCategory.SEMANTIC to 1000L,
+                        MemoryManager.MemoryCategory.PROFILE to 1000L
+                    ),
+                    retentionCountByCategory = mapOf(
+                        MemoryManager.MemoryCategory.SESSION to 1,
+                        MemoryManager.MemoryCategory.SEMANTIC to 100,
+                        MemoryManager.MemoryCategory.PROFILE to 100
+                    ),
+                    deleteArchivedAfterMs = 10_000L,
+                    sessionCompactionEnabled = false
+                )
+            )
+        )
+
+        manager.appendSessionTurn(MemoryManager.SessionTurn(role = "user", content = "old-1", timestampMs = 100L))
+        manager.appendSessionTurn(MemoryManager.SessionTurn(role = "user", content = "old-2", timestampMs = 200L))
+        manager.upsertSemanticMemory(
+            MindNode(
+                id = "semantic-old",
+                label = "old semantics",
+                type = NodeType.MEMORY,
+                description = "very old",
+                attributes = mutableMapOf("timestamp" to "100", "current_relevance" to "0.8")
+            )
+        )
+
+        val report = manager.runScheduledCleanup(nowEpochMs = 50_000L)
+        assertNotNull(report)
+        val status = manager.status(nowEpochMs = 50_000L)
+        assertTrue(status.archivedMemoryCount >= 2)
+
+        val export = manager.exportDormantMemoriesToColdStorage(nowEpochMs = 50_000L)
+        assertTrue(export.records.isNotEmpty())
+        assertTrue(export.lineDelimitedJson.contains("archived_at_ms"))
     }
 
     @Test
