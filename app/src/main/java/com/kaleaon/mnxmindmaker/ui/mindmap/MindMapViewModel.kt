@@ -507,6 +507,13 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
             val systemPrompt = buildSystemPrompt(settings)
             val start = System.currentTimeMillis()
         val primarySettings = chain.first()
+        val systemPrompt = buildSystemPrompt(primarySettings)
+        val transcript = buildChatTranscript(prompt)
+        val pipelineRequest = PromptPipelineRequest(
+            prompt = prompt,
+            transcript = transcript,
+            task = "mindmap_assist"
+        )
         val catchUp = chatCatchUpBuilder.build(
             history = _chatMessages.value.orEmpty(),
             targetMindId = _selectedNode.value?.id,
@@ -568,7 +575,7 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
                 val fallbackTurn = llmClient.completeAssistantTurn(
                     settings = primarySettings,
                     systemPrompt = systemPrompt,
-                    transcript = listOf(JSONObject().put("role", "user").put("content", prompt)),
+                    transcript = transcript,
                     tools = emptyList()
                 )
                 val latency = System.currentTimeMillis() - start
@@ -616,6 +623,20 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
         return null
     }
 
+    private fun buildChatTranscript(currentPrompt: String): List<JSONObject> {
+        val transcript = mutableListOf<JSONObject>()
+        _chatMessages.value.orEmpty().forEach { message ->
+            transcript += JSONObject()
+                .put("role", "user")
+                .put("content", message.prompt)
+            transcript += JSONObject()
+                .put("role", "assistant")
+                .put("content", message.response)
+        }
+        transcript += JSONObject()
+            .put("role", "user")
+            .put("content", currentPrompt)
+        return transcript
     private fun buildMentionCandidates(nodes: List<MindNode>): List<ChatMentionParser.IdentityCandidate> {
         return nodes.map { node ->
             ChatMentionParser.IdentityCandidate(
