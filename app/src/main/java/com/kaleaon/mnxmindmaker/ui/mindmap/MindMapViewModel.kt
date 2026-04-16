@@ -510,6 +510,10 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
                 id = UUID.randomUUID().toString(),
                 prompt = prompt,
                 response = pipelineResult.responseText,
+                createdTimestamp = System.currentTimeMillis(),
+                role = ChatRole.MIND,
+                actorLabel = "Mind (${provider.displayName})",
+                isAiGenerated = true,
                 providerChoice = choice,
                 provenance = MessageProvenance(
                     provider = provider,
@@ -537,9 +541,11 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
                 return ChatMessage(
                     id = UUID.randomUUID().toString(),
                     prompt = prompt,
-                    response = turn.text,
                     createdTimestamp = System.currentTimeMillis(),
                     response = "[Fallback mode] $traceAwareMessage\n\n${fallbackTurn.text}",
+                    role = ChatRole.MIND,
+                    actorLabel = "Mind (${primarySettings.provider.displayName})",
+                    isAiGenerated = true,
                     providerChoice = choice,
                     provenance = MessageProvenance(
                         provider = primarySettings.provider,
@@ -724,6 +730,9 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
             prompt = prompt,
             response = response,
             createdTimestamp = createdTimestamp,
+            role = enumValues<ChatRole>().firstOrNull { it.name == role } ?: ChatRole.MIND,
+            actorLabel = actorLabel,
+            isAiGenerated = isAiGenerated,
             providerChoice = choice,
             provenance = MessageProvenance(
                 provider = provider,
@@ -753,6 +762,9 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
             id = id,
             prompt = prompt,
             response = response,
+            role = role.name,
+            actorLabel = actorLabel,
+            isAiGenerated = isAiGenerated,
             createdTimestamp = createdTimestamp,
             providerChoice = providerChoice.name,
             provider = provenance.provider.name,

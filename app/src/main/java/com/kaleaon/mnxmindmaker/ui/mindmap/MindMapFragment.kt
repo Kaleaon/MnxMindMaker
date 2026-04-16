@@ -6,6 +6,7 @@ import android.text.InputType
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.AdapterView
 import android.widget.ArrayAdapter
 import android.widget.BaseAdapter
 import android.widget.EditText
@@ -19,6 +20,8 @@ import androidx.fragment.app.Fragment
 import androidx.fragment.app.viewModels
 import androidx.navigation.fragment.findNavController
 import com.google.android.material.button.MaterialButton
+import com.google.android.material.chip.Chip
+import com.google.android.material.chip.ChipGroup
 import com.google.android.material.snackbar.Snackbar
 import com.kaleaon.mnxmindmaker.R
 import com.kaleaon.mnxmindmaker.continuity.ContinuityManager
@@ -33,6 +36,7 @@ import java.util.Date
 import java.util.Locale
 
 class MindMapFragment : Fragment() {
+    private val mentionPattern = Regex("@([A-Za-z0-9_\\-]+)")
 
     private var _binding: FragmentMindMapBinding? = null
     private val binding get() = _binding!!
@@ -202,6 +206,8 @@ class MindMapFragment : Fragment() {
         val threadSpinnerControl = dialogView.findViewById<Spinner>(R.id.spinner_chat_threads)
         val newThreadButton = dialogView.findViewById<MaterialButton>(R.id.btn_new_chat_thread)
         val threadMetaLabel = dialogView.findViewById<TextView>(R.id.tv_chat_thread_meta)
+        val participantChipGroup = dialogView.findViewById<ChipGroup>(R.id.chip_group_chat_participants)
+        val unresolvedMentionsLabel = dialogView.findViewById<TextView>(R.id.tv_chat_unresolved_mentions)
         val providerSpinner = dialogView.findViewById<Spinner>(R.id.spinner_chat_provider)
         val promptInput = dialogView.findViewById<EditText>(R.id.et_chat_prompt)
         val sendButton = dialogView.findViewById<MaterialButton>(R.id.btn_send_chat)
@@ -228,16 +234,17 @@ class MindMapFragment : Fragment() {
         ).also { threadSpinnerControl.adapter = it }
         syncThreadSelection()
         refreshThreadMetaLabel()
+        populateParticipantChips(participantChipGroup)
 
-        threadSpinnerControl.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: View?, position: Int, id: Long) {
+        threadSpinnerControl.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
                 val session = viewModel.chatSessions.value.orEmpty().getOrNull(position) ?: return
                 if (session.sessionId != viewModel.activeChatSessionId.value) {
                     viewModel.switchChatSession(session.sessionId)
                 }
             }
 
-            override fun onNothingSelected(parent: android.widget.AdapterView<*>?) = Unit
+            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
         }
 
         newThreadButton.setOnClickListener {
@@ -259,8 +266,25 @@ class MindMapFragment : Fragment() {
             val prompt = promptInput.text.toString().trim()
             if (prompt.isBlank()) return@setOnClickListener
             val selectedChoice = providerOptions[providerSpinner.selectedItemPosition]
-            viewModel.askLlmForMindDesign(prompt, selectedChoice)
-            promptInput.setText("")
+            val mentionCheck = collectMentionStatus(prompt)
+            if (mentionCheck.unresolvedMentions.isNotEmpty()) {
+                unresolvedMentionsLabel.visibility = View.VISIBLE
+                unresolvedMentionsLabel.text = getString(
+                    R.string.chat_unresolved_mentions_inline,
+                    mentionCheck.unresolvedMentions.joinToString(", ")
+                )
+                showMentionCorrectionDialog(
+                    prompt = prompt,
+                    unresolved = mentionCheck.unresolvedMentions,
+                    suggestions = mentionCheck.knownAddresses,
+                    onContinue = { correctedPrompt ->
+                        dispatchChatPrompt(correctedPrompt, selectedChoice, promptInput, unresolvedMentionsLabel)
+                    }
+                )
+            } else {
+                unresolvedMentionsLabel.visibility = View.GONE
+                dispatchChatPrompt(prompt, selectedChoice, promptInput, unresolvedMentionsLabel)
+            }
         }
 
         chatDialog?.dismiss()
@@ -269,6 +293,100 @@ class MindMapFragment : Fragment() {
             .setView(dialogView)
             .setNegativeButton(R.string.cancel, null)
             .show()
+    }
+
+    private fun dispatchChatPrompt(
+        prompt: String,
+        selectedChoice: ComposerProviderChoice,
+        promptInput: EditText,
+        unresolvedMentionsLabel: TextView
+    ) {
+        viewModel.askLlmForMindDesign(prompt, selectedChoice)
+        promptInput.setText("")
+        unresolvedMentionsLabel.visibility = View.GONE
+    }
+
+    private fun populateParticipantChips(chipGroup: ChipGroup) {
+        chipGroup.removeAllViews()
+        val participantLabels = mutableListOf("user", "system")
+        participantLabels += viewModel.graph.value?.nodes
+            .orEmpty()
+            .map { normalizeAddressToken(it.label) }
+            .filter { it.isNotBlank() }
+            .distinct()
+            .take(8)
+
+        participantLabels.distinct().forEach { participant ->
+            val chip = Chip(requireContext()).apply {
+                text = "@$participant"
+                isCheckable = false
+                isClickable = false
+            }
+            chipGroup.addView(chip)
+        }
+    }
+
+    private fun showMentionCorrectionDialog(
+        prompt: String,
+        unresolved: List<String>,
+        suggestions: List<String>,
+        onContinue: (String) -> Unit
+    ) {
+        val input = EditText(requireContext()).apply {
+            setText(prompt)
+            minLines = 2
+            maxLines = 6
+        }
+        val suggestionText = if (suggestions.isEmpty()) {
+            getString(R.string.chat_mentions_no_suggestions)
+        } else {
+            getString(R.string.chat_mentions_suggestions, suggestions.joinToString(", "))
+        }
+        AlertDialog.Builder(requireContext())
+            .setTitle(R.string.chat_unresolved_mentions_title)
+            .setMessage(
+                getString(
+                    R.string.chat_unresolved_mentions_message,
+                    unresolved.joinToString(", "),
+                    suggestionText
+                )
+            )
+            .setView(input)
+            .setPositiveButton(R.string.chat_fix_and_send) { _, _ ->
+                onContinue(input.text.toString().trim())
+            }
+            .setNeutralButton(R.string.send_anyway) { _, _ ->
+                onContinue(prompt)
+            }
+            .setNegativeButton(R.string.cancel, null)
+            .show()
+    }
+
+    private data class MentionStatus(
+        val unresolvedMentions: List<String>,
+        val knownAddresses: List<String>
+    )
+
+    private fun collectMentionStatus(prompt: String): MentionStatus {
+        val knownAddresses = viewModel.graph.value?.nodes
+            .orEmpty()
+            .map { normalizeAddressToken(it.label) }
+            .filter { it.isNotBlank() }
+            .distinct()
+            .sorted()
+        val unresolved = mentionPattern.findAll(prompt)
+            .map { it.groupValues[1] }
+            .distinct()
+            .filter { mention -> knownAddresses.none { it.equals(mention, ignoreCase = true) } }
+            .toList()
+        return MentionStatus(unresolvedMentions = unresolved, knownAddresses = knownAddresses)
+    }
+
+    private fun normalizeAddressToken(label: String): String {
+        return label.trim()
+            .lowercase(Locale.US)
+            .replace(Regex("[^a-z0-9]+"), "-")
+            .trim('-')
     }
 
     private fun syncThreadSelection() {
@@ -549,21 +667,31 @@ private class ChatMessageAdapter(
         val view = convertView ?: inflater.inflate(R.layout.item_chat_message, parent, false)
         val message = messages[position]
 
-        view.findViewById<TextView>(R.id.tv_chat_prompt).text = "You: ${message.prompt}"
-        view.findViewById<TextView>(R.id.tv_chat_response).text = message.response
-        view.findViewById<TextView>(R.id.tv_chat_provenance).text = buildProvenance(message)
-        view.findViewById<MaterialButton>(R.id.btn_retry_provider).setOnClickListener {
+        view.findViewById<TextView>(R.id.tv_chat_speaker).text = buildSpeakerLabel(message)
+        view.findViewById<TextView>(R.id.tv_chat_content).text = message.response
+        view.findViewById<TextView>(R.id.tv_chat_metadata).text = buildMetadata(message)
+        val retryButton = view.findViewById<MaterialButton>(R.id.btn_retry_provider)
+        retryButton.visibility = if (message.isAiGenerated) View.VISIBLE else View.GONE
+        retryButton.setOnClickListener {
             onRetry(message)
         }
 
         val compareButton = view.findViewById<MaterialButton>(R.id.btn_compare_side_by_side)
-        compareButton.visibility = if (isPremium() && message.compareCandidate != null) View.VISIBLE else View.GONE
+        compareButton.visibility = if (message.isAiGenerated && isPremium() && message.compareCandidate != null) View.VISIBLE else View.GONE
         compareButton.setOnClickListener { onCompare(message) }
 
         return view
     }
 
-    private fun buildProvenance(message: ChatMessage): String {
+    private fun buildSpeakerLabel(message: ChatMessage): String {
+        return when (message.role) {
+            ChatRole.USER -> "User"
+            ChatRole.SYSTEM -> "System"
+            ChatRole.MIND -> message.actorLabel ?: "Mind"
+        }
+    }
+
+    private fun buildMetadata(message: ChatMessage): String {
         val p = message.provenance
         val tools = if (p.toolCalls.isEmpty()) "none" else p.toolCalls.joinToString()
         val latency = p.latencyMs?.let { "${it}ms" } ?: "n/a"
@@ -572,7 +700,8 @@ private class ChatMessageAdapter(
         } else {
             "n/a"
         }
-        return "Provider: ${p.provider.displayName} | Model: ${p.model}\n" +
+        return "Prompt: ${message.prompt}\n" +
+            "Provider: ${p.provider.displayName} | Model: ${p.model}\n" +
             "Tools: $tools\n" +
             "Latency: $latency | Tokens: $usage"
     }

@@ -26,10 +26,19 @@ data class ChatMessage(
     val prompt: String,
     val response: String,
     val createdTimestamp: Long,
+    val role: ChatRole = ChatRole.MIND,
+    val actorLabel: String? = null,
+    val isAiGenerated: Boolean = true,
     val providerChoice: ComposerProviderChoice,
     val provenance: MessageProvenance,
     val compareCandidate: CompareCandidate? = null
 )
+
+enum class ChatRole {
+    USER,
+    MIND,
+    SYSTEM
+}
 
 data class ChatSessionSummary(
     val sessionId: String,
