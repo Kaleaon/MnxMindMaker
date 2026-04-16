@@ -20,6 +20,7 @@ import com.kaleaon.mnxmindmaker.util.ContinuityAuditResult
 import com.kaleaon.mnxmindmaker.util.DimensionMapper
 import com.kaleaon.mnxmindmaker.util.tooling.ToolApprovalRequest
 import com.kaleaon.mnxmindmaker.util.LlmApiClient
+import com.kaleaon.mnxmindmaker.util.provider.ModelCapabilityRegistry
 import com.kaleaon.mnxmindmaker.util.LlmApiException
 import com.kaleaon.mnxmindmaker.util.run_continuity_audit
 import kotlinx.coroutines.Dispatchers
@@ -35,7 +36,7 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
     private val mnxRepository = MnxRepository(application)
     private val llmRepository = LlmSettingsRepository(application)
     private val continuityManager = ContinuityManager(application)
-    private val llmClient = LlmApiClient()
+    private val llmClient = LlmApiClient(capabilityRegistry = ModelCapabilityRegistry.create(application))
 
     private val _graph = MutableLiveData(newDefaultGraph())
     val graph: LiveData<MindGraph> get() = _graph

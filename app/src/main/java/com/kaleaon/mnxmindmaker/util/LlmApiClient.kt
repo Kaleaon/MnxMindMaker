@@ -7,6 +7,7 @@ import com.kaleaon.mnxmindmaker.util.provider.ChatGPTProvider
 import com.kaleaon.mnxmindmaker.util.provider.ClaudeProvider
 import com.kaleaon.mnxmindmaker.util.provider.GeminiProvider
 import com.kaleaon.mnxmindmaker.util.provider.LocalProvider
+import com.kaleaon.mnxmindmaker.util.provider.ModelCapabilitySource
 import com.kaleaon.mnxmindmaker.util.provider.ProviderSettingsValidator
 import com.kaleaon.mnxmindmaker.util.provider.ProviderRequest
 import com.kaleaon.mnxmindmaker.util.tooling.AssistantTurn
@@ -14,6 +15,7 @@ import com.kaleaon.mnxmindmaker.util.tooling.ToolSpec
 import org.json.JSONObject
 
 class LlmApiClient(
+    private val capabilityRegistry: ModelCapabilitySource? = null,
     private val providers: List<AssistantProvider> = listOf(
         LocalProvider(),
         ClaudeProvider(),
@@ -42,12 +44,19 @@ class LlmApiClient(
         val provider = providers.firstOrNull { it.supports(settings) }
             ?: throw LlmApiException("No provider adapter for ${settings.provider.displayName}")
 
+        val runtimeCapabilities = capabilityRegistry?.capabilitiesFor(settings)
+        val runtimeMaxTokens = runtimeCapabilities?.contextWindowTokens
+            ?.let { detectedWindow -> settings.maxTokens.coerceAtMost(detectedWindow.coerceAtLeast(256)) }
+            ?: settings.maxTokens
+        val adaptedSettings = settings.copy(maxTokens = runtimeMaxTokens)
+        val adaptedTools = if (runtimeCapabilities?.supportsToolCalls == false) emptyList() else tools
+
         return provider.chat(
             ProviderRequest(
-                settings = settings,
+                settings = adaptedSettings,
                 systemPrompt = systemPrompt,
                 transcript = transcript,
-                tools = tools
+                tools = adaptedTools
             )
         )
     }
