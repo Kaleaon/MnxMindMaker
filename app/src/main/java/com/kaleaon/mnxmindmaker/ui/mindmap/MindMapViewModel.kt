@@ -63,6 +63,7 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
     private val chatSessionRepository = ChatSessionRepository(application)
     private val traceStore = InMemoryTraceStore()
     private val promptPipelineEngine = PromptPipelineEngine(traceStore = traceStore)
+    private val chatCatchUpBuilder = ChatCatchUpBuilder()
     private val pendingApprovalResolvers = ConcurrentHashMap<String, CompletableDeferred<Boolean>>()
 
     private val _graph = MutableLiveData(newDefaultGraph())
@@ -475,7 +476,13 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
 
         var lastError: String? = null
         val primarySettings = chain.first()
-        val systemPrompt = buildSystemPrompt(primarySettings)
+        val catchUp = chatCatchUpBuilder.build(
+            history = _chatMessages.value.orEmpty(),
+            targetMindId = _selectedNode.value?.id,
+            currentUserUtterance = prompt,
+            tokenBudget = catchUpTokenBudget(primarySettings)
+        )
+        val systemPrompt = buildSystemPrompt(primarySettings, catchUp)
         val pipelineRequest = PromptPipelineRequest(prompt = prompt, task = "mindmap_assist")
         val graphNodes = _graph.value?.nodes.orEmpty()
 
@@ -537,7 +544,6 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
                 return ChatMessage(
                     id = UUID.randomUUID().toString(),
                     prompt = prompt,
-                    response = turn.text,
                     createdTimestamp = System.currentTimeMillis(),
                     response = "[Fallback mode] $traceAwareMessage\n\n${fallbackTurn.text}",
                     providerChoice = choice,
@@ -593,16 +599,26 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
             }
     }
 
-    private fun buildSystemPrompt(settings: LlmSettings): String {
+    private fun buildSystemPrompt(settings: LlmSettings, catchUp: ChatCatchUp): String {
         val caps = settings.capabilities
         return buildString {
             appendLine("You are an AI mind design assistant helping the user build an AI mind graph in .mnx format.")
             appendLine("The mind graph represents identity, memories, knowledge, emotions, personality, beliefs, values, and relationships.")
             appendLine("Provide concise, structured suggestions for mind nodes and connections.")
             appendLine("Format suggestions as: NodeType: label - description")
+            val catchUpSection = catchUp.asSystemPromptSection()
+            if (catchUpSection.isNotBlank()) {
+                appendLine(catchUpSection)
+                appendLine("If unresolved references exist, ask a concise clarification question before making assumptions.")
+            }
             if (!caps.supportsToolPlanning) appendLine("Avoid multi-step tool plans.")
             appendLine("Stay within approximately ${caps.contextWindowTokens / 8} output tokens.")
         }
+    }
+
+    private fun catchUpTokenBudget(settings: LlmSettings): Int {
+        val contextWindow = settings.capabilities.contextWindowTokens
+        return (contextWindow / 5).coerceIn(160, 1200)
     }
 
     private fun loadUsableSettings(provider: LlmProvider): LlmSettings? {
