@@ -16,10 +16,12 @@ class LocalProvider(
 ) : AssistantProvider {
 
     override val id: String = "local"
+    override val capabilities: ProviderCapabilities = ProviderCapabilities(reportsTokenUsage = true)
 
     override fun supports(settings: LlmSettings): Boolean =
         settings.provider == LlmProvider.VLLM_GEMMA4 ||
-            settings.provider == LlmProvider.OPENAI_COMPATIBLE_SELF_HOSTED
+            settings.provider == LlmProvider.OPENAI_COMPATIBLE_SELF_HOSTED ||
+            settings.provider == LlmProvider.LOCAL_ON_DEVICE
 
     override fun chat(request: ProviderRequest) = runCatching {
         val apiKey = request.settings.apiKey.ifBlank { "EMPTY" }

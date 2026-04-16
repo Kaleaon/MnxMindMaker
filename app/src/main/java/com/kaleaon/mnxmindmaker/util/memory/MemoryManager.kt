@@ -2,6 +2,7 @@ package com.kaleaon.mnxmindmaker.util.memory
 
 import com.kaleaon.mnxmindmaker.model.MindNode
 import com.kaleaon.mnxmindmaker.model.NodeType
+import com.kaleaon.mnxmindmaker.model.PrivacyMode
 import com.kaleaon.mnxmindmaker.util.MemoryRetrievalService
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
@@ -10,7 +11,10 @@ import kotlin.math.sqrt
 class MemoryManager(
     private val storage: MemoryStorage = InMemoryMemoryStorage(),
     private val persistenceStore: MemoryPersistenceStore = NoOpMemoryPersistenceStore,
-    private val expiryTelemetry: MemoryExpiryTelemetry = StdoutMemoryExpiryTelemetry
+    private val expiryTelemetry: MemoryExpiryTelemetry = StdoutMemoryExpiryTelemetry,
+    private val embeddingPolicy: EmbeddingPolicy = EmbeddingPolicy(),
+    private val localEmbeddingProvider: EmbeddingProvider = BagOfWordsEmbeddingProvider(),
+    private val remoteEmbeddingProvider: EmbeddingProvider? = null
 ) {
 
     constructor(
@@ -51,6 +55,9 @@ class MemoryManager(
         val sessionCompactionEnabled: Boolean = true,
         val sessionCompactionMinAgeMs: Long = 12L * 60 * 60 * 1000,
         val maxCompactedSessionChars: Int = 4_000
+    data class EmbeddingPolicy(
+        val privacyMode: PrivacyMode = PrivacyMode.HYBRID,
+        val preferLocal: Boolean = true
     )
 
     data class MemoryPolicySettings(
@@ -96,6 +103,11 @@ class MemoryManager(
         val compactedSessionTurns: Int,
         val deletedArchivedCount: Int
     )
+    interface EmbeddingProvider {
+        val id: String
+        val isLocal: Boolean
+        fun embed(input: String): Map<String, Float>
+    }
 
     interface MemoryPersistenceStore {
         fun deleteExpired(category: MemoryCategory, memoryIds: List<String>)
@@ -104,6 +116,28 @@ class MemoryManager(
     interface MemoryExpiryTelemetry {
         fun onExpiredRemoved(category: MemoryCategory, removedCount: Int, malformedTimestampCount: Int)
     }
+
+    data class PersistedMemorySnapshot(
+        val sessionTurns: List<SessionTurn> = emptyList(),
+        val profileMemories: List<MindNode> = emptyList(),
+        val semanticMemories: List<MindNode> = emptyList()
+    )
+
+    interface MemoryStorage {
+        fun loadSnapshot(): PersistedMemorySnapshot
+        fun saveSnapshot(snapshot: PersistedMemorySnapshot)
+    }
+
+    data class MemoryStatus(
+        val mode: MemoryPolicyMode,
+        val sessionTurnCount: Int,
+        val profileMemoryCount: Int,
+        val semanticMemoryCount: Int,
+        val expiryByCategoryMs: Map<MemoryCategory, Long>,
+        val embeddingCacheEntries: Int
+    )
+
+    private data class PurgeSelection(val expiredIds: List<String>, val malformedTimestampCount: Int)
 
     private object NoOpMemoryPersistenceStore : MemoryPersistenceStore {
         override fun deleteExpired(category: MemoryCategory, memoryIds: List<String>) = Unit
@@ -136,13 +170,28 @@ class MemoryManager(
     private val profileMemories = ConcurrentHashMap<String, MindNode>()
     private val semanticIndex = SemanticMemoryVectorIndex()
     private val archivedMemories = ConcurrentHashMap<String, ArchivedMemoryRecord>()
+    private val sessionTurns = mutableListOf<SessionTurn>()
+    private val profileMemories = ConcurrentHashMap<String, MindNode>()
+    private val semanticIndex = SemanticMemoryVectorIndex(
+        policy = embeddingPolicy,
+        localProvider = localEmbeddingProvider,
+        remoteProvider = remoteEmbeddingProvider
+    )
     private val expiryPurgeCounters = ConcurrentHashMap<MemoryCategory, Int>()
 
     @Volatile
     private var policySettings: MemoryPolicySettings = MemoryPolicySettings()
 
-    @Volatile
-    private var lastMaintenanceRunMs: Long? = null
+    constructor() : this(storage = InMemoryMemoryStorage())
+
+    constructor(
+        persistenceStore: MemoryPersistenceStore,
+        expiryTelemetry: MemoryExpiryTelemetry = StdoutMemoryExpiryTelemetry
+    ) : this(
+        storage = InMemoryMemoryStorage(),
+        persistenceStore = persistenceStore,
+        expiryTelemetry = expiryTelemetry
+    )
 
     init {
         MemoryCategory.entries.forEach { expiryPurgeCounters[it] = 0 }
@@ -186,6 +235,7 @@ class MemoryManager(
             attributes = mutableMapOf(
                 "semantic_subtype" to "profile",
                 "preference_key" to key,
+                "memory_category" to MemoryCategory.PROFILE.name.lowercase(),
                 "sensitivity" to sensitivity,
                 "timestamp" to timestampMs.toString(),
                 "last_accessed_timestamp" to timestampMs.toString(),
@@ -228,6 +278,11 @@ class MemoryManager(
 
     fun getMemory(memoryId: String): MindNode? =
         semanticIndex.get(memoryId) ?: profileMemories[memoryId] ?: archivedMemories[memoryId]?.payload
+        if (semanticRemoved || profileRemoved) persistAndRefresh()
+        return semanticRemoved || profileRemoved
+    }
+
+    fun getMemory(memoryId: String): MindNode? = semanticIndex.get(memoryId) ?: profileMemories[memoryId]
 
     fun searchMemories(query: String, limit: Int, nowEpochMs: Long = System.currentTimeMillis()): List<MindNode> {
         if (query.isBlank() || limit <= 0) return emptyList()
@@ -236,9 +291,8 @@ class MemoryManager(
         val profileNodes = profileMemories.values.toList()
         val semanticNodes = if (policySettings.mode == MemoryPolicyMode.PERSISTENT) {
             semanticIndex.query(query, topK = limit * 3)
-        } else {
-            emptyList()
-        }
+        } else emptyList()
+
         val all = sessionNodes + profileNodes + semanticNodes
         return MemoryRetrievalService.retrieveWithSuggestions(
             memories = all,
@@ -280,6 +334,11 @@ class MemoryManager(
         val lastMaintenanceRunMs: Long?
     )
 
+            expiryByCategoryMs = policySettings.expiryByCategoryMs,
+            embeddingCacheEntries = semanticIndex.cacheSize()
+        )
+    }
+
     fun clearSession(clearAllCategories: Boolean = false) {
         sessionTurns.clear()
         if (clearAllCategories) {
@@ -300,14 +359,11 @@ class MemoryManager(
         if (policySettings.mode == MemoryPolicyMode.OFF || limit <= 0) return emptyList()
 
         val context = MemoryRetrievalService.RetrievalContext(prompt = prompt, task = task, nowEpochMs = nowEpochMs)
-
         val sessionMemories = sessionTurns.map { it.toMindNode() }
         val profile = profileMemories.values.toList()
         val semantic = if (policySettings.mode == MemoryPolicyMode.PERSISTENT) {
             semanticIndex.query(prompt = "$prompt $task", topK = limit * 3)
-        } else {
-            emptyList()
-        }
+        } else emptyList()
 
         val rawCandidates = when (policySettings.mode) {
             MemoryPolicyMode.OFF -> emptyList()
@@ -433,17 +489,32 @@ class MemoryManager(
         }
 
         return removed
+        }.forEach { expiredId -> sessionTurns.removeAll { it.id == expiredId } }
+
+        purgeExpiredByCategory(MemoryCategory.PROFILE, expiryMap[MemoryCategory.PROFILE]) { maxAgeMs ->
+            profileMemories.values.selectExpiredByTimestamp(nowEpochMs = nowEpochMs, maxAgeMs = maxAgeMs)
+        }.forEach { profileMemories.remove(it) }
+
+        purgeExpiredByCategory(MemoryCategory.SEMANTIC, expiryMap[MemoryCategory.SEMANTIC]) { maxAgeMs ->
+            semanticIndex.memories().selectExpiredByTimestamp(nowEpochMs = nowEpochMs, maxAgeMs = maxAgeMs)
+        }.let { semanticIndex.deleteMany(it) }
+
+        if (sessionTurns.isEmpty() && profileMemories.isEmpty() && semanticIndex.size() == 0) return
     }
 
     private fun purgeExpiredByCategory(
         category: MemoryCategory,
         maxAgeMs: Long?,
         selectExpired: (Long) -> PurgeSelection
-    ): List<String>? {
-        if (maxAgeMs == null) return null
+    ): List<String> {
+        if (maxAgeMs == null) return emptyList()
         val selection = selectExpired(maxAgeMs)
         persistenceStore.deleteExpired(category, selection.expiredIds)
         expiryPurgeCounters.compute(category) { _, count -> (count ?: 0) + selection.expiredIds.size }
+        if (selection.expiredIds.isNotEmpty()) {
+            persistenceStore.deleteExpired(category, selection.expiredIds)
+            expiryPurgeCounters.compute(category) { _, count -> (count ?: 0) + selection.expiredIds.size }
+        }
         expiryTelemetry.onExpiredRemoved(category, selection.expiredIds.size, selection.malformedTimestampCount)
         return selection.expiredIds
     }
@@ -451,7 +522,7 @@ class MemoryManager(
     private fun Collection<MindNode>.selectExpiredByTimestamp(nowEpochMs: Long, maxAgeMs: Long): PurgeSelection {
         var malformedTimestampCount = 0
         val expiredIds = this.filter { memory ->
-            val ts = parseTimestamp(memory.attributes["timestamp"])
+            val ts = memory.attributes["timestamp"]?.toLongOrNull()
             if (ts == null) malformedTimestampCount += 1
             nowEpochMs - (ts ?: nowEpochMs) > maxAgeMs
         }.map { it.id }
@@ -629,29 +700,27 @@ class MemoryManager(
         restoreFromStorage()
     }
 
-    private fun SessionTurn.toMindNode(): MindNode {
-        return MindNode(
-            id = id,
-            label = "${role.uppercase()}: ${content.take(32)}",
-            type = NodeType.MEMORY,
-            description = content,
-            attributes = mutableMapOf(
-                "semantic_subtype" to "session",
-                "memory_category" to MemoryCategory.SESSION.name.lowercase(),
-                "conversation_id" to (conversationId ?: ""),
-                "turn_index" to (turnIndex?.toString() ?: ""),
-                "chunk_span" to (chunkSpan ?: ""),
-                "source" to source,
-                "role" to role,
-                "timestamp" to timestampMs.toString(),
-                "current_relevance" to "0.75",
-                "sensitivity" to sensitivity,
-                MemoryRouting.KEY_MEMORY_WING to "history",
-                MemoryRouting.KEY_MEMORY_HALL to "events",
-                MemoryRouting.KEY_MEMORY_ROOM to "session_turn"
-            )
+    private fun SessionTurn.toMindNode(): MindNode = MindNode(
+        id = id,
+        label = "${role.uppercase()}: ${content.take(32)}",
+        type = NodeType.MEMORY,
+        description = content,
+        attributes = mutableMapOf(
+            "semantic_subtype" to "session",
+            "memory_category" to MemoryCategory.SESSION.name.lowercase(),
+            "conversation_id" to (conversationId ?: ""),
+            "turn_index" to (turnIndex?.toString() ?: ""),
+            "chunk_span" to (chunkSpan ?: ""),
+            "source" to source,
+            "role" to role,
+            "timestamp" to timestampMs.toString(),
+            "current_relevance" to "0.75",
+            "sensitivity" to sensitivity,
+            MemoryRouting.KEY_MEMORY_WING to "history",
+            MemoryRouting.KEY_MEMORY_HALL to "events",
+            MemoryRouting.KEY_MEMORY_ROOM to "session_turn"
         )
-    }
+    )
 }
 
 private class InMemoryMemoryStorage : MemoryManager.MemoryStorage {
@@ -665,68 +734,11 @@ private class InMemoryMemoryStorage : MemoryManager.MemoryStorage {
     }
 }
 
-private class SemanticMemoryVectorIndex {
-    private val memories = ConcurrentHashMap<String, MindNode>()
-    private val vectors = ConcurrentHashMap<String, Map<String, Float>>()
+private class BagOfWordsEmbeddingProvider : MemoryManager.EmbeddingProvider {
+    override val id: String = "local-bow"
+    override val isLocal: Boolean = true
 
-    fun upsert(node: MindNode) {
-        memories[node.id] = node
-        vectors[node.id] = tokenizeToUnitVector("${node.label} ${node.description} ${node.attributes["tags"] ?: ""}")
-    }
-
-    fun get(id: String): MindNode? = memories[id]
-
-    fun delete(id: String): Boolean {
-        val removed = memories.remove(id) != null
-        vectors.remove(id)
-        return removed
-    }
-
-    fun deleteMany(ids: List<String>) {
-        ids.forEach {
-            memories.remove(it)
-            vectors.remove(it)
-        }
-    }
-
-    fun clearAll() {
-        memories.clear()
-        vectors.clear()
-    }
-
-    fun allMemories(): List<MindNode> = memories.values.toList()
-
-    fun replaceAll(nodes: List<MindNode>) {
-        clearAll()
-        nodes.forEach { upsert(it) }
-    }
-
-    fun query(prompt: String, topK: Int): List<MindNode> {
-        if (prompt.isBlank() || topK <= 0) return emptyList()
-        val queryVector = tokenizeToUnitVector(prompt)
-        if (queryVector.isEmpty()) return emptyList()
-
-        return memories.values
-            .asSequence()
-            .map { memory ->
-                val vector = vectors[memory.id].orEmpty()
-                val similarity = cosineSimilarity(queryVector, vector)
-                val updated = memory.copy(attributes = memory.attributes.toMutableMap().apply {
-                    put("vector_similarity", "%.4f".format(similarity))
-                    putIfAbsent("memory_category", MemoryManager.MemoryCategory.SEMANTIC.name.lowercase())
-                })
-                updated to similarity
-            }
-            .filter { (_, similarity) -> similarity > 0f }
-            .sortedByDescending { (_, similarity) -> similarity }
-            .take(topK)
-            .map { (memory, _) -> memory }
-            .toList()
-    }
-
-    fun memories(): Collection<MindNode> = memories.values.toList()
-
-    fun size(): Int = memories.size
+    override fun embed(input: String): Map<String, Float> = tokenizeToUnitVector(input)
 
     private fun tokenizeToUnitVector(text: String): Map<String, Float> {
         val counts = text.lowercase()
@@ -739,6 +751,120 @@ private class SemanticMemoryVectorIndex {
         val norm = sqrt(counts.values.sumOf { (it * it).toDouble() }).toFloat()
         if (norm == 0f) return emptyMap()
         return counts.mapValues { (_, value) -> value / norm }
+    }
+}
+
+private class SemanticMemoryVectorIndex(
+    private val policy: MemoryManager.EmbeddingPolicy,
+    private val localProvider: MemoryManager.EmbeddingProvider,
+    private val remoteProvider: MemoryManager.EmbeddingProvider?
+) {
+    private data class VectorCacheEntry(
+        val fingerprint: String,
+        val vector: Map<String, Float>,
+        val providerId: String
+    )
+
+    private val memories = ConcurrentHashMap<String, MindNode>()
+    private val vectorCache = ConcurrentHashMap<String, VectorCacheEntry>()
+
+    fun upsert(node: MindNode) {
+        val fingerprint = fingerprintFor(node)
+        val cached = vectorCache[node.id]
+        val freshVector = if (cached != null && cached.fingerprint == fingerprint) {
+            cached.vector
+        } else {
+            val provider = selectProvider()
+            val vector = provider.embed(contentForEmbedding(node))
+            vectorCache[node.id] = VectorCacheEntry(
+                fingerprint = fingerprint,
+                vector = vector,
+                providerId = provider.id
+            )
+            vector
+        }
+
+        val providerId = vectorCache[node.id]?.providerId ?: "unknown"
+        memories[node.id] = node.copy(attributes = node.attributes.toMutableMap().apply {
+            put("embedding_provider", providerId)
+            put("embedding_cache_fingerprint", fingerprint)
+            put("memory_category", MemoryManager.MemoryCategory.SEMANTIC.name.lowercase())
+            putIfAbsent("semantic_subtype", "semantic")
+        })
+
+        if (freshVector.isEmpty()) {
+            vectorCache.remove(node.id)
+        }
+    }
+
+    fun get(id: String): MindNode? = memories[id]
+
+    fun delete(id: String): Boolean {
+        val removed = memories.remove(id) != null
+        vectorCache.remove(id)
+        return removed
+    }
+
+    fun deleteMany(ids: List<String>) {
+        ids.forEach {
+            memories.remove(it)
+            vectors.remove(it)
+            vectorCache.remove(it)
+        }
+    }
+
+    fun clearAll() {
+        memories.clear()
+        vectorCache.clear()
+    }
+
+    fun allMemories(): List<MindNode> = memories.values.toList()
+
+    fun replaceAll(nodes: List<MindNode>) {
+        clearAll()
+        nodes.forEach { upsert(it) }
+    }
+
+    fun query(prompt: String, topK: Int): List<MindNode> {
+        if (prompt.isBlank() || topK <= 0) return emptyList()
+        val queryVector = selectProvider().embed(prompt)
+        if (queryVector.isEmpty()) return emptyList()
+
+        return memories.values
+            .asSequence()
+            .mapNotNull { memory ->
+                val vector = vectorCache[memory.id]?.vector ?: return@mapNotNull null
+                val similarity = cosineSimilarity(queryVector, vector)
+                if (similarity <= 0f) return@mapNotNull null
+                memory.copy(attributes = memory.attributes.toMutableMap().apply {
+                    put("vector_similarity", "%.4f".format(similarity))
+                }) to similarity
+            }
+            .sortedByDescending { (_, similarity) -> similarity }
+            .take(topK)
+            .map { (memory, _) -> memory }
+            .toList()
+    }
+
+    fun memories(): Collection<MindNode> = memories.values.toList()
+
+    fun size(): Int = memories.size
+
+    fun cacheSize(): Int = vectorCache.size
+
+    private fun contentForEmbedding(node: MindNode): String =
+        "${node.label} ${node.description} ${node.attributes["tags"] ?: ""}".trim()
+
+    private fun fingerprintFor(node: MindNode): String =
+        "${node.label}|${node.description}|${node.attributes["tags"] ?: ""}".trim()
+
+    private fun selectProvider(): MemoryManager.EmbeddingProvider {
+        val canUseRemote = policy.privacyMode != PrivacyMode.STRICT_LOCAL_ONLY
+        return when {
+            policy.preferLocal -> localProvider
+            canUseRemote && remoteProvider != null -> remoteProvider
+            else -> localProvider
+        }
     }
 
     private fun cosineSimilarity(a: Map<String, Float>, b: Map<String, Float>): Float {

@@ -1,0 +1,21 @@
+{
+  "pack_id": "sample-debug-pack",
+  "version": "1.0.0",
+  "enabled": false,
+  "tools": [
+    {
+      "name": "graph_overview_alias",
+      "description": "Alias for graph summary exposed via manifest metadata.",
+      "handler_id": "graph.read.get_summary",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "risk": {
+        "operation_class": "READ_ONLY",
+        "requires_confirmation": false
+      }
+    }
+  ]
+}

@@ -16,6 +16,7 @@ class ClaudeProvider(
 ) : AssistantProvider {
 
     override val id: String = "claude"
+    override val capabilities: ProviderCapabilities = ProviderCapabilities(reportsTokenUsage = true)
 
     override fun supports(settings: LlmSettings): Boolean = settings.provider == LlmProvider.ANTHROPIC
 
