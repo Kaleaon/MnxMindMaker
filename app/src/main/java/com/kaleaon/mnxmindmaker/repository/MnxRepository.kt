@@ -22,6 +22,9 @@ import com.kaleaon.mnxmindmaker.persona.runtime.RuntimeTarget
 import com.kaleaon.mnxmindmaker.persona.runtime.ToolPolicy
 import com.kaleaon.mnxmindmaker.util.BootPacketGenerator
 import com.kaleaon.mnxmindmaker.util.DimensionMapper
+import com.kaleaon.mnxmindmaker.security.EncryptedArtifactStore
+import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.InputStream
 import java.util.UUID
@@ -33,6 +36,8 @@ import org.json.JSONObject
  * Bridges the MindGraph model to the MNX binary format.
  */
 class MnxRepository(private val context: Context) {
+
+    private val encryptedStore = EncryptedArtifactStore(context)
 
     companion object {
         internal const val GRAPH_PAYLOAD_SECTION_TYPE: Short = (-1).toShort()
@@ -373,7 +378,9 @@ class MnxRepository(private val context: Context) {
         continuityMetadata: ContinuityMetadata? = null,
         personaManifest: PersonaDeploymentManifest = PersonaDeploymentManifest.defaults()
     ) {
-        MnxCodec.encodeToFile(buildMnxFile(graph, continuityMetadata, personaManifest), outFile)
+        val stream = ByteArrayOutputStream()
+        MnxCodec.encode(buildMnxFile(graph, continuityMetadata, personaManifest), stream)
+        encryptedStore.writeEncryptedBytes(outFile, stream.toByteArray(), "mind_file")
     }
 
     fun buildMnxFile(
@@ -468,6 +475,9 @@ class MnxRepository(private val context: Context) {
      * Reconstructs the graph from the latest schema, migrating older artifacts on-the-fly.
      */
     fun importFromMnx(stream: InputStream): MindGraph {
+        val raw = stream.readBytes()
+        val decoded = encryptedStore.decryptIfEnvelope(raw, "mind_file")
+        val mnxFile = MnxCodec.decode(ByteArrayInputStream(decoded))
         val report = migrateArtifact(stream, dryRun = false)
         val mnxFile = report.migratedFile
         return if (mnxFile.hasRawSection(GRAPH_PAYLOAD_SECTION_TYPE)) {
@@ -813,7 +823,7 @@ class MnxRepository(private val context: Context) {
     fun getMnxExportsDir(): File = File(context.filesDir, "mnx_exports").also { it.mkdirs() }
 
     fun listExportedFiles(): List<File> =
-        getMnxExportsDir().listFiles { f -> f.extension == "mnx" }
+        getMnxExportsDir().listFiles { f -> f.extension == "mnx" || f.extension == "enc" }
             ?.sortedByDescending { it.lastModified() } ?: emptyList()
 
     fun exportWorkspacePack(pack: MindWorkspacePack, fileName: String? = null): File {
