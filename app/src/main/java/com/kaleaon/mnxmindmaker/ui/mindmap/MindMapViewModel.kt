@@ -31,6 +31,7 @@ import com.kaleaon.mnxmindmaker.util.observability.RequestTrace
 import com.kaleaon.mnxmindmaker.util.observability.TraceEventType
 import com.kaleaon.mnxmindmaker.util.provider.ProviderRouter
 import com.kaleaon.mnxmindmaker.util.LlmApiClient
+import com.kaleaon.mnxmindmaker.util.provider.ModelCapabilityRegistry
 import com.kaleaon.mnxmindmaker.util.LlmApiException
 import com.kaleaon.mnxmindmaker.util.provider.runtime.LocalRuntimeCoordinator
 import com.kaleaon.mnxmindmaker.util.provider.runtime.LocalRuntimeState
@@ -58,6 +59,7 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
     private val mnxRepository = MnxRepository(application)
     private val llmRepository = LlmSettingsRepository(application)
     private val continuityManager = ContinuityManager(application)
+    private val llmClient = LlmApiClient(capabilityRegistry = ModelCapabilityRegistry.create(application))
     private val llmClient = LlmApiClient()
     private val localRuntimeCoordinator = LocalRuntimeCoordinator(scope = viewModelScope)
     private val chatSessionRepository = ChatSessionRepository(application)
