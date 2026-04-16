@@ -1,6 +1,7 @@
 package com.kaleaon.mnxmindmaker.util.memory.persistence
 
 import android.content.Context
+import com.kaleaon.mnxmindmaker.security.EncryptedArtifactStore
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -14,6 +15,8 @@ class MemoryStoreRepository(
     context: Context,
     private val fileName: String = DEFAULT_FILE_NAME
 ) : MemoryStore {
+
+    private val encryptedStore = EncryptedArtifactStore(context)
 
     private val json = Json {
         ignoreUnknownKeys = true
@@ -139,7 +142,7 @@ class MemoryStoreRepository(
         }
 
         return try {
-            val raw = storageFile.readText()
+            val raw = String(encryptedStore.readDecryptedBytes(storageFile, "memory_index"))
             val payload = json.parseToJsonElement(raw).jsonObject
             val payloadVersion = payload[SCHEMA_VERSION_FIELD]?.jsonPrimitive?.intOrNull ?: 1
             val migratedPayload = applyMigrationsLocked(payload, payloadVersion)
@@ -163,7 +166,7 @@ class MemoryStoreRepository(
 
     private fun saveStateLocked(state: PersistedMemoryStore) {
         storageFile.parentFile?.mkdirs()
-        storageFile.writeText(json.encodeToString(state))
+        encryptedStore.writeEncryptedBytes(storageFile, json.encodeToString(state).toByteArray(), "memory_index")
     }
 
     private fun defaultState(now: Long = System.currentTimeMillis()): PersistedMemoryStore {
