@@ -7,6 +7,7 @@ import com.kaleaon.mnxmindmaker.util.memory.MemoryManager
 import java.util.concurrent.ConcurrentHashMap
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -67,6 +68,7 @@ class MemoryManagerTest {
     }
 
     @Test
+    fun `persistent policy applies sensitivity and supports edit delete`() {
     fun `persistent policy supports edit delete`() {
         val manager = MemoryManager()
         manager.setPolicy(
@@ -121,6 +123,9 @@ class MemoryManagerTest {
                     MemoryManager.MemoryCategory.SESSION to 1000L,
                     MemoryManager.MemoryCategory.SEMANTIC to 1000L,
                     MemoryManager.MemoryCategory.PROFILE to 1000L
+                ),
+                maintenancePolicy = MemoryManager.MemoryMaintenancePolicy(
+                    enabled = false
                 )
             )
         )
@@ -152,6 +157,8 @@ class MemoryManagerTest {
             )
         )
 
+        manager.runMaintenance(now)
+
         val retrieved = manager.retrieveForPromptInjection(
             prompt = "fresh",
             task = "any",
@@ -171,6 +178,29 @@ class MemoryManagerTest {
     }
 
     @Test
+    fun `malformed timestamps use fallback and emit malformed telemetry count`() {
+        val store = RecordingStore()
+        val telemetry = RecordingTelemetry()
+        val manager = MemoryManager(store, telemetry)
+        manager.setPolicy(
+            MemoryManager.MemoryPolicySettings(
+                mode = MemoryManager.MemoryPolicyMode.PERSISTENT,
+                expiryByCategoryMs = mapOf(
+                    MemoryManager.MemoryCategory.SESSION to 1000L,
+                    MemoryManager.MemoryCategory.SEMANTIC to 1000L,
+                    MemoryManager.MemoryCategory.PROFILE to 1000L
+                ),
+                maintenancePolicy = MemoryManager.MemoryMaintenancePolicy(enabled = false)
+            )
+        )
+        manager.upsertProfileMemory(
+            key = "tone",
+            value = "friendly",
+            timestampMs = 1_000L
+        )
+        manager.editMemory("tone") { node ->
+            node.copy(attributes = node.attributes.toMutableMap().apply { put("timestamp", "not-a-number") })
+        }
     fun `embedding cache invalidates when semantic node content changes`() {
         val manager = MemoryManager()
         manager.setPolicy(MemoryManager.MemoryPolicySettings(mode = MemoryManager.MemoryPolicyMode.PERSISTENT))
@@ -185,6 +215,14 @@ class MemoryManagerTest {
             )
         )
 
+        manager.runMaintenance(50_000L)
+
+        val retrieved = manager.retrieveForPromptInjection(
+            prompt = "check",
+            task = "check",
+            limit = 10,
+            nowEpochMs = 50_000L
+        )
         val initialFingerprint = manager.getMemory("semantic-cache")
             ?.attributes
             ?.get("embedding_cache_fingerprint")
@@ -203,6 +241,67 @@ class MemoryManagerTest {
     }
 
     @Test
+    fun `scheduled maintenance archives dormant memories and exports cold storage`() {
+        val manager = MemoryManager()
+        manager.setPolicy(
+            MemoryManager.MemoryPolicySettings(
+                mode = MemoryManager.MemoryPolicyMode.PERSISTENT,
+                maintenancePolicy = MemoryManager.MemoryMaintenancePolicy(
+                    enabled = true,
+                    cleanupIntervalMs = 1,
+                    archiveDormantAfterMs = mapOf(
+                        MemoryManager.MemoryCategory.SESSION to 1000L,
+                        MemoryManager.MemoryCategory.SEMANTIC to 1000L,
+                        MemoryManager.MemoryCategory.PROFILE to 1000L
+                    ),
+                    retentionCountByCategory = mapOf(
+                        MemoryManager.MemoryCategory.SESSION to 1,
+                        MemoryManager.MemoryCategory.SEMANTIC to 100,
+                        MemoryManager.MemoryCategory.PROFILE to 100
+                    ),
+                    deleteArchivedAfterMs = 10_000L,
+                    sessionCompactionEnabled = false
+                )
+            )
+        )
+
+        manager.appendSessionTurn(MemoryManager.SessionTurn(role = "user", content = "old-1", timestampMs = 100L))
+        manager.appendSessionTurn(MemoryManager.SessionTurn(role = "user", content = "old-2", timestampMs = 200L))
+        manager.upsertSemanticMemory(
+            MindNode(
+                id = "semantic-old",
+                label = "old semantics",
+                type = NodeType.MEMORY,
+                description = "very old",
+                attributes = mutableMapOf("timestamp" to "100", "current_relevance" to "0.8")
+            )
+        )
+
+        val report = manager.runScheduledCleanup(nowEpochMs = 50_000L)
+        assertNotNull(report)
+        val status = manager.status(nowEpochMs = 50_000L)
+        assertTrue(status.archivedMemoryCount >= 2)
+
+        val export = manager.exportDormantMemoriesToColdStorage(nowEpochMs = 50_000L)
+        assertTrue(export.records.isNotEmpty())
+        assertTrue(export.lineDelimitedJson.contains("archived_at_ms"))
+    }
+
+    @Test
+    fun `session turn metadata is preserved in retrieved memory attributes`() {
+        val manager = MemoryManager()
+        manager.setPolicy(
+            MemoryManager.MemoryPolicySettings(mode = MemoryManager.MemoryPolicyMode.SESSION_ONLY)
+        )
+        manager.appendSessionTurn(
+            MemoryManager.SessionTurn(
+                role = "assistant",
+                source = "import",
+                content = "Chunked transcript segment",
+                conversationId = "conv-42",
+                turnIndex = 7,
+                chunkSpan = "7:0-199"
+            )
     fun `strict local privacy blocks remote embedding provider fallback`() {
         val manager = MemoryManager(
             embeddingPolicy = MemoryManager.EmbeddingPolicy(
