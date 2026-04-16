@@ -6,7 +6,9 @@ import kotlinx.serialization.Serializable
 enum class MemoryCategory {
     SESSION,
     PROFILE,
-    SEMANTIC
+    SEMANTIC,
+    GRAPH,
+    EPISODIC
 }
 
 @Serializable
@@ -39,6 +41,58 @@ data class SemanticMemoryRecord(
     val label: String,
     val description: String,
     val attributes: Map<String, String> = emptyMap()
+)
+
+@Serializable
+data class GraphMemoryRecord(
+    val metadata: MemoryRecordMetadata,
+    val nodeId: String,
+    val edges: Map<String, List<String>> = emptyMap(),
+    val properties: Map<String, String> = emptyMap()
+)
+
+@Serializable
+data class MetadataIndexEntry(
+    val id: String,
+    val category: MemoryCategory,
+    val lastUpdatedTimestamp: Long,
+    val sensitivity: String,
+    val routingTags: List<String> = emptyList(),
+    val localRevision: Long = 0,
+    val remoteRevision: Long? = null
+)
+
+@Serializable
+data class MetadataIndexStore(
+    val schemaVersion: Int,
+    val createdTimestamp: Long,
+    val updatedTimestamp: Long,
+    val entries: List<MetadataIndexEntry> = emptyList()
+)
+
+@Serializable
+data class GraphMemoryStore(
+    val schemaVersion: Int,
+    val createdTimestamp: Long,
+    val updatedTimestamp: Long,
+    val profiles: List<ProfileMemoryRecord> = emptyList(),
+    val graphRecords: List<GraphMemoryRecord> = emptyList()
+)
+
+@Serializable
+data class SemanticMemoryStore(
+    val schemaVersion: Int,
+    val createdTimestamp: Long,
+    val updatedTimestamp: Long,
+    val semantics: List<SemanticMemoryRecord> = emptyList()
+)
+
+@Serializable
+data class EpisodicTimelineStore(
+    val schemaVersion: Int,
+    val createdTimestamp: Long,
+    val updatedTimestamp: Long,
+    val episodes: List<SessionMemoryRecord> = emptyList()
 )
 
 @Serializable

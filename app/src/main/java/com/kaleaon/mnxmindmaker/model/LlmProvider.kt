@@ -102,10 +102,17 @@ data class LlmSettings(
     val tlsPinnedSpkiSha256: String = "",
     val enableWakeUpContext: Boolean = true,
     val wakeUpTokenBudget: Int = 1024,
-    val retrievalModePreference: RetrievalModePreference = RetrievalModePreference.SUMMARY
+    val retrievalModePreference: RetrievalModePreference = RetrievalModePreference.SUMMARY,
+    val pluginId: String? = null,
+    val pluginVersion: String? = null,
+    val pluginDriver: String? = null,
+    val pluginDisplayName: String? = null
 ) {
     val capabilities: LlmCapabilityFlags
         get() = provider.defaultCapabilities(localProfile)
+
+    val displayName: String
+        get() = pluginDisplayName ?: provider.displayName
 }
 
 fun LlmProvider.defaultModel(): String = when (this) {

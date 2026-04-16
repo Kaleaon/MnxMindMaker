@@ -12,6 +12,7 @@ A standalone Android APK for designing AI minds and exporting them to the
 | **Mind Map Canvas** | Interactive node editor — add, move, and connect nodes representing every domain of an AI mind (identity, memory, knowledge, affect, personality, beliefs, values, relationships) |
 | **N-Dimensional Nodes** | Every node carries a named dimension vector beyond the visible (x, y) canvas position. Values get 7 axes (`ethical_weight`, `social_impact`, `personal_relevance`, `priority`, `universality`, `actionability`, `intrinsic_worth`); beliefs get 7 axes (`confidence`, `evidence_strength`, `emotional_loading`, `social_consensus`, `revisability`, `centrality`, `acquired_recency`), etc. All dimensions are persisted in the `.mnx` `DIMENSIONAL_REFS` section |
 | **MNX Import / Export** | Read and write `.mnx` binary files — fully compatible with [TronProtocol](https://github.com/Kaleaon/TronProtocol)'s codec (magic, CRC32 per section, SHA-256 footer) |
+| **Interchange Import / Export** | Adds provider-neutral exports via `.mnxj` (strict JSON) and `.mnxb` (ZIP bundle with `manifest.json` + `payload/graph.json` + optional `blobs/` files), including explicit schema versioning and compatibility hooks |
 | **Data Import** | Paste or load plain text or JSON; the mapper heuristically assigns node types and populates default dimensions automatically |
 | **LLM API Settings** | Configure API keys, model names, and base URLs for **Anthropic** (Claude), **OpenAI** (GPT), **Google Gemini**, and **vLLM Gemma 4** (self-hosted OpenAI-compatible endpoint) |
 | **Continuity Metadata** | Supports kernel/memory/drift metadata fields (for example `protection_level`, `kernel_section`, `memory_class`, `raw_record`, `interpretation`, `drift_type`, and related schema attributes) |
@@ -45,6 +46,24 @@ The deploy wizard is intentionally conservative and policy-aware:
 - **Step 5: Confirmation** — display effective config + warnings before final deploy.
 
 When compatibility mode is triggered, wizard warnings are non-blocking unless a policy explicitly requires manifest-enforced fields.
+
+## Interchange format (`.mnxj` / `.mnxb`)
+
+For provider-neutral portability beyond `.mnx`, the app now supports a stable interchange format:
+
+- **`.mnxj`**: canonical JSON envelope with:
+  - `schema.family = "mnx.interchange"`
+  - `schema.version = { major, minor }`
+  - `compatibility.min_reader_version`
+  - `compatibility.forward_compat_extensions`
+- **`.mnxb`**: ZIP bundle containing:
+  - `manifest.json`
+  - `payload/graph.json` (same strict JSON format as `.mnxj`)
+  - optional `blobs/*` binary payloads
+
+Validation is strict by default (required fields, finite coordinates, node-id uniqueness,
+and edge referential integrity). Forward/backward compatibility hooks are carried under
+`compatibility` to allow additive evolution without provider lock-in.
 
 ## Legacy `.mnx` compatibility (no manifest)
 
