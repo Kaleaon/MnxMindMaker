@@ -31,6 +31,7 @@ import com.kaleaon.mnxmindmaker.util.observability.RequestTrace
 import com.kaleaon.mnxmindmaker.util.observability.TraceEventType
 import com.kaleaon.mnxmindmaker.util.provider.ProviderRouter
 import com.kaleaon.mnxmindmaker.util.LlmApiClient
+import com.kaleaon.mnxmindmaker.util.provider.ModelCapabilityRegistry
 import com.kaleaon.mnxmindmaker.util.LlmApiException
 import com.kaleaon.mnxmindmaker.util.provider.runtime.LocalRuntimeCoordinator
 import com.kaleaon.mnxmindmaker.util.provider.runtime.LocalRuntimeState
@@ -58,6 +59,7 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
     private val mnxRepository = MnxRepository(application)
     private val llmRepository = LlmSettingsRepository(application)
     private val continuityManager = ContinuityManager(application)
+    private val llmClient = LlmApiClient(capabilityRegistry = ModelCapabilityRegistry.create(application))
     private val llmClient = LlmApiClient()
     private val localRuntimeCoordinator = LocalRuntimeCoordinator(scope = viewModelScope)
     private val chatSessionRepository = ChatSessionRepository(application)
@@ -117,6 +119,7 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
     val compareCandidateMessageId: LiveData<String?> get() = _compareCandidateMessageId
 
     private val interactionPolicy = MindMapInteractionPolicy()
+    private val mentionParser = ChatMentionParser()
 
     private val _pendingToolApprovalRequest = MutableLiveData<ToolApprovalRequest?>()
     val pendingToolApprovalRequest: LiveData<ToolApprovalRequest?> get() = _pendingToolApprovalRequest
@@ -312,12 +315,36 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
             loadPersistedChatSessions()
             _activeChatSessionId.value
         } ?: return
+
+        val mentionCandidates = buildMentionCandidates(_graph.value?.nodes.orEmpty())
+        val parseResult = mentionParser.parse(prompt, mentionCandidates)
+        val cleanedPrompt = parseResult.cleanedMessageContent.ifBlank { prompt.trim() }
+        val dispatchPrompt = buildDispatchPrompt(cleanedPrompt, parseResult.addressedIdentities)
+
         viewModelScope.launch {
             _isLoading.value = true
             try {
-                val result = withContext(Dispatchers.IO) { runSingleChat(prompt, choice) }
+                val result = withContext(Dispatchers.IO) { runSingleChat(dispatchPrompt, choice) }
                 if (result != null) {
-                    val nextMessages = _chatMessages.value.orEmpty() + result
+                    val nextMessages = _chatMessages.value.orEmpty() + result.copy(prompt = cleanedPrompt)
+                    val userMessageId = UUID.randomUUID().toString()
+                    val userMessage = ChatMessage(
+                        id = userMessageId,
+                        role = ChatRole.USER,
+                        actorId = "user",
+                        actorLabel = "You",
+                        content = prompt,
+                        providerChoice = choice,
+                        addressedActorIds = listOf(result.actorId),
+                        replyToMessageId = null,
+                        prompt = prompt
+                    )
+                    val assistantMessage = result.copy(
+                        addressedActorIds = listOf("user"),
+                        replyToMessageId = userMessageId,
+                        response = result.content
+                    )
+                    val nextMessages = _chatMessages.value.orEmpty() + userMessage + assistantMessage
                     _chatMessages.value = nextMessages
                     persistChatMessages(activeSessionId, nextMessages)
                 }
@@ -361,13 +388,13 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch {
             _isLoading.value = true
             try {
-                val nextProvider = withContext(Dispatchers.IO) { pickAlternativeProvider(existing.provenance.provider) }
+                val nextProvider = withContext(Dispatchers.IO) { pickAlternativeProvider(existing.provenance?.provider ?: LlmProvider.OPENAI) }
                 if (nextProvider == null) {
                     _error.value = "No alternate enabled provider available for retry."
                     return@launch
                 }
                 val result = withContext(Dispatchers.IO) {
-                    runSingleChat(existing.prompt, providerToChoice(nextProvider), forcedProvider = nextProvider)
+                    runSingleChat(existing.content, providerToChoice(nextProvider), forcedProvider = nextProvider)
                 } ?: return@launch
 
                 val updatedMessages = _chatMessages.value.orEmpty().map { msg ->
@@ -376,11 +403,11 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
                     } else {
                         msg.copy(
                             compareCandidate = CompareCandidate(
-                                provider = result.provenance.provider,
-                                model = result.provenance.model,
-                                response = result.response,
-                                latencyMs = result.provenance.latencyMs,
-                                totalTokens = result.provenance.totalTokens
+                                provider = result.provenance?.provider ?: LlmProvider.OPENAI,
+                                model = result.provenance?.model.orEmpty(),
+                                response = result.content,
+                                latencyMs = result.provenance?.latencyMs,
+                                totalTokens = result.provenance?.totalTokens
                             )
                         )
                     }
@@ -475,6 +502,10 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
         }
 
         var lastError: String? = null
+        val failoverEvents = mutableListOf<FailoverEvent>()
+        for (settings in chain) {
+            val systemPrompt = buildSystemPrompt(settings)
+            val start = System.currentTimeMillis()
         val primarySettings = chain.first()
         val catchUp = chatCatchUpBuilder.build(
             history = _chatMessages.value.orEmpty(),
@@ -515,9 +546,12 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
 
             return ChatMessage(
                 id = UUID.randomUUID().toString(),
-                prompt = prompt,
-                response = pipelineResult.responseText,
+                role = ChatRole.MIND,
+                actorId = primarySettings.provider.name,
+                actorLabel = primarySettings.provider.displayName,
+                content = pipelineResult.responseText,
                 providerChoice = choice,
+                replyToMessageId = null,
                 provenance = MessageProvenance(
                     provider = provider,
                     model = primarySettings.model,
@@ -544,10 +578,19 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
                 return ChatMessage(
                     id = UUID.randomUUID().toString(),
                     prompt = prompt,
+                    role = ChatRole.MIND,
+                    actorId = primarySettings.provider.name,
+                    actorLabel = primarySettings.provider.displayName,
+                    content = "[Fallback mode] $traceAwareMessage\n\n${fallbackTurn.text}",
                     createdTimestamp = System.currentTimeMillis(),
-                    response = "[Fallback mode] $traceAwareMessage\n\n${fallbackTurn.text}",
                     providerChoice = choice,
+                    prompt = prompt,
+                    response = fallbackTurn.text,
                     provenance = MessageProvenance(
+                        provider = settings.provider,
+                        model = turn.raw?.optString("model").takeUnless { it.isNullOrBlank() } ?: settings.model,
+                        toolCalls = turn.toolInvocations.map { it.toolName },
+                        failoverEvents = failoverEvents.toList(),
                         provider = primarySettings.provider,
                         model = fallbackTurn.raw?.optString("model").takeUnless { it.isNullOrBlank() } ?: primarySettings.model,
                         toolCalls = listOf("orchestrator_error: ${orchestratedError::class.java.simpleName}"),
@@ -557,6 +600,12 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
                         totalTokens = extractTotalTokens(fallbackTurn.raw)
                     )
                 )
+            } catch (e: LlmApiException) {
+                failoverEvents += FailoverEvent(
+                    reasonCode = reasonCodeFor(e),
+                    message = e.message.orEmpty().ifBlank { "Provider request failed" }
+                )
+                lastError = "${settings.provider.displayName}: ${e.message}"
             } catch (fallbackError: LlmApiException) {
                 lastError = "$traceAwareMessage Fallback failed: ${fallbackError.message}"
             }
@@ -565,6 +614,51 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
         _llmStatusBadge.postValue("REMOTE ERROR")
         _error.postValue("AI request failed across provider chain. $lastError")
         return null
+    }
+
+    private fun buildMentionCandidates(nodes: List<MindNode>): List<ChatMentionParser.IdentityCandidate> {
+        return nodes.map { node ->
+            ChatMentionParser.IdentityCandidate(
+                id = node.id,
+                label = node.label,
+                aliases = extractAliases(node)
+            )
+        }
+    }
+
+    private fun extractAliases(node: MindNode): Set<String> {
+        val aliasKeys = listOf("aliases", "alias", "mention_aliases")
+        return aliasKeys
+            .mapNotNull { key -> node.attributes[key] }
+            .flatMap { raw -> raw.split(',', ';', '|') }
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .toSet()
+    }
+
+    private fun buildDispatchPrompt(
+        cleanedPrompt: String,
+        addressedIdentities: List<ChatMentionParser.AddressedIdentity>
+    ): String {
+        if (addressedIdentities.isEmpty()) return cleanedPrompt
+
+        val addressedLine = addressedIdentities.joinToString(", ") { identity ->
+            "${identity.label} [${identity.id}]"
+        }
+        return "Addressed minds: $addressedLine\n$cleanedPrompt"
+    }
+
+    private fun reasonCodeFor(error: LlmApiException): String {
+        val message = error.message.orEmpty().lowercase()
+        return when {
+            message.contains("api key") -> "AUTH_INVALID"
+            message.contains("timeout") -> "UPSTREAM_TIMEOUT"
+            message.contains("429") || message.contains("rate limit") -> "RATE_LIMITED"
+            message.contains("503") || message.contains("unavailable") -> "UPSTREAM_UNAVAILABLE"
+            message.contains("must use") || message.contains("misconfigured") || message.contains("cannot use") -> "CONFIG_INVALID"
+            message.contains("no adapter") -> "ADAPTER_UNAVAILABLE"
+            else -> "PROVIDER_ERROR"
+        }
     }
 
     private suspend fun awaitToolApprovalDecision(request: ToolApprovalRequest): Boolean {
@@ -735,10 +829,19 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
         val compareProviderValue = compareProvider?.let { candidate ->
             enumValues<LlmProvider>().firstOrNull { it.name == candidate } ?: LlmProvider.OPENAI
         }
+        val resolvedRole = enumValues<ChatRole>().firstOrNull { it.name == role } ?: ChatRole.MIND
+        val resolvedContent = content.ifBlank {
+            when (resolvedRole) {
+                ChatRole.USER -> prompt
+                else -> response
+            }
+        }
         return ChatMessage(
             id = id,
-            prompt = prompt,
-            response = response,
+            role = resolvedRole,
+            actorId = actorId,
+            actorLabel = actorLabel,
+            content = resolvedContent,
             createdTimestamp = createdTimestamp,
             providerChoice = choice,
             provenance = MessageProvenance(
@@ -750,6 +853,10 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
                 completionTokens = completionTokens,
                 totalTokens = totalTokens
             ),
+            addressedActorIds = addressedActorIds,
+            replyToMessageId = replyToMessageId,
+            prompt = prompt,
+            response = response,
             compareCandidate = if (compareProviderValue != null && !compareResponse.isNullOrBlank()) {
                 CompareCandidate(
                     provider = compareProviderValue,
@@ -767,17 +874,23 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
     private fun ChatMessage.toPersistedMessage(): PersistedChatMessage {
         return PersistedChatMessage(
             id = id,
-            prompt = prompt,
-            response = response,
+            role = role.name,
+            actorId = actorId,
+            actorLabel = actorLabel,
+            content = content,
+            addressedActorIds = addressedActorIds,
+            replyToMessageId = replyToMessageId,
+            prompt = prompt.orEmpty(),
+            response = response.orEmpty(),
             createdTimestamp = createdTimestamp,
             providerChoice = providerChoice.name,
-            provider = provenance.provider.name,
-            model = provenance.model,
-            toolCalls = provenance.toolCalls,
-            latencyMs = provenance.latencyMs,
-            promptTokens = provenance.promptTokens,
-            completionTokens = provenance.completionTokens,
-            totalTokens = provenance.totalTokens,
+            provider = provenance?.provider?.name ?: LlmProvider.OPENAI.name,
+            model = provenance?.model.orEmpty(),
+            toolCalls = provenance?.toolCalls ?: emptyList(),
+            latencyMs = provenance?.latencyMs,
+            promptTokens = provenance?.promptTokens,
+            completionTokens = provenance?.completionTokens,
+            totalTokens = provenance?.totalTokens,
             compareProvider = compareCandidate?.provider?.name,
             compareModel = compareCandidate?.model,
             compareResponse = compareCandidate?.response,
