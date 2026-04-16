@@ -28,8 +28,17 @@ object MemoryRetrievalService {
         val roomHint: String? = null,
         val hallHint: String? = null,
         val wingHint: String? = null,
+        val queryVector: Map<String, Float> = emptyMap(),
+        val policyProfile: RetrievalPolicyProfile = RetrievalPolicyProfile.ASSIST,
         val nowEpochMs: Long = System.currentTimeMillis()
     )
+
+    enum class RetrievalPolicyProfile {
+        ASSIST,
+        AUDIT,
+        DEPLOYMENT,
+        RECOVERY
+    }
 
     data class RetrievalFilters(
         val minRelevance: Float = 0f,
@@ -47,7 +56,10 @@ object MemoryRetrievalService {
         val score: Float,
         val confidence: Float,
         val recency: Float,
+        val importance: Float,
         val relevance: Float,
+        val vectorSimilarity: Float,
+        val graphProximity: Float,
         val riskPenalty: Float,
         val tier: RetrievalTier
     )
@@ -63,6 +75,16 @@ object MemoryRetrievalService {
         val room: String?,
         val hall: String?,
         val wing: String?
+    )
+
+    private data class PolicyWeights(
+        val relevance: Float,
+        val confidence: Float,
+        val recency: Float,
+        val importance: Float,
+        val vectorSimilarity: Float,
+        val graphProximity: Float,
+        val riskPenaltyWeight: Float
     )
 
     fun retrieve(
@@ -86,6 +108,8 @@ object MemoryRetrievalService {
         if (limit <= 0 || memories.isEmpty()) return RetrievalResult(memories = emptyList())
 
         val routeHints = buildRouteHints(context)
+        val graphProximityByNode = graphProximityScores(memories, context)
+        val policyWeights = weightsFor(context.policyProfile)
 
         val scored = memories
             .asSequence()
@@ -95,15 +119,21 @@ object MemoryRetrievalService {
 
                 val confidence = node.attributeAsFloat("confidence", default = 0.55f)
                 val recency = recencyScore(node, context.nowEpochMs)
+                val importance = importanceScore(node)
+                val vectorSimilarity = vectorSimilarityScore(node, context)
+                val graphProximity = graphProximityByNode[node.id] ?: 0f
                 val riskPenalty = confabulationRiskPenalty(node)
                 val stabilityBonus = (1f - abs(confidence - relevance)).coerceIn(0f, 1f) * 0.08f
 
                 val score = (
-                    relevance * 0.48f +
-                        confidence * 0.2f +
-                        recency * 0.2f +
+                    relevance * policyWeights.relevance +
+                        confidence * policyWeights.confidence +
+                        recency * policyWeights.recency +
+                        importance * policyWeights.importance +
+                        vectorSimilarity * policyWeights.vectorSimilarity +
+                        graphProximity * policyWeights.graphProximity +
                         stabilityBonus -
-                        riskPenalty
+                        riskPenalty * policyWeights.riskPenaltyWeight
                     ).coerceIn(0f, 1f)
 
                 ScoredMemory(
@@ -111,7 +141,10 @@ object MemoryRetrievalService {
                     score = score,
                     confidence = confidence,
                     recency = recency,
+                    importance = importance,
                     relevance = relevance,
+                    vectorSimilarity = vectorSimilarity,
+                    graphProximity = graphProximity,
                     riskPenalty = riskPenalty,
                     tier = classifyTier(node, routeHints)
                 )
@@ -162,6 +195,14 @@ object MemoryRetrievalService {
             allowSensitiveBoot = false
         )
     )
+
+    fun policyProfileForUseCase(useCase: String): RetrievalPolicyProfile = when (useCase.trim().lowercase()) {
+        "assist", "assistant", "chat", "help" -> RetrievalPolicyProfile.ASSIST
+        "audit", "compliance", "trace" -> RetrievalPolicyProfile.AUDIT
+        "deployment", "deploy", "release", "runtime" -> RetrievalPolicyProfile.DEPLOYMENT
+        "recovery", "incident", "fallback", "restore" -> RetrievalPolicyProfile.RECOVERY
+        else -> RetrievalPolicyProfile.ASSIST
+    }
 
     private fun passesProtectionAndSensitivity(
         node: MindNode,
@@ -251,6 +292,124 @@ object MemoryRetrievalService {
         }
     }
 
+    private fun importanceScore(node: MindNode): Float =
+        node.attributeAsFloat("importance", default = node.dimensions["importance"]?.coerceIn(0f, 1f) ?: 0.5f)
+
+    private fun vectorSimilarityScore(node: MindNode, context: RetrievalContext): Float {
+        val queryVector = context.queryVector
+            .filterValues { it.isFinite() }
+            .mapValues { (_, value) -> value.coerceIn(-1f, 1f) }
+        if (queryVector.isEmpty()) {
+            return node.attributeAsFloat("vector_similarity", default = 0.5f)
+        }
+
+        val nodeVector = node.dimensions
+            .filterKeys { it in queryVector.keys }
+            .mapValues { (_, value) -> value.coerceIn(-1f, 1f) }
+        if (nodeVector.isEmpty()) return 0f
+
+        val dot = nodeVector.entries.sumOf { (key, value) -> (value * (queryVector[key] ?: 0f)).toDouble() }
+        val nodeNorm = kotlin.math.sqrt(nodeVector.values.sumOf { (it * it).toDouble() })
+        val queryNorm = kotlin.math.sqrt(queryVector.values.sumOf { (it * it).toDouble() })
+        if (nodeNorm == 0.0 || queryNorm == 0.0) return 0f
+
+        val cosine = (dot / (nodeNorm * queryNorm)).toFloat().coerceIn(-1f, 1f)
+        return ((cosine + 1f) / 2f).coerceIn(0f, 1f)
+    }
+
+    private fun graphProximityScores(
+        memories: List<MindNode>,
+        context: RetrievalContext
+    ): Map<String, Float> {
+        if (memories.isEmpty()) return emptyMap()
+
+        val seedIds = memories
+            .map { it to relevanceScore(it, context) }
+            .sortedByDescending { (_, score) -> score }
+            .take(3)
+            .mapNotNull { (node, score) -> node.id.takeIf { score >= 0.3f } }
+            .toSet()
+        if (seedIds.isEmpty()) return emptyMap()
+
+        val adjacency = mutableMapOf<String, MutableSet<String>>()
+        memories.forEach { node ->
+            adjacency.getOrPut(node.id) { linkedSetOf() }
+            val parentId = node.parentId ?: return@forEach
+            adjacency.getOrPut(node.id) { linkedSetOf() }.add(parentId)
+            adjacency.getOrPut(parentId) { linkedSetOf() }.add(node.id)
+        }
+
+        val distanceById = mutableMapOf<String, Int>()
+        val queue = ArrayDeque<String>()
+        seedIds.forEach { seedId ->
+            distanceById[seedId] = 0
+            queue.add(seedId)
+        }
+
+        while (queue.isNotEmpty()) {
+            val current = queue.removeFirst()
+            val currentDistance = distanceById[current] ?: continue
+            if (currentDistance >= 2) continue
+
+            adjacency[current].orEmpty().forEach { neighbor ->
+                if (neighbor !in distanceById) {
+                    distanceById[neighbor] = currentDistance + 1
+                    queue.add(neighbor)
+                }
+            }
+        }
+
+        return memories.associate { node ->
+            val distance = distanceById[node.id]
+            val proximity = when (distance) {
+                0 -> 1f
+                1 -> 0.7f
+                2 -> 0.4f
+                else -> 0f
+            }
+            node.id to proximity
+        }
+    }
+
+    private fun weightsFor(profile: RetrievalPolicyProfile): PolicyWeights = when (profile) {
+        RetrievalPolicyProfile.ASSIST -> PolicyWeights(
+            relevance = 0.28f,
+            confidence = 0.14f,
+            recency = 0.18f,
+            importance = 0.12f,
+            vectorSimilarity = 0.14f,
+            graphProximity = 0.14f,
+            riskPenaltyWeight = 1f
+        )
+        RetrievalPolicyProfile.AUDIT -> PolicyWeights(
+            relevance = 0.24f,
+            confidence = 0.2f,
+            recency = 0.12f,
+            importance = 0.2f,
+            vectorSimilarity = 0.14f,
+            graphProximity = 0.1f,
+            riskPenaltyWeight = 1.15f
+        )
+        RetrievalPolicyProfile.DEPLOYMENT -> PolicyWeights(
+            relevance = 0.2f,
+            confidence = 0.12f,
+            recency = 0.22f,
+            importance = 0.2f,
+            vectorSimilarity = 0.14f,
+            graphProximity = 0.12f,
+            riskPenaltyWeight = 0.95f
+        )
+        RetrievalPolicyProfile.RECOVERY -> PolicyWeights(
+            relevance = 0.22f,
+            confidence = 0.1f,
+            recency = 0.26f,
+            importance = 0.1f,
+            vectorSimilarity = 0.1f,
+            graphProximity = 0.22f,
+            riskPenaltyWeight = 0.9f
+        )
+    }
+
     private fun confabulationRiskPenalty(node: MindNode): Float {
         val confabRisk = node.attributeAsFloat("confabulation_risk", default = 0.15f)
         val sourceQuality = node.attributeAsFloat("source_quality", default = 0.6f)
@@ -280,7 +439,10 @@ object MemoryRetrievalService {
                 "last_revalidated" to nowEpochMs.toString(),
                 "last_retrieval_score" to "%.4f".format(scoredMemory.score),
                 "confidence_drift" to "%.4f".format(confidenceDrift),
-                "confidence" to "%.4f".format(targetConfidence)
+                "confidence" to "%.4f".format(targetConfidence),
+                "last_importance_score" to "%.4f".format(scoredMemory.importance),
+                "last_vector_similarity" to "%.4f".format(scoredMemory.vectorSimilarity),
+                "last_graph_proximity" to "%.4f".format(scoredMemory.graphProximity)
             )
         )
     }

@@ -8,6 +8,7 @@ import com.kaleaon.mnxmindmaker.model.LlmSettings
 import com.kaleaon.mnxmindmaker.model.PrivacyMode
 import com.kaleaon.mnxmindmaker.util.LlmApiException
 import com.kaleaon.mnxmindmaker.util.tooling.AssistantTurn
+import com.kaleaon.mnxmindmaker.util.tooling.OutboundOperationQueue
 import com.kaleaon.mnxmindmaker.util.tooling.ToolSpec
 import org.json.JSONObject
 
@@ -24,15 +25,31 @@ data class GovernedRoutingResult(
     val rejections: List<String>
 )
 
+enum class FailoverReasonCode {
+    SETTINGS_INVALID,
+    ADAPTER_UNAVAILABLE,
+    PROVIDER_ERROR
+}
+
+data class ProviderFailoverEvent(
+    val fromProvider: LlmProvider,
+    val fromModel: String,
+    val reasonCode: FailoverReasonCode,
+    val userVisibleReason: String
+)
+
 class ProviderRouter(
-    private val providers: List<AssistantProvider> = listOf(
+    providers: List<AssistantProvider> = listOf(
         LlmEdgeProvider(),
         LocalProvider(),
         ClaudeProvider(),
         GeminiProvider(),
         ChatGPTProvider()
-    )
+    ),
+    private val outboundOperationQueue: OutboundOperationQueue? = null,
+    private val isNetworkAvailable: () -> Boolean = { true }
 ) {
+    private val providers: List<AssistantProvider> = ProviderConformanceGate.enforce(providers)
 
     fun chat(
         settingsChain: List<LlmSettings>,
@@ -44,20 +61,54 @@ class ProviderRouter(
         val ordered = orderByPolicy(settingsChain, policy)
         if (ordered.isEmpty()) throw LlmApiException("No provider configuration available for routing")
 
+        val online = isNetworkAvailable()
+        if (online) {
+            outboundOperationQueue?.reconcile(kind = "provider_chat") { queued ->
+                JSONObject()
+                    .put("status", "reconciled")
+                    .put("note", "Deferred provider request requires an explicit user retry")
+                    .put("provider", queued.payload.optString("provider"))
+            }
+        }
+
         var lastError: Exception? = null
+        val failoverEvents = mutableListOf<ProviderFailoverEvent>()
         for (settings in ordered) {
+            if (!online && settings.provider.runtime != LlmRuntime.LOCAL_ON_DEVICE) {
+                outboundOperationQueue?.enqueue(
+                    kind = "provider_chat",
+                    payload = JSONObject()
+                        .put("provider", settings.provider.name)
+                        .put("model", settings.model)
+                        .put("transcript_size", transcript.size)
+                        .put("tool_count", tools.size)
+                )
+                continue
+            }
             val validationError = ProviderSettingsValidator.validate(settings)
             if (validationError != null) {
                 lastError = LlmApiException("${settings.provider.displayName}: $validationError")
+                failoverEvents += ProviderFailoverEvent(
+                    fromProvider = settings.provider,
+                    fromModel = settings.model,
+                    reasonCode = FailoverReasonCode.SETTINGS_INVALID,
+                    userVisibleReason = validationError
+                )
                 continue
             }
             val provider = providers.firstOrNull { it.supports(settings) }
             if (provider == null) {
                 lastError = LlmApiException("No provider adapter for ${settings.provider.displayName}")
+                failoverEvents += ProviderFailoverEvent(
+                    fromProvider = settings.provider,
+                    fromModel = settings.model,
+                    reasonCode = FailoverReasonCode.ADAPTER_UNAVAILABLE,
+                    userVisibleReason = "No provider adapter for ${settings.provider.displayName}"
+                )
                 continue
             }
             try {
-                return provider.chat(
+                val turn = provider.chat(
                     ProviderRequest(
                         settings = settings,
                         systemPrompt = systemPrompt,
@@ -65,12 +116,43 @@ class ProviderRouter(
                         tools = tools
                     )
                 )
+                if (failoverEvents.isEmpty()) return turn
+                val failoverJson = org.json.JSONArray().also { events ->
+                    failoverEvents.forEach { event ->
+                        events.put(
+                            JSONObject()
+                                .put("provider", event.fromProvider.name)
+                                .put("model", event.fromModel)
+                                .put("reason_code", event.reasonCode.name)
+                                .put("message", event.userVisibleReason)
+                        )
+                    }
+                }
+                val raw = (turn.raw?.let { JSONObject(it.toString()) } ?: JSONObject())
+                    .put("failover_events", failoverJson)
+                return turn.copy(raw = raw)
             } catch (e: Exception) {
                 lastError = e
+                failoverEvents += ProviderFailoverEvent(
+                    fromProvider = settings.provider,
+                    fromModel = settings.model,
+                    reasonCode = FailoverReasonCode.PROVIDER_ERROR,
+                    userVisibleReason = e.message ?: "Provider request failed"
+                )
             }
         }
+        val reasonCodes = failoverEvents.joinToString(",") { it.reasonCode.name }
+        if (!online) {
+            return AssistantTurn(
+                text = "Offline mode is active. Outbound provider requests were queued and will reconcile when connectivity returns.",
+                raw = JSONObject()
+                    .put("offline_mode", true)
+                    .put("queued_provider_requests", outboundOperationQueue?.pending("provider_chat")?.size ?: 0)
+            )
+        }
+
         throw LlmApiException(
-            "All providers failed. Last error: ${lastError?.message}",
+            "All providers failed after policy-approved fallback chain. Reason codes: [$reasonCodes]. Last error: ${lastError?.message}",
             lastError
         )
     }
