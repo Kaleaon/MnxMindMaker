@@ -476,7 +476,12 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
         var lastError: String? = null
         val primarySettings = chain.first()
         val systemPrompt = buildSystemPrompt(primarySettings)
-        val pipelineRequest = PromptPipelineRequest(prompt = prompt, task = "mindmap_assist")
+        val transcript = buildChatTranscript(prompt)
+        val pipelineRequest = PromptPipelineRequest(
+            prompt = prompt,
+            transcript = transcript,
+            task = "mindmap_assist"
+        )
         val graphNodes = _graph.value?.nodes.orEmpty()
 
         try {
@@ -527,7 +532,7 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
                 val fallbackTurn = llmClient.completeAssistantTurn(
                     settings = primarySettings,
                     systemPrompt = systemPrompt,
-                    transcript = listOf(JSONObject().put("role", "user").put("content", prompt)),
+                    transcript = transcript,
                     tools = emptyList()
                 )
                 val latency = System.currentTimeMillis() - start
@@ -559,6 +564,22 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
         _llmStatusBadge.postValue("REMOTE ERROR")
         _error.postValue("AI request failed across provider chain. $lastError")
         return null
+    }
+
+    private fun buildChatTranscript(currentPrompt: String): List<JSONObject> {
+        val transcript = mutableListOf<JSONObject>()
+        _chatMessages.value.orEmpty().forEach { message ->
+            transcript += JSONObject()
+                .put("role", "user")
+                .put("content", message.prompt)
+            transcript += JSONObject()
+                .put("role", "assistant")
+                .put("content", message.response)
+        }
+        transcript += JSONObject()
+            .put("role", "user")
+            .put("content", currentPrompt)
+        return transcript
     }
 
     private suspend fun awaitToolApprovalDecision(request: ToolApprovalRequest): Boolean {
