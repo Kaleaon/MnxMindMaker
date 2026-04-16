@@ -27,6 +27,15 @@ class PersonaRuntimeManager(
     private val activePersonas = ConcurrentHashMap<String, ActivePersona>()
 
     fun activatePersona(personaId: String): PersonaRuntimeStatus {
+        activePersonas[personaId]?.let { existing ->
+            return PersonaRuntimeStatus(
+                personaId = personaId,
+                phase = PersonaRuntimePhase.ACTIVE,
+                activeProviders = existing.governedChain.map { it.provider },
+                governance = existing.governanceDecision,
+                updatedAtEpochMs = nowMs()
+            )
+        }
         updateStatus(personaId, PersonaRuntimePhase.ACTIVATING)
 
         val manifest = manifestProvider(personaId)

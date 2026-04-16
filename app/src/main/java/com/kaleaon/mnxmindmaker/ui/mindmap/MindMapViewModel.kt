@@ -14,7 +14,13 @@ import com.kaleaon.mnxmindmaker.model.MindGraph
 import com.kaleaon.mnxmindmaker.model.MindNode
 import com.kaleaon.mnxmindmaker.model.NodeType
 import com.kaleaon.mnxmindmaker.model.PrivacyMode
+import com.kaleaon.mnxmindmaker.model.DataClassification
+import com.kaleaon.mnxmindmaker.model.LlmFallbackOrder
 import com.kaleaon.mnxmindmaker.model.defaultModel
+import com.kaleaon.mnxmindmaker.persona.runtime.PersonaDeploymentManifest
+import com.kaleaon.mnxmindmaker.persona.runtime.PersonaRuntimeErrorCode
+import com.kaleaon.mnxmindmaker.persona.runtime.PersonaRuntimeManager
+import com.kaleaon.mnxmindmaker.persona.runtime.PersonaRuntimePhase
 import com.kaleaon.mnxmindmaker.repository.ChatSessionRepository
 import com.kaleaon.mnxmindmaker.repository.LlmSettingsRepository
 import com.kaleaon.mnxmindmaker.repository.MnxRepository
@@ -64,6 +70,26 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
     private val traceStore = InMemoryTraceStore()
     private val promptPipelineEngine = PromptPipelineEngine(traceStore = traceStore)
     private val pendingApprovalResolvers = ConcurrentHashMap<String, CompletableDeferred<Boolean>>()
+    private val personaRuntimeManager = PersonaRuntimeManager(
+        providerRouter = ProviderRouter(),
+        toolOrchestratorFactory = { settingsChain, routingPolicy, tracer ->
+            val toolRegistry = ToolRegistry(
+                getGraph = { _graph.value ?: newDefaultGraph() },
+                setGraph = { updated -> _graph.postValue(updated) }
+            )
+            ToolOrchestrator(
+                providerRouter = ProviderRouter(),
+                settingsChain = settingsChain,
+                registry = toolRegistry,
+                policy = ToolPolicyEngine(toolRegistry.specs().associateBy { it.name }),
+                requestApproval = { request -> awaitToolApprovalDecision(request) },
+                tracer = tracer
+            )
+        },
+        settingsProvider = { llmRepository.getInvocationChain().filter { isUsable(it) } },
+        privacyModeProvider = { llmRepository.loadPrivacyMode() },
+        manifestProvider = { personaId -> resolvePersonaManifest(personaId) }
+    )
 
     private val _graph = MutableLiveData(newDefaultGraph())
     val graph: LiveData<MindGraph> get() = _graph
@@ -314,6 +340,14 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch {
             _isLoading.value = true
             try {
+                val activationResult = withContext(Dispatchers.IO) {
+                    resolveAndActivateMentionedPersonas(activeSessionId, prompt)
+                }
+                if (activationResult.systemMessages.isNotEmpty()) {
+                    val seededMessages = _chatMessages.value.orEmpty() + activationResult.systemMessages
+                    _chatMessages.value = seededMessages
+                    persistChatMessages(activeSessionId, seededMessages)
+                }
                 val result = withContext(Dispatchers.IO) { runSingleChat(prompt, choice) }
                 if (result != null) {
                     val nextMessages = _chatMessages.value.orEmpty() + result
@@ -775,6 +809,117 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
         _auditResult.value = run_continuity_audit(current, acceptedFindingIds)
     }
 
+    private fun resolveAndActivateMentionedPersonas(
+        sessionId: String,
+        prompt: String
+    ): PersonaActivationBatch {
+        val addressedPersonaIds = PersonaMentionResolver.resolvePersonaIds(prompt)
+        if (addressedPersonaIds.isEmpty()) {
+            return PersonaActivationBatch()
+        }
+
+        val state = chatSessionRepository.loadState()
+        val activeSession = state.sessions.firstOrNull { it.sessionId == sessionId }
+        val participants = activeSession?.activeParticipants.orEmpty().toMutableSet()
+        val systemMessages = mutableListOf<ChatMessage>()
+
+        addressedPersonaIds.forEach { personaId ->
+            if (participants.contains(personaId)) {
+                return@forEach
+            }
+            val status = personaRuntimeManager.activatePersona(personaId)
+            if (status.phase == PersonaRuntimePhase.ACTIVE) {
+                participants += personaId
+            } else {
+                systemMessages += buildPersonaActivationFailureMessage(personaId, status)
+            }
+        }
+
+        if (participants != activeSession?.activeParticipants.orEmpty().toSet()) {
+            chatSessionRepository.updateActiveParticipants(sessionId, participants)
+        }
+
+        return PersonaActivationBatch(
+            activeParticipants = participants,
+            systemMessages = systemMessages
+        )
+    }
+
+    private fun resolvePersonaManifest(personaId: String): PersonaDeploymentManifest? {
+        val node = _graph.value?.nodes.orEmpty().firstOrNull { candidate ->
+            val alias = candidate.attributes["persona_id"]
+                ?: candidate.attributes["personaId"]
+                ?: candidate.attributes["participant_id"]
+            alias.equals(personaId, ignoreCase = true) ||
+                PersonaMentionResolver.canonicalId(candidate.label) == PersonaMentionResolver.canonicalId(personaId)
+        } ?: return null
+
+        return PersonaDeploymentManifest(
+            personaId = personaId,
+            allowedProviders = parseAllowedProviders(node.attributes["persona_allowed_providers"]),
+            maxOutboundClassification = parseEnum(
+                raw = node.attributes["persona_max_outbound_classification"],
+                values = enumValues()
+            ) ?: DataClassification.SENSITIVE,
+            enforcedPrivacyMode = parseEnum(
+                raw = node.attributes["persona_privacy_mode"],
+                values = enumValues()
+            ),
+            fallbackOrder = parseEnum(
+                raw = node.attributes["persona_fallback_order"],
+                values = enumValues()
+            ),
+            allowTools = node.attributes["persona_allow_tools"]?.toBooleanStrictOrNull() ?: true
+        )
+    }
+
+    private fun parseAllowedProviders(raw: String?): Set<LlmProvider> {
+        if (raw.isNullOrBlank()) return emptySet()
+        return raw.split(",")
+            .asSequence()
+            .map { token -> token.trim() }
+            .mapNotNull { token ->
+                enumValues<LlmProvider>().firstOrNull { provider ->
+                    provider.name.equals(token, ignoreCase = true)
+                }
+            }
+            .toSet()
+    }
+
+    private fun <T : Enum<T>> parseEnum(raw: String?, values: Array<T>): T? {
+        if (raw.isNullOrBlank()) return null
+        return values.firstOrNull { value -> value.name.equals(raw.trim(), ignoreCase = true) }
+    }
+
+    private fun buildPersonaActivationFailureMessage(
+        personaId: String,
+        status: com.kaleaon.mnxmindmaker.persona.runtime.PersonaRuntimeStatus
+    ): ChatMessage {
+        val error = status.lastError
+        val errorCode = error?.code ?: PersonaRuntimeErrorCode.INTERNAL_ERROR
+        val payload = buildMap<String, Any> {
+            put("event", "persona_activation_failed")
+            put("persona_id", personaId)
+            put("phase", status.phase.name)
+            put("error_code", errorCode.name)
+            put("reason", error?.message ?: "Activation failed")
+            if (!error?.details.isNullOrEmpty()) {
+                put("details", error?.details.orEmpty())
+            }
+        }
+        return ChatMessage(
+            id = UUID.randomUUID().toString(),
+            prompt = "[system]",
+            response = JSONObject(payload).toString(2),
+            createdTimestamp = System.currentTimeMillis(),
+            providerChoice = ComposerProviderChoice.AUTO,
+            provenance = MessageProvenance(
+                provider = LlmProvider.LOCAL_ON_DEVICE,
+                model = "system"
+            )
+        )
+    }
+
     fun clearError() {
         _error.value = null
     }
@@ -793,6 +938,28 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
             dimensions = DimensionMapper.defaultDimensions(NodeType.IDENTITY)
         )
         return MindGraph(name = "New Mind", nodes = mutableListOf(identity), edges = mutableListOf())
+    }
+}
+
+private data class PersonaActivationBatch(
+    val activeParticipants: Set<String> = emptySet(),
+    val systemMessages: List<ChatMessage> = emptyList()
+)
+
+internal object PersonaMentionResolver {
+    private val mentionRegex = Regex("""@([A-Za-z0-9_.-]+)""")
+
+    fun resolvePersonaIds(prompt: String): Set<String> {
+        return mentionRegex.findAll(prompt)
+            .map { match -> canonicalId(match.groupValues[1]) }
+            .filter { it.isNotBlank() }
+            .toSet()
+    }
+
+    fun canonicalId(raw: String): String {
+        return raw.trim()
+            .lowercase()
+            .replace(Regex("""[^a-z0-9_.-]"""), "")
     }
 }
 
