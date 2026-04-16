@@ -19,6 +19,7 @@ data class PersistedChatSession(
     val updatedTimestamp: Long = System.currentTimeMillis(),
     val providerLabel: String = "Auto",
     val modelLabel: String = "",
+    val activeParticipants: List<String> = emptyList(),
     val messages: List<PersistedChatMessage> = emptyList()
 )
 
