@@ -39,6 +39,12 @@ data class ChatMessage(
     val actorLabel: String,
     val content: String,
     val createdTimestamp: Long,
+    val role: ChatRole = ChatRole.MIND,
+    val actorLabel: String? = null,
+    val isAiGenerated: Boolean = true,
+    val providerChoice: ComposerProviderChoice,
+    val provenance: MessageProvenance,
+    val compareCandidate: CompareCandidate? = null
     val providerChoice: ComposerProviderChoice = ComposerProviderChoice.AUTO,
     val provenance: MessageProvenance? = null,
     val addressedActorIds: List<String>? = null,
@@ -48,6 +54,12 @@ data class ChatMessage(
     val prompt: String? = null,
     val response: String? = null
 )
+
+enum class ChatRole {
+    USER,
+    MIND,
+    SYSTEM
+}
 
 data class ChatSessionSummary(
     val sessionId: String,

@@ -588,6 +588,12 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
 
             return ChatMessage(
                 id = UUID.randomUUID().toString(),
+                prompt = prompt,
+                response = pipelineResult.responseText,
+                createdTimestamp = System.currentTimeMillis(),
+                role = ChatRole.MIND,
+                actorLabel = "Mind (${provider.displayName})",
+                isAiGenerated = true,
                 role = ChatRole.MIND,
                 actorId = primarySettings.provider.name,
                 actorLabel = primarySettings.provider.displayName,
@@ -620,6 +626,11 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
                 return ChatMessage(
                     id = UUID.randomUUID().toString(),
                     prompt = prompt,
+                    createdTimestamp = System.currentTimeMillis(),
+                    response = "[Fallback mode] $traceAwareMessage\n\n${fallbackTurn.text}",
+                    role = ChatRole.MIND,
+                    actorLabel = "Mind (${primarySettings.provider.displayName})",
+                    isAiGenerated = true,
                     role = ChatRole.MIND,
                     actorId = primarySettings.provider.name,
                     actorLabel = primarySettings.provider.displayName,
@@ -899,6 +910,9 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
             actorLabel = actorLabel,
             content = resolvedContent,
             createdTimestamp = createdTimestamp,
+            role = enumValues<ChatRole>().firstOrNull { it.name == role } ?: ChatRole.MIND,
+            actorLabel = actorLabel,
+            isAiGenerated = isAiGenerated,
             providerChoice = choice,
             provenance = MessageProvenance(
                 provider = provider,
@@ -930,6 +944,11 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
     private fun ChatMessage.toPersistedMessage(): PersistedChatMessage {
         return PersistedChatMessage(
             id = id,
+            prompt = prompt,
+            response = response,
+            role = role.name,
+            actorLabel = actorLabel,
+            isAiGenerated = isAiGenerated,
             role = role.name,
             actorId = actorId,
             actorLabel = actorLabel,

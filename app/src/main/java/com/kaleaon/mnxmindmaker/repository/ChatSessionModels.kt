@@ -26,6 +26,11 @@ data class PersistedChatSession(
 @Serializable
 data class PersistedChatMessage(
     val id: String,
+    val prompt: String,
+    val response: String,
+    val role: String = "MIND",
+    val actorLabel: String? = null,
+    val isAiGenerated: Boolean = true,
     val role: String = "MIND",
     val actorId: String = "mind",
     val actorLabel: String = "Mind",

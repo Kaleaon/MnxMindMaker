@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:orientation="vertical"
@@ -32,6 +33,30 @@
         android:layout_height="wrap_content"
         android:layout_marginTop="8dp"
         android:textAppearance="@style/TextAppearance.MaterialComponents.Body2" />
+
+    <TextView
+        android:id="@+id/tv_chat_participants_label"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="10dp"
+        android:text="@string/chat_participants_label"
+        android:textAppearance="@style/TextAppearance.MaterialComponents.Caption" />
+
+    <com.google.android.material.chip.ChipGroup
+        android:id="@+id/chip_group_chat_participants"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        app:singleLine="false" />
+
+    <TextView
+        android:id="@+id/tv_chat_unresolved_mentions"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:textAppearance="@style/TextAppearance.MaterialComponents.Caption"
+        android:textColor="@android:color/holo_orange_dark"
+        android:visibility="gone" />
 
     <ListView
         android:id="@+id/lv_chat_messages"
