@@ -25,7 +25,7 @@ data class GovernedRoutingResult(
 )
 
 class ProviderRouter(
-    private val providers: List<AssistantProvider> = listOf(
+    providers: List<AssistantProvider> = listOf(
         LlmEdgeProvider(),
         LocalProvider(),
         ClaudeProvider(),
@@ -33,6 +33,7 @@ class ProviderRouter(
         ChatGPTProvider()
     )
 ) {
+    private val providers: List<AssistantProvider> = ProviderConformanceGate.enforce(providers)
 
     fun chat(
         settingsChain: List<LlmSettings>,
