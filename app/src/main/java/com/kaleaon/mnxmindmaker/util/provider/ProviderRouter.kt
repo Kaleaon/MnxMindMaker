@@ -39,7 +39,7 @@ data class ProviderFailoverEvent(
 )
 
 class ProviderRouter(
-    private val providers: List<AssistantProvider> = listOf(
+    providers: List<AssistantProvider> = listOf(
         LlmEdgeProvider(),
         LocalProvider(),
         ClaudeProvider(),
@@ -49,6 +49,7 @@ class ProviderRouter(
     private val outboundOperationQueue: OutboundOperationQueue? = null,
     private val isNetworkAvailable: () -> Boolean = { true }
 ) {
+    private val providers: List<AssistantProvider> = ProviderConformanceGate.enforce(providers)
 
     fun chat(
         settingsChain: List<LlmSettings>,

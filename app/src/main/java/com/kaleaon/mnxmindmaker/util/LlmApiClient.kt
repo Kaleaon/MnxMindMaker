@@ -7,6 +7,7 @@ import com.kaleaon.mnxmindmaker.util.provider.ChatGPTProvider
 import com.kaleaon.mnxmindmaker.util.provider.ClaudeProvider
 import com.kaleaon.mnxmindmaker.util.provider.GeminiProvider
 import com.kaleaon.mnxmindmaker.util.provider.LocalProvider
+import com.kaleaon.mnxmindmaker.util.provider.ProviderConformanceGate
 import com.kaleaon.mnxmindmaker.util.provider.ProviderSettingsValidator
 import com.kaleaon.mnxmindmaker.util.provider.ProviderRequest
 import com.kaleaon.mnxmindmaker.util.tooling.AssistantTurn
@@ -14,13 +15,14 @@ import com.kaleaon.mnxmindmaker.util.tooling.ToolSpec
 import org.json.JSONObject
 
 class LlmApiClient(
-    private val providers: List<AssistantProvider> = listOf(
+    providers: List<AssistantProvider> = listOf(
         LocalProvider(),
         ClaudeProvider(),
         GeminiProvider(),
         ChatGPTProvider()
     )
 ) {
+    private val providers: List<AssistantProvider> = ProviderConformanceGate.enforce(providers)
 
     fun complete(settings: LlmSettings, systemPrompt: String, userMessage: String): String {
         val turn = completeAssistantTurn(
