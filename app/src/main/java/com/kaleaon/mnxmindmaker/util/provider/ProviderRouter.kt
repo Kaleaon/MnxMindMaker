@@ -25,8 +25,21 @@ data class GovernedRoutingResult(
     val rejections: List<String>
 )
 
+enum class FailoverReasonCode {
+    SETTINGS_INVALID,
+    ADAPTER_UNAVAILABLE,
+    PROVIDER_ERROR
+}
+
+data class ProviderFailoverEvent(
+    val fromProvider: LlmProvider,
+    val fromModel: String,
+    val reasonCode: FailoverReasonCode,
+    val userVisibleReason: String
+)
+
 class ProviderRouter(
-    private val providers: List<AssistantProvider> = listOf(
+    providers: List<AssistantProvider> = listOf(
         LlmEdgeProvider(),
         LocalProvider(),
         ClaudeProvider(),
@@ -36,6 +49,7 @@ class ProviderRouter(
     private val outboundOperationQueue: OutboundOperationQueue? = null,
     private val isNetworkAvailable: () -> Boolean = { true }
 ) {
+    private val providers: List<AssistantProvider> = ProviderConformanceGate.enforce(providers)
 
     fun chat(
         settingsChain: List<LlmSettings>,
@@ -58,6 +72,7 @@ class ProviderRouter(
         }
 
         var lastError: Exception? = null
+        val failoverEvents = mutableListOf<ProviderFailoverEvent>()
         for (settings in ordered) {
             if (!online && settings.provider.runtime != LlmRuntime.LOCAL_ON_DEVICE) {
                 outboundOperationQueue?.enqueue(
@@ -73,15 +88,27 @@ class ProviderRouter(
             val validationError = ProviderSettingsValidator.validate(settings)
             if (validationError != null) {
                 lastError = LlmApiException("${settings.provider.displayName}: $validationError")
+                failoverEvents += ProviderFailoverEvent(
+                    fromProvider = settings.provider,
+                    fromModel = settings.model,
+                    reasonCode = FailoverReasonCode.SETTINGS_INVALID,
+                    userVisibleReason = validationError
+                )
                 continue
             }
             val provider = providers.firstOrNull { it.supports(settings) }
             if (provider == null) {
                 lastError = LlmApiException("No provider adapter for ${settings.provider.displayName}")
+                failoverEvents += ProviderFailoverEvent(
+                    fromProvider = settings.provider,
+                    fromModel = settings.model,
+                    reasonCode = FailoverReasonCode.ADAPTER_UNAVAILABLE,
+                    userVisibleReason = "No provider adapter for ${settings.provider.displayName}"
+                )
                 continue
             }
             try {
-                return provider.chat(
+                val turn = provider.chat(
                     ProviderRequest(
                         settings = settings,
                         systemPrompt = systemPrompt,
@@ -89,10 +116,32 @@ class ProviderRouter(
                         tools = tools
                     )
                 )
+                if (failoverEvents.isEmpty()) return turn
+                val failoverJson = org.json.JSONArray().also { events ->
+                    failoverEvents.forEach { event ->
+                        events.put(
+                            JSONObject()
+                                .put("provider", event.fromProvider.name)
+                                .put("model", event.fromModel)
+                                .put("reason_code", event.reasonCode.name)
+                                .put("message", event.userVisibleReason)
+                        )
+                    }
+                }
+                val raw = (turn.raw?.let { JSONObject(it.toString()) } ?: JSONObject())
+                    .put("failover_events", failoverJson)
+                return turn.copy(raw = raw)
             } catch (e: Exception) {
                 lastError = e
+                failoverEvents += ProviderFailoverEvent(
+                    fromProvider = settings.provider,
+                    fromModel = settings.model,
+                    reasonCode = FailoverReasonCode.PROVIDER_ERROR,
+                    userVisibleReason = e.message ?: "Provider request failed"
+                )
             }
         }
+        val reasonCodes = failoverEvents.joinToString(",") { it.reasonCode.name }
         if (!online) {
             return AssistantTurn(
                 text = "Offline mode is active. Outbound provider requests were queued and will reconcile when connectivity returns.",
@@ -103,7 +152,7 @@ class ProviderRouter(
         }
 
         throw LlmApiException(
-            "All providers failed. Last error: ${lastError?.message}",
+            "All providers failed after policy-approved fallback chain. Reason codes: [$reasonCodes]. Last error: ${lastError?.message}",
             lastError
         )
     }

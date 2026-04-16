@@ -19,6 +19,7 @@ data class PersistedChatSession(
     val updatedTimestamp: Long = System.currentTimeMillis(),
     val providerLabel: String = "Auto",
     val modelLabel: String = "",
+    val activeParticipants: List<String> = emptyList(),
     val messages: List<PersistedChatMessage> = emptyList()
 )
 
@@ -30,6 +31,15 @@ data class PersistedChatMessage(
     val role: String = "MIND",
     val actorLabel: String? = null,
     val isAiGenerated: Boolean = true,
+    val role: String = "MIND",
+    val actorId: String = "mind",
+    val actorLabel: String = "Mind",
+    val content: String = "",
+    val addressedActorIds: List<String>? = null,
+    val replyToMessageId: String? = null,
+    // Legacy fields retained to preserve backward compatibility for schema migration.
+    val prompt: String = "",
+    val response: String = "",
     val providerChoice: String = "AUTO",
     val provider: String = "OPENAI",
     val model: String = "",
@@ -47,5 +57,5 @@ data class PersistedChatMessage(
 )
 
 object ChatPersistenceSchema {
-    const val CURRENT_VERSION = 1
+    const val CURRENT_VERSION = 2
 }

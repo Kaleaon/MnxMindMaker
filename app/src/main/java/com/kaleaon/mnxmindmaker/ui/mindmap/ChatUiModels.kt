@@ -15,16 +15,29 @@ data class MessageProvenance(
     val provider: LlmProvider,
     val model: String,
     val toolCalls: List<String> = emptyList(),
+    val failoverEvents: List<FailoverEvent> = emptyList(),
     val latencyMs: Long? = null,
     val promptTokens: Int? = null,
     val completionTokens: Int? = null,
     val totalTokens: Int? = null
 )
 
+enum class ChatRole {
+    USER,
+    MIND,
+    SYSTEM
+}
+data class FailoverEvent(
+    val reasonCode: String,
+    val message: String
+)
+
 data class ChatMessage(
     val id: String,
-    val prompt: String,
-    val response: String,
+    val role: ChatRole,
+    val actorId: String,
+    val actorLabel: String,
+    val content: String,
     val createdTimestamp: Long,
     val role: ChatRole = ChatRole.MIND,
     val actorLabel: String? = null,
@@ -32,6 +45,14 @@ data class ChatMessage(
     val providerChoice: ComposerProviderChoice,
     val provenance: MessageProvenance,
     val compareCandidate: CompareCandidate? = null
+    val providerChoice: ComposerProviderChoice = ComposerProviderChoice.AUTO,
+    val provenance: MessageProvenance? = null,
+    val addressedActorIds: List<String>? = null,
+    val replyToMessageId: String? = null,
+    val compareCandidate: CompareCandidate? = null,
+    // Legacy fields kept for backward compatibility during schema migration.
+    val prompt: String? = null,
+    val response: String? = null
 )
 
 enum class ChatRole {

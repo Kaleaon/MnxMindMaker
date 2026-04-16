@@ -423,9 +423,14 @@ class MindMapFragment : Fragment() {
         val rightHeader = panel.findViewById<TextView>(R.id.tv_compare_right_header)
         val rightContent = panel.findViewById<TextView>(R.id.tv_compare_right_content)
 
-        leftHeader.text = "${message.provenance.provider.displayName} / ${message.provenance.model}"
+        val provenance = message.provenance
+        leftHeader.text = if (provenance != null) {
+            "${provenance.provider.displayName} / ${provenance.model}"
+        } else {
+            message.actorLabel
+        }
         rightHeader.text = "${candidate.provider.displayName} / ${candidate.model}"
-        leftContent.text = message.response
+        leftContent.text = message.content
         rightContent.text = candidate.response
 
         leftContent.setTextIsSelectable(true)
@@ -673,11 +678,16 @@ private class ChatMessageAdapter(
         val retryButton = view.findViewById<MaterialButton>(R.id.btn_retry_provider)
         retryButton.visibility = if (message.isAiGenerated) View.VISIBLE else View.GONE
         retryButton.setOnClickListener {
+        view.findViewById<TextView>(R.id.tv_chat_prompt).text = message.actorLabel
+        view.findViewById<TextView>(R.id.tv_chat_response).text = message.content
+        view.findViewById<TextView>(R.id.tv_chat_provenance).text = buildProvenance(message)
+        view.findViewById<MaterialButton>(R.id.btn_retry_provider).setOnClickListener {
             onRetry(message)
         }
 
         val compareButton = view.findViewById<MaterialButton>(R.id.btn_compare_side_by_side)
         compareButton.visibility = if (message.isAiGenerated && isPremium() && message.compareCandidate != null) View.VISIBLE else View.GONE
+        compareButton.visibility = if (isPremium() && message.role == ChatRole.MIND && message.compareCandidate != null) View.VISIBLE else View.GONE
         compareButton.setOnClickListener { onCompare(message) }
 
         return view
@@ -693,6 +703,8 @@ private class ChatMessageAdapter(
 
     private fun buildMetadata(message: ChatMessage): String {
         val p = message.provenance
+    private fun buildProvenance(message: ChatMessage): String {
+        val p = message.provenance ?: return "No provenance"
         val tools = if (p.toolCalls.isEmpty()) "none" else p.toolCalls.joinToString()
         val latency = p.latencyMs?.let { "${it}ms" } ?: "n/a"
         val usage = if (p.totalTokens != null) {
@@ -700,9 +712,14 @@ private class ChatMessageAdapter(
         } else {
             "n/a"
         }
-        return "Prompt: ${message.prompt}\n" +
-            "Provider: ${p.provider.displayName} | Model: ${p.model}\n" +
+        val failover = if (p.failoverEvents.isEmpty()) {
+            "none"
+        } else {
+            p.failoverEvents.joinToString(" -> ") { it.reasonCode }
+        }
+        return "Provider: ${p.provider.displayName} | Model: ${p.model}\n" +
             "Tools: $tools\n" +
-            "Latency: $latency | Tokens: $usage"
+            "Latency: $latency | Tokens: $usage\n" +
+            "Failover: $failover"
     }
 }
