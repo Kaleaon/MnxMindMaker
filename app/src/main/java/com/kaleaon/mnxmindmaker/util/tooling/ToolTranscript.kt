@@ -1,5 +1,7 @@
 package com.kaleaon.mnxmindmaker.util.tooling
 
+import android.content.Context
+import com.kaleaon.mnxmindmaker.security.EncryptedArtifactStore
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -36,6 +38,31 @@ class FileToolTranscriptStore(private val file: File) : ToolTranscriptStore {
             file.createNewFile()
         }
         file.appendText(entry.toJson().toString() + "\n")
+    }
+
+    private fun ToolTranscriptEntry.toJson(): JSONObject = JSONObject()
+        .put("run_id", runId)
+        .put("timestamp_ms", timestampMs)
+        .put("event_type", eventType)
+        .put("tool_invocation_id", toolInvocationId)
+        .put("tool_name", toolName)
+        .put("payload", payload)
+}
+
+class EncryptedFileToolTranscriptStore(
+    context: Context,
+    private val file: File
+) : ToolTranscriptStore {
+    private val encryptedStore = EncryptedArtifactStore(context)
+
+    override fun persist(entry: ToolTranscriptEntry) {
+        val existing = if (file.exists()) {
+            String(encryptedStore.readDecryptedBytes(file, "transcript"))
+        } else {
+            ""
+        }
+        val updated = existing + entry.toJson().toString() + "\n"
+        encryptedStore.writeEncryptedBytes(file, updated.toByteArray(), "transcript")
     }
 
     private fun ToolTranscriptEntry.toJson(): JSONObject = JSONObject()

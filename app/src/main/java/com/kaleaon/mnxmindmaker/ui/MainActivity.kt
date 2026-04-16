@@ -12,6 +12,7 @@ import com.kaleaon.mnxmindmaker.R
 import com.kaleaon.mnxmindmaker.databinding.ActivityMainBinding
 import com.kaleaon.mnxmindmaker.ktheme.KthemeManager
 import com.kaleaon.mnxmindmaker.ktheme.Theme
+import com.kaleaon.mnxmindmaker.util.background.MindHealthWorkScheduler
 
 class MainActivity : AppCompatActivity() {
 
@@ -42,6 +43,9 @@ class MainActivity : AppCompatActivity() {
         KthemeManager.activeTheme.observe(this) { theme ->
             applyThemeToChrome(theme)
         }
+
+        // Schedule periodic background mind-health maintenance work.
+        MindHealthWorkScheduler.schedule(this)
     }
 
     private fun applyThemeToChrome(theme: Theme?) {
