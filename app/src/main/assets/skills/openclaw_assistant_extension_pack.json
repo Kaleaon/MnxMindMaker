@@ -1,0 +1,87 @@
+{
+  "pack_id": "openclaw-assistant-extension",
+  "version": "1.0.0",
+  "enabled": true,
+  "tools": [
+    {
+      "name": "status_overview",
+      "description": "OpenClaw-inspired /status style overview of graph and memory readiness in one read pass.",
+      "handler_id": "graph.read.get_summary",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "risk": {
+        "operation_class": "READ_ONLY",
+        "requires_confirmation": false
+      },
+      "playbook": {
+        "summary": "Mirror OpenClaw command-palette ergonomics: inspect first, then decide follow-up actions.",
+        "steps": [
+          "Call status_overview before proposing edits",
+          "Use node and edge counts to explain graph health",
+          "Recommend the next tool call only when a concrete gap is found"
+        ],
+        "source": "https://github.com/OpenClawAndroid/openclaw-android-assistant"
+      }
+    },
+    {
+      "name": "tools_inventory_compact",
+      "description": "OpenClaw-inspired compact tool inventory for node-level inspection.",
+      "handler_id": "graph.read.list_nodes",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "risk": {
+        "operation_class": "READ_ONLY",
+        "requires_confirmation": false
+      },
+      "playbook": {
+        "summary": "Equivalent to a lightweight /tools view for graph assets.",
+        "steps": [
+          "List nodes",
+          "Group nodes by type and surface outliers",
+          "Offer one deterministic cleanup or enrichment suggestion"
+        ],
+        "source": "https://github.com/OpenClawAndroid/openclaw-android-assistant"
+      }
+    },
+    {
+      "name": "memory_lookup_fast",
+      "description": "Fast memory probe aligned with OpenClaw slash-command style interactions.",
+      "handler_id": "memory.read.search",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["query"],
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 1
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50
+          }
+        }
+      },
+      "risk": {
+        "operation_class": "READ_ONLY",
+        "requires_confirmation": false
+      },
+      "playbook": {
+        "summary": "Use quick search loops before mutating memory records.",
+        "steps": [
+          "Run memory_lookup_fast with the user topic",
+          "Summarize matched memories and confidence",
+          "Only escalate to write tools if user explicitly requests updates"
+        ],
+        "source": "https://github.com/OpenClawAndroid/openclaw-android-assistant"
+      }
+    }
+  ]
+}
