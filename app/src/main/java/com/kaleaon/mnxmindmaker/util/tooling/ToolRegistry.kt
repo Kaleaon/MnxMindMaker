@@ -8,6 +8,11 @@ import com.kaleaon.mnxmindmaker.model.MindNode
 import com.kaleaon.mnxmindmaker.model.NodeType
 import com.kaleaon.mnxmindmaker.util.DimensionMapper
 import com.kaleaon.mnxmindmaker.util.memory.MemoryManager
+import com.kaleaon.mnxmindmaker.util.moderation.ModerationAction
+import com.kaleaon.mnxmindmaker.util.moderation.ModerationPipeline
+import com.kaleaon.mnxmindmaker.util.moderation.ModerationRequest
+import com.kaleaon.mnxmindmaker.util.moderation.ModerationStage
+import com.kaleaon.mnxmindmaker.util.moderation.SensitiveEntityModerationPolicy
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -15,6 +20,7 @@ class ToolRegistry(
     private val getGraph: () -> MindGraph,
     private val setGraph: (MindGraph) -> Unit,
     private val memoryManager: MemoryManager? = null,
+    private val moderationPipeline: ModerationPipeline = ModerationPipeline(listOf(SensitiveEntityModerationPolicy()))
     context: Context? = null
 ) {
 
@@ -589,6 +595,31 @@ class ToolRegistry(
         return ToolResult(invocation.id, invocation.name, true, payload.toString(), payload)
     }
 
+    private fun moderateMemoryWrite(invocation: ToolInvocation, value: String): ToolResult? {
+        val moderation = moderationPipeline.moderate(
+            ModerationRequest(
+                text = value,
+                stage = ModerationStage.MEMORY_WRITE,
+                policyId = "memory_write"
+            )
+        )
+        return if (moderation.action == ModerationAction.DENY) {
+            ToolResult(
+                invocation.id,
+                invocation.name,
+                false,
+                "memory_write_denied_by_moderation",
+                JSONObject()
+                    .put("error", "moderation_denied")
+                    .put("policy_id", moderation.policyId)
+                    .put("reason", moderation.reason ?: "Denied by moderation policy")
+                    .put("detected_entity_types", JSONArray(moderation.detectedEntityTypes.toList()))
+            )
+        } else {
+            null
+        }
+    }
+
     private fun memoryUpsert(invocation: ToolInvocation): ToolResult =
         withMemoryManager(invocation) { manager ->
             val args = invocation.arguments
@@ -602,10 +633,17 @@ class ToolRegistry(
             )
             if (policyViolation != null) return@withMemoryManager policyViolation
 
+            val value = args.optString("value")
+            val moderationDenied = moderateMemoryWrite(invocation, value)
+            if (moderationDenied != null) return@withMemoryManager moderationDenied
+            val moderatedValue = moderationPipeline.moderate(
+                ModerationRequest(text = value, stage = ModerationStage.MEMORY_WRITE, policyId = "memory_write")
+            ).text
+
             when (category) {
                 "profile" -> manager.upsertProfileMemory(
                     key = memoryId,
-                    value = args.optString("value"),
+                    value = moderatedValue,
                     writingStyle = args.optString("writing_style").ifBlank { null },
                     sensitivity = sensitivity
                 )
@@ -614,7 +652,7 @@ class ToolRegistry(
                         id = memoryId,
                         label = args.optString("label").ifBlank { memoryId },
                         type = NodeType.MEMORY,
-                        description = args.optString("value"),
+                        description = moderatedValue,
                         attributes = mutableMapOf(
                             "semantic_subtype" to "semantic",
                             "memory_category" to "semantic",
@@ -649,10 +687,17 @@ class ToolRegistry(
             )
             if (policyViolation != null) return@withMemoryManager policyViolation
 
+            val requestedValue = args.optString("value").ifBlank { existing.description }
+            val moderationDenied = moderateMemoryWrite(invocation, requestedValue)
+            if (moderationDenied != null) return@withMemoryManager moderationDenied
+            val moderatedValue = moderationPipeline.moderate(
+                ModerationRequest(text = requestedValue, stage = ModerationStage.MEMORY_WRITE, policyId = "memory_write")
+            ).text
+
             val edited = manager.editMemory(memoryId) { node ->
                 node.copy(
                     label = args.optString("label").ifBlank { node.label },
-                    description = args.optString("value").ifBlank { node.description },
+                    description = moderatedValue,
                     attributes = node.attributes.toMutableMap().apply {
                         if (args.has("tags")) put("tags", args.optString("tags"))
                         if (args.has("writing_style")) put("writing_style", args.optString("writing_style"))

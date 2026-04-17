@@ -9,6 +9,7 @@ import com.kaleaon.mnxmindmaker.util.tooling.ToolInvocation
 import com.kaleaon.mnxmindmaker.util.tooling.ToolPolicyEngine
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -180,6 +181,24 @@ class FoundationalToolsTest {
         assertEquals("sensitivity_policy_violation", denied.contentJson.getString("error"))
     }
 
+
+    @Test
+    fun `memory upsert masks sensitive entities using moderation pipeline`() {
+        val root = createTempDir(prefix = "tooling-test")
+        val memoryManager = MemoryManager().apply {
+            setPolicy(MemoryManager.MemoryPolicySettings(mode = MemoryManager.MemoryPolicyMode.PERSISTENT))
+        }
+        val tools = FoundationalTools(appRoot = root, scopedDirectories = listOf(root), memoryManager = memoryManager)
+
+        val upsert = tools.handlers().getValue("memory_upsert").execute(
+            ToolInvocation(
+                "1",
+                "memory_upsert",
+                JSONObject()
+                    .put("memory_id", "profile-contact")
+                    .put("category", "profile")
+                    .put("value", "Reach me at jane.doe@example.com")
+                    .put("sensitivity", "low")
     @Test
     fun `web fetch queues outbound operation when offline`() {
         val root = createTempDir(prefix = "tooling-test")
@@ -200,6 +219,35 @@ class FoundationalToolsTest {
             MindGraph()
         )
 
+        assertEquals("upserted", upsert.contentJson.getString("status"))
+        val stored = memoryManager.getMemory("profile-contact")
+        assertTrue(stored?.description?.contains("[REDACTED:EMAIL]") == true)
+        assertFalse(stored?.description?.contains("jane.doe@example.com") == true)
+    }
+
+    @Test
+    fun `memory upsert denies disallowed sensitive entities through moderation`() {
+        val root = createTempDir(prefix = "tooling-test")
+        val memoryManager = MemoryManager().apply {
+            setPolicy(MemoryManager.MemoryPolicySettings(mode = MemoryManager.MemoryPolicyMode.PERSISTENT))
+        }
+        val tools = FoundationalTools(appRoot = root, scopedDirectories = listOf(root), memoryManager = memoryManager)
+
+        val denied = tools.handlers().getValue("memory_upsert").execute(
+            ToolInvocation(
+                "1",
+                "memory_upsert",
+                JSONObject()
+                    .put("memory_id", "bad-memory")
+                    .put("category", "semantic")
+                    .put("value", "SSN 123-45-6789")
+                    .put("sensitivity", "low")
+            ),
+            MindGraph()
+        )
+
+        assertEquals("moderation_denied", denied.contentJson.getString("error"))
+        assertEquals(null, memoryManager.getMemory("bad-memory"))
         assertTrue(result.contentJson.getBoolean("queued"))
         assertEquals(1, queue.pending("web_fetch_search").size)
     }

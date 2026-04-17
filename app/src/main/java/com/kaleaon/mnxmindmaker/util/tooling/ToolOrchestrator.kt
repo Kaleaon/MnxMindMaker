@@ -2,6 +2,11 @@ package com.kaleaon.mnxmindmaker.util.tooling
 
 import com.kaleaon.mnxmindmaker.model.LlmSettings
 import com.kaleaon.mnxmindmaker.util.observability.RequestTracer
+import com.kaleaon.mnxmindmaker.util.moderation.ModerationAction
+import com.kaleaon.mnxmindmaker.util.moderation.ModerationPipeline
+import com.kaleaon.mnxmindmaker.util.moderation.ModerationRequest
+import com.kaleaon.mnxmindmaker.util.moderation.ModerationStage
+import com.kaleaon.mnxmindmaker.util.moderation.SensitiveEntityModerationPolicy
 import com.kaleaon.mnxmindmaker.util.provider.ProviderRouter
 import com.kaleaon.mnxmindmaker.util.provider.RoutingPolicy
 import org.json.JSONArray
@@ -16,10 +21,20 @@ class ToolOrchestrator(
     private val routingPolicy: RoutingPolicy = RoutingPolicy(),
     private val maxToolRounds: Int = 6,
     private val tracer: RequestTracer? = null,
+    private val moderationPipeline: ModerationPipeline = ModerationPipeline(listOf(SensitiveEntityModerationPolicy())),
     private val nowMs: () -> Long = { System.currentTimeMillis() }
 ) {
 
     suspend fun run(systemPrompt: String, userPrompt: String): String {
+        val promptModeration = moderationPipeline.moderate(
+            ModerationRequest(text = userPrompt, stage = ModerationStage.PROMPT, policyId = "orchestrator_prompt")
+        )
+        if (promptModeration.action == ModerationAction.DENY) {
+            return "Request blocked by moderation policy."
+        }
+
+        val transcript = mutableListOf<JSONObject>()
+        transcript += JSONObject().put("role", "user").put("content", promptModeration.text)
         val transcript = listOf(JSONObject().put("role", "user").put("content", userPrompt))
         return run(systemPrompt = systemPrompt, transcript = transcript)
     }
@@ -46,7 +61,14 @@ class ToolOrchestrator(
             }
 
             if (turn.toolInvocations.isEmpty()) {
-                return textParts.joinToString("\n\n").ifBlank { "Done." }
+                val rawOutput = textParts.joinToString("\n\n").ifBlank { "Done." }
+                val outputModeration = moderationPipeline.moderate(
+                    ModerationRequest(text = rawOutput, stage = ModerationStage.OUTPUT, policyId = "assistant_output")
+                )
+                return when (outputModeration.action) {
+                    ModerationAction.DENY -> "Response blocked by moderation policy."
+                    else -> outputModeration.text
+                }
             }
 
             val toolResults = JSONArray()
