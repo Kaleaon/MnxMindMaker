@@ -27,7 +27,9 @@ class FoundationalTools(
     private val scopedDirectories: List<File>,
     private val memoryManager: MemoryManager = MemoryManager(),
     private val allowTerminal: Boolean = false,
-    private val allowedCommandPrefixes: List<String> = listOf("echo", "pwd", "date")
+    private val allowedCommandPrefixes: List<String> = listOf("echo", "pwd", "date"),
+    private val outboundOperationQueue: OutboundOperationQueue? = null,
+    private val isNetworkAvailable: () -> Boolean = { true }
 ) {
 
     private val dbFile = File(appRoot, "tooling/notes_tasks_db.json")
@@ -408,19 +410,51 @@ class FoundationalTools(
 
     private fun executeWeb(invocation: ToolInvocation, graph: MindGraph): ToolExecutionOutcome {
         val mode = invocation.argumentsJson.optString("mode", "fetch")
+        if (isNetworkAvailable()) {
+            outboundOperationQueue?.reconcile(kind = "web_fetch_search") { queued ->
+                runWebMode(
+                    mode = queued.payload.optString("mode", "fetch"),
+                    url = queued.payload.optString("url"),
+                    query = queued.payload.optString("query")
+                )
+            }
+            val payload = runWebMode(
+                mode = mode,
+                url = invocation.argumentsJson.optString("url"),
+                query = invocation.argumentsJson.optString("query")
+            )
+            return ToolExecutionOutcome(payload, mutatedGraph = false)
+        }
+
+        val queueId = outboundOperationQueue?.enqueue(
+            kind = "web_fetch_search",
+            payload = JSONObject()
+                .put("mode", mode)
+                .put("url", invocation.argumentsJson.optString("url"))
+                .put("query", invocation.argumentsJson.optString("query"))
+        )
+
+        return ToolExecutionOutcome(
+            JSONObject()
+                .put("queued", true)
+                .put("queue_id", queueId)
+                .put("message", "Offline mode active. Web operation queued for reconciliation."),
+            mutatedGraph = false
+        )
+    }
+
+    private fun runWebMode(mode: String, url: String, query: String): JSONObject {
         return when (mode) {
             "fetch" -> {
-                val url = invocation.argumentsJson.optString("url")
                 val text = httpGet(url)
-                ToolExecutionOutcome(JSONObject().put("url", url).put("body", text.take(5000)), mutatedGraph = false)
+                JSONObject().put("url", url).put("body", text.take(5000))
             }
             "search" -> {
-                val query = invocation.argumentsJson.optString("query")
                 val ddgUrl = "https://duckduckgo.com/html/?q=" + java.net.URLEncoder.encode(query, "UTF-8")
                 val html = httpGet(ddgUrl)
-                ToolExecutionOutcome(JSONObject().put("query", query).put("results_html", html.take(5000)), mutatedGraph = false)
+                JSONObject().put("query", query).put("results_html", html.take(5000))
             }
-            else -> ToolExecutionOutcome(JSONObject().put("error", "Unsupported web mode"), mutatedGraph = false)
+            else -> JSONObject().put("error", "Unsupported web mode")
         }
     }
 

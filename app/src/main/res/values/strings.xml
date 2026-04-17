@@ -42,6 +42,16 @@
     <string name="compare_side_by_side">Compare</string>
     <string name="chat_assistant_title">AI Chat Assistant</string>
     <string name="side_by_side_provider_compare_title">Side-by-side provider compare</string>
+    <string name="new_thread">New Thread</string>
+    <string name="chat_thread_meta">Created %1$s • Updated %2$s • Provider %3$s</string>
+    <string name="chat_participants_label">Active participants</string>
+    <string name="chat_unresolved_mentions_title">Unresolved mentions</string>
+    <string name="chat_unresolved_mentions_message">These mind handles were not found: %1$s\n\n%2$s\n\nYou can correct the prompt before sending.</string>
+    <string name="chat_unresolved_mentions_inline">Unresolved mentions: %1$s</string>
+    <string name="chat_mentions_suggestions">Available handles: %1$s</string>
+    <string name="chat_mentions_no_suggestions">No known mind handles in the current graph.</string>
+    <string name="chat_fix_and_send">Fix &amp; send</string>
+    <string name="send_anyway">Send anyway</string>
     <string name="provider_auto">Auto</string>
     <string name="provider_local">Local</string>
     <string name="provider_claude">Claude</string>
@@ -56,6 +66,10 @@
     <string name="default_import_name">Imported Mind</string>
     <string name="section_mapping_preview">%1$d nodes mapped to MNX sections:\n%2$s</string>
     <string name="import_file_loaded">Loaded %1$s — tap Parse &amp; Map to import</string>
+    <string name="import_intent_success">Imported %1$d nodes from shared file</string>
+    <string name="import_intent_invalid_uri">Could not open shared file: invalid URI</string>
+    <string name="import_intent_unsupported">Shared file type is not supported for import</string>
+    <string name="import_intent_unknown_error">unknown error</string>
 
     <!-- Ktheme -->
     <string name="theme_section_title">App Theme</string>
@@ -79,8 +93,18 @@
     <string name="deploy_step_summary_title">Step 4: Deployment Summary</string>
     <string name="deploy_env_hint">Environment (e.g., staging, prod)</string>
     <string name="deploy_endpoint_hint">Runtime endpoint URL</string>
-    <string name="deploy_release_channel_hint">Release channel (canary/stable)</string>
+    <string name="deploy_release_channel_hint">Publish channel (dev/stage/prod)</string>
     <string name="deploy_notes_hint">Deployment notes</string>
+    <string name="deploy_ops_title">Ops Runtime Health</string>
+    <string name="deploy_ops_runtime_health_label">Runtime health</string>
+    <string name="deploy_ops_queue_depth_label">Queue depth</string>
+    <string name="deploy_ops_job_status_label">Job status</string>
+    <string name="deploy_ops_sync_state_label">Sync state</string>
+    <string name="deploy_ops_policy_violations_label">Policy violations</string>
+    <string name="deploy_ops_quick_actions_label">Quick actions</string>
+    <string name="deploy_ops_restart">Restart</string>
+    <string name="deploy_ops_reindex">Reindex</string>
+    <string name="deploy_ops_retry">Retry</string>
 
     <string name="settings_title">Settings</string>
     <string name="settings_saved">%1$s settings saved</string>
@@ -89,6 +113,7 @@
     <string name="hint_openai_compatible_self_hosted_key">Optional bearer token for your self-hosted OpenAI-compatible endpoint.</string>
     <string name="hint_gemini_key">Get your key at aistudio.google.com</string>
     <string name="hint_vllm_key">Optional for local vLLM. Leave blank to use Bearer EMPTY.</string>
+    <string name="hint_local_litert_model_path">Use a local .litertlm model package path (or bridge-provided path) with a LiteRT-LM runtime endpoint.</string>
     <string name="anthropic_api_info">Anthropic Claude — powerful reasoning, long context</string>
     <string name="openai_api_info">OpenAI GPT — broad capability, wide model choice</string>
     <string name="gemini_api_info">Google Gemini — multimodal, large context window</string>
@@ -121,6 +146,7 @@
     <string name="preflight_result_idle">Preflight diagnostics idle.</string>
     <string name="preflight_running">Running preflight diagnostics…</string>
     <string name="preflight_blocked_validation">Preflight blocked: fix critical validation issues first.</string>
+    <string name="skill_pack_diagnostics_idle">Skill pack diagnostics idle.</string>
     <string name="api_key_required_for_provider">%1$s requires an API key.</string>
     <string name="hint_local_model_path">Set the on-device model file path and runtime endpoint; no API key required.</string>
     <string name="local_model_path_label">Local Model Path</string>
@@ -159,16 +185,25 @@
     <string name="link_access_token_hint">Access token</string>
     <string name="link_refresh_token_hint">Refresh token (optional)</string>
     <string name="link_expiry_hint">Access token expires in seconds (optional)</string>
+    <string name="link_oauth_client_id_hint">OAuth client ID (required for refresh)</string>
+    <string name="link_oauth_client_secret_hint">OAuth client secret (required for refresh)</string>
     <string name="link_access_required">Access token is required.</string>
+    <string name="link_oauth_client_pair_required">Enter both OAuth client ID and client secret, or leave both blank.</string>
+    <string name="link_oauth_client_required_for_refresh">%1$s refresh requires OAuth client ID and client secret. Enter them to enable refresh.</string>
     <string name="link_success">%1$s account linked.</string>
     <string name="link_refresh_success">%1$s access token refreshed.</string>
-    <string name="link_refresh_failed">%1$s refresh failed. Link an account with a refresh token first.</string>
+    <string name="link_refresh_missing_refresh_token">%1$s refresh is unavailable because no refresh token is linked.</string>
+    <string name="link_refresh_missing_client_config">%1$s refresh is unavailable because OAuth client ID/secret are not configured.</string>
     <string name="link_refresh_provider_rejected">%1$s rejected the refresh token. Re-link this account to continue.</string>
+    <string name="link_refresh_network_error">%1$s refresh failed due to a network or transport issue. Try again.</string>
+    <string name="link_refresh_invalid_response">%1$s refresh returned an invalid response. Re-link the account and retry.</string>
+    <string name="link_refresh_disabled_reason">%1$s refresh disabled: link a refresh token and configure OAuth client credentials.</string>
     <string name="link_revoke_success">%1$s account link revoked.</string>
     <string name="link_expiry_unknown">unknown</string>
     <string name="link_status_not_linked">%1$s: not linked</string>
     <string name="link_status_linked">%1$s: linked (expiry %2$s) • models: %3$d • tools: %4$s • rate limit: %5$s</string>
     <string name="compute_backend_label">Runtime Device</string>
+    <string name="local_runtime_engine_label">Local Runtime Engine</string>
     <string name="context_window_label">Context Window</string>
     <string name="quantization_profile_label">Quantization Profile</string>
     <string name="max_ram_label">Max RAM (MB)</string>

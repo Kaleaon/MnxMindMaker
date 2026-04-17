@@ -1,5 +1,7 @@
 package com.kaleaon.mnxmindmaker.util.tooling
 
+import android.content.Context
+import android.util.Log
 import com.kaleaon.mnxmindmaker.model.MindEdge
 import com.kaleaon.mnxmindmaker.model.MindGraph
 import com.kaleaon.mnxmindmaker.model.MindNode
@@ -12,7 +14,8 @@ import org.json.JSONObject
 class ToolRegistry(
     private val getGraph: () -> MindGraph,
     private val setGraph: (MindGraph) -> Unit,
-    private val memoryManager: MemoryManager? = null
+    private val memoryManager: MemoryManager? = null,
+    context: Context? = null
 ) {
 
     companion object {
@@ -24,91 +27,140 @@ class ToolRegistry(
             name = "get_graph_summary",
             description = "Return graph-level summary with node/edge counts and name.",
             operationClass = ToolOperationClass.READ_ONLY
+    private val approvedHandlers: Map<String, (ToolInvocation) -> ToolResult> = mapOf(
+        "graph.read.get_summary" to ::getGraphSummary,
+        "graph.read.list_nodes" to ::listNodes,
+        "graph.read.get_node" to ::getNode,
+        "graph.write.add_node" to ::addNode,
+        "graph.write.link_nodes" to ::linkNodes,
+        "graph.write.set_node_attribute" to ::setNodeAttribute,
+        "memory.read.search" to ::memorySearch,
+        "memory.write.upsert" to ::memoryUpsert,
+        "memory.write.edit" to ::memoryEdit,
+        "memory.write.delete" to ::memoryDelete,
+        "memory.read.status" to ::memoryStatus
+    )
+
+    private val builtInToolDefs = listOf(
+        BuiltInToolDef(
+            spec = ToolSpec(
+                name = "get_graph_summary",
+                description = "Return graph-level summary with node/edge counts and name.",
+                operationClass = ToolOperationClass.READ_ONLY
+            ),
+            handlerId = "graph.read.get_summary"
         ),
-        ToolSpec(
-            name = "list_nodes",
-            description = "List nodes in the graph with id, label, type.",
-            operationClass = ToolOperationClass.READ_ONLY
+        BuiltInToolDef(
+            spec = ToolSpec(
+                name = "list_nodes",
+                description = "List nodes in the graph with id, label, type.",
+                operationClass = ToolOperationClass.READ_ONLY
+            ),
+            handlerId = "graph.read.list_nodes"
         ),
-        ToolSpec(
-            name = "get_node",
-            description = "Get detailed node by id.",
-            operationClass = ToolOperationClass.READ_ONLY,
-            inputSchema = JSONObject().put("type", "object").put("properties", JSONObject().put("node_id", JSONObject().put("type", "string")))
+        BuiltInToolDef(
+            spec = ToolSpec(
+                name = "get_node",
+                description = "Get detailed node by id.",
+                operationClass = ToolOperationClass.READ_ONLY,
+                inputSchema = JSONObject().put("type", "object").put("properties", JSONObject().put("node_id", JSONObject().put("type", "string")))
+            ),
+            handlerId = "graph.read.get_node"
         ),
-        ToolSpec(
-            name = "add_node",
-            description = "Create a node. Args: label, type, description(optional), parent_id(optional).",
-            operationClass = ToolOperationClass.MUTATING
+        BuiltInToolDef(
+            spec = ToolSpec(
+                name = "add_node",
+                description = "Create a node. Args: label, type, description(optional), parent_id(optional).",
+                operationClass = ToolOperationClass.MUTATING
+            ),
+            handlerId = "graph.write.add_node"
         ),
-        ToolSpec(
-            name = "link_nodes",
-            description = "Create edge between source_node_id and target_node_id.",
-            operationClass = ToolOperationClass.MUTATING
+        BuiltInToolDef(
+            spec = ToolSpec(
+                name = "link_nodes",
+                description = "Create edge between source_node_id and target_node_id.",
+                operationClass = ToolOperationClass.MUTATING
+            ),
+            handlerId = "graph.write.link_nodes"
         ),
-        ToolSpec(
-            name = "set_node_attribute",
-            description = "Set node attributes map key/value for a node id.",
-            operationClass = ToolOperationClass.MUTATING
+        BuiltInToolDef(
+            spec = ToolSpec(
+                name = "set_node_attribute",
+                description = "Set node attributes map key/value for a node id.",
+                operationClass = ToolOperationClass.MUTATING
+            ),
+            handlerId = "graph.write.set_node_attribute"
         ),
-        ToolSpec(
-            name = "memory_search",
-            description = "Search memory entries by query text. Safety: read-only operation.",
-            operationClass = ToolOperationClass.READ_ONLY,
-            inputSchema = JSONObject()
-                .put("type", "object")
-                .put("additionalProperties", false)
-                .put("required", JSONArray().put("query"))
-                .put("properties", JSONObject()
-                    .put("query", JSONObject().put("type", "string").put("minLength", 1))
-                    .put("limit", JSONObject().put("type", "integer").put("minimum", 1).put("maximum", 50)))
+        BuiltInToolDef(
+            spec = ToolSpec(
+                name = "memory_search",
+                description = "Search memory entries by query text. Safety: read-only operation.",
+                operationClass = ToolOperationClass.READ_ONLY,
+                inputSchema = JSONObject()
+                    .put("type", "object")
+                    .put("additionalProperties", false)
+                    .put("required", JSONArray().put("query"))
+                    .put("properties", JSONObject()
+                        .put("query", JSONObject().put("type", "string").put("minLength", 1))
+                        .put("limit", JSONObject().put("type", "integer").put("minimum", 1).put("maximum", 50)))
+            ),
+            handlerId = "memory.read.search"
         ),
-        ToolSpec(
-            name = "memory_upsert",
-            description = "Upsert memory by id/category/value/sensitivity. Safety: restricted sensitivity is denied and high sensitivity requires allow_high_sensitivity=true.",
-            operationClass = ToolOperationClass.MUTATING,
-            inputSchema = JSONObject()
-                .put("type", "object")
-                .put("additionalProperties", false)
-                .put("required", JSONArray().put("memory_id").put("category").put("value").put("sensitivity"))
-                .put("properties", JSONObject()
-                    .put("memory_id", JSONObject().put("type", "string").put("minLength", 1))
-                    .put("category", JSONObject().put("type", "string").put("enum", JSONArray().put("profile").put("semantic")))
-                    .put("value", JSONObject().put("type", "string").put("minLength", 1))
-                    .put("label", JSONObject().put("type", "string"))
-                    .put("tags", JSONObject().put("type", "string"))
-                    .put("writing_style", JSONObject().put("type", "string"))
-                    .put("sensitivity", JSONObject().put("type", "string").put("enum", JSONArray().put("low").put("medium").put("high").put("restricted")))
-                    .put("allow_high_sensitivity", JSONObject().put("type", "boolean")))
+        BuiltInToolDef(
+            spec = ToolSpec(
+                name = "memory_upsert",
+                description = "Upsert memory by id/category/value/sensitivity. Safety: restricted sensitivity is denied and high sensitivity requires allow_high_sensitivity=true.",
+                operationClass = ToolOperationClass.MUTATING,
+                inputSchema = JSONObject()
+                    .put("type", "object")
+                    .put("additionalProperties", false)
+                    .put("required", JSONArray().put("memory_id").put("category").put("value").put("sensitivity"))
+                    .put("properties", JSONObject()
+                        .put("memory_id", JSONObject().put("type", "string").put("minLength", 1))
+                        .put("category", JSONObject().put("type", "string").put("enum", JSONArray().put("profile").put("semantic")))
+                        .put("value", JSONObject().put("type", "string").put("minLength", 1))
+                        .put("label", JSONObject().put("type", "string"))
+                        .put("tags", JSONObject().put("type", "string"))
+                        .put("writing_style", JSONObject().put("type", "string"))
+                        .put("sensitivity", JSONObject().put("type", "string").put("enum", JSONArray().put("low").put("medium").put("high").put("restricted")))
+                        .put("allow_high_sensitivity", JSONObject().put("type", "boolean")))
+            ),
+            handlerId = "memory.write.upsert"
         ),
-        ToolSpec(
-            name = "memory_edit",
-            description = "Edit memory by id. Safety: restricted sensitivity is denied and high sensitivity requires allow_high_sensitivity=true.",
-            operationClass = ToolOperationClass.MUTATING,
-            inputSchema = JSONObject()
-                .put("type", "object")
-                .put("additionalProperties", false)
-                .put("required", JSONArray().put("memory_id"))
-                .put("properties", JSONObject()
-                    .put("memory_id", JSONObject().put("type", "string").put("minLength", 1))
-                    .put("value", JSONObject().put("type", "string"))
-                    .put("label", JSONObject().put("type", "string"))
-                    .put("tags", JSONObject().put("type", "string"))
-                    .put("writing_style", JSONObject().put("type", "string"))
-                    .put("sensitivity", JSONObject().put("type", "string").put("enum", JSONArray().put("low").put("medium").put("high").put("restricted")))
-                    .put("allow_high_sensitivity", JSONObject().put("type", "boolean")))
+        BuiltInToolDef(
+            spec = ToolSpec(
+                name = "memory_edit",
+                description = "Edit memory by id. Safety: restricted sensitivity is denied and high sensitivity requires allow_high_sensitivity=true.",
+                operationClass = ToolOperationClass.MUTATING,
+                inputSchema = JSONObject()
+                    .put("type", "object")
+                    .put("additionalProperties", false)
+                    .put("required", JSONArray().put("memory_id"))
+                    .put("properties", JSONObject()
+                        .put("memory_id", JSONObject().put("type", "string").put("minLength", 1))
+                        .put("value", JSONObject().put("type", "string"))
+                        .put("label", JSONObject().put("type", "string"))
+                        .put("tags", JSONObject().put("type", "string"))
+                        .put("writing_style", JSONObject().put("type", "string"))
+                        .put("sensitivity", JSONObject().put("type", "string").put("enum", JSONArray().put("low").put("medium").put("high").put("restricted")))
+                        .put("allow_high_sensitivity", JSONObject().put("type", "boolean")))
+            ),
+            handlerId = "memory.write.edit"
         ),
-        ToolSpec(
-            name = "memory_delete",
-            description = "Delete memory by id. Safety: restricted sensitivity is denied and high sensitivity requires allow_high_sensitivity=true.",
-            operationClass = ToolOperationClass.MUTATING,
-            inputSchema = JSONObject()
-                .put("type", "object")
-                .put("additionalProperties", false)
-                .put("required", JSONArray().put("memory_id"))
-                .put("properties", JSONObject()
-                    .put("memory_id", JSONObject().put("type", "string").put("minLength", 1))
-                    .put("allow_high_sensitivity", JSONObject().put("type", "boolean")))
+        BuiltInToolDef(
+            spec = ToolSpec(
+                name = "memory_delete",
+                description = "Delete memory by id. Safety: restricted sensitivity is denied and high sensitivity requires allow_high_sensitivity=true.",
+                operationClass = ToolOperationClass.MUTATING,
+                inputSchema = JSONObject()
+                    .put("type", "object")
+                    .put("additionalProperties", false)
+                    .put("required", JSONArray().put("memory_id"))
+                    .put("properties", JSONObject()
+                        .put("memory_id", JSONObject().put("type", "string").put("minLength", 1))
+                        .put("allow_high_sensitivity", JSONObject().put("type", "boolean")))
+            ),
+            handlerId = "memory.write.delete"
         ),
         ToolSpec(
             name = "memory_status",
@@ -184,8 +236,20 @@ class ToolRegistry(
                     .put("remove_duplicate_edges", JSONObject().put("type", "boolean"))
                     .put("add_missing_parent_links", JSONObject().put("type", "boolean"))
             )
+        BuiltInToolDef(
+            spec = ToolSpec(
+                name = "memory_status",
+                description = "Return current memory mode and counters. Safety: read-only operation.",
+                operationClass = ToolOperationClass.READ_ONLY,
+                inputSchema = JSONObject().put("type", "object").put("additionalProperties", false)
+            ),
+            handlerId = "memory.read.status"
         )
     )
+
+    private val merged = mergeBuiltInsAndSkillPacks(context)
+    private val specs: List<ToolSpec> = merged.specs
+    private val handlersByToolName: Map<String, (ToolInvocation) -> ToolResult> = merged.handlersByToolName
 
     fun specs(): List<ToolSpec> = specs
 
@@ -212,7 +276,50 @@ class ToolRegistry(
             "link_repair_diagnostics" -> linkRepairDiagnostics(invocation)
             "link_repair_apply" -> linkRepairApply(invocation)
             else -> ToolResult(invocation.id, invocation.name, false, "Unknown tool: ${invocation.name}")
+        val handler = handlersByToolName[invocation.name]
+            ?: return ToolResult(invocation.id, invocation.name, false, "Unknown tool: ${invocation.name}")
+        return handler(invocation)
+    }
+
+    private fun mergeBuiltInsAndSkillPacks(context: Context?): MergedRegistry {
+        val builtInSpecs = builtInToolDefs.map { it.spec }
+        val handlers = builtInToolDefs.associate { it.spec.name to approvedHandlers.getValue(it.handlerId) }.toMutableMap()
+
+        if (context == null) {
+            val report = SkillPackLoadReport()
+            SkillPackDiagnosticsStore.update(report)
+            return MergedRegistry(builtInSpecs, handlers)
         }
+
+        val loader = SkillPackLoader(
+            assets = context.assets,
+            validator = SkillManifestValidator(approvedHandlerIds = approvedHandlers.keys)
+        )
+        val report = loader.load()
+
+        val manifestSpecs = mutableListOf<ToolSpec>()
+        report.loadedPacks.forEach { pack ->
+            val duplicate = pack.tools.firstOrNull { tool -> handlers.containsKey(tool.name) }
+            if (duplicate != null) {
+                val message = "Skipping skill pack ${pack.source}: duplicate tool '${duplicate.name}'"
+                Log.w(TAG, message)
+                return@forEach
+            }
+
+            pack.tools.forEachIndexed { idx, tool ->
+                val manifestTool = pack.manifest.tools[idx]
+                val handler = approvedHandlers[manifestTool.handlerId]
+                if (handler == null) {
+                    Log.w(TAG, "Skipping tool ${tool.name} from ${pack.source}: unknown handler ${manifestTool.handlerId}")
+                    return@forEachIndexed
+                }
+                manifestSpecs += tool
+                handlers[tool.name] = handler
+            }
+        }
+
+        SkillPackDiagnosticsStore.update(report)
+        return MergedRegistry(builtInSpecs + manifestSpecs, handlers)
     }
 
     private fun graphRefactorDiagnostics(invocation: ToolInvocation): ToolResult {
@@ -780,5 +887,28 @@ class ToolRegistry(
                     .put("message", "This mutating tool requires explicit approval_token=APPROVED")
             )
         }
+    data class BuiltInToolDef(val spec: ToolSpec, val handlerId: String)
+
+    data class MergedRegistry(
+        val specs: List<ToolSpec>,
+        val handlersByToolName: Map<String, (ToolInvocation) -> ToolResult>
+    )
+
+    companion object {
+        private const val TAG = "ToolRegistry"
+
+        fun approvedHandlerIds(): Set<String> = setOf(
+            "graph.read.get_summary",
+            "graph.read.list_nodes",
+            "graph.read.get_node",
+            "graph.write.add_node",
+            "graph.write.link_nodes",
+            "graph.write.set_node_attribute",
+            "memory.read.search",
+            "memory.write.upsert",
+            "memory.write.edit",
+            "memory.write.delete",
+            "memory.read.status"
+        )
     }
 }

@@ -3,6 +3,7 @@ package com.kaleaon.mnxmindmaker.util.provider
 import com.kaleaon.mnxmindmaker.model.LlmProvider
 import com.kaleaon.mnxmindmaker.model.LlmSettings
 import com.kaleaon.mnxmindmaker.model.LocalRuntimeControls
+import com.kaleaon.mnxmindmaker.model.LocalRuntimeEngine
 import com.kaleaon.mnxmindmaker.model.PrivacyMode
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -59,6 +60,20 @@ class LlmSettingsValidatorTest {
     fun `validate runtime endpoint accepts http and https only`() {
         assertTrue(validateRuntimeEndpoint("ftp://example.com").isNotEmpty())
         assertTrue(validateRuntimeEndpoint("https://example.com").isEmpty())
+    }
+
+    @Test
+    fun `validate warns when LiteRT-LM path is not litertlm package`() {
+        val settings = LlmSettings(
+            provider = LlmProvider.LOCAL_ON_DEVICE,
+            enabled = true,
+            localModelPath = "/tmp/model.gguf",
+            runtimeControls = LocalRuntimeControls(engine = LocalRuntimeEngine.LITERT_LM)
+        )
+
+        val issues = validate(settings, PrivacyMode.HYBRID)
+
+        assertTrue(issues.any { it.field == "localModelPath" && it.severity == ValidationSeverity.WARNING })
     }
 
     @Test

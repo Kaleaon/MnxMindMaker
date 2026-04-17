@@ -2,6 +2,7 @@ package com.kaleaon.mnxmindmaker.util.provider
 
 import com.kaleaon.mnxmindmaker.model.LlmRuntime
 import com.kaleaon.mnxmindmaker.model.LlmSettings
+import com.kaleaon.mnxmindmaker.model.LocalRuntimeEngine
 import com.kaleaon.mnxmindmaker.model.PrivacyMode
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
@@ -107,6 +108,19 @@ fun validate(settings: LlmSettings, privacyMode: PrivacyMode?): List<ValidationI
             ValidationSeverity.CRITICAL,
             "localModelPath",
             "Local model path is required when local runtime is enabled."
+        )
+    }
+
+    if (
+        settings.provider.runtime == LlmRuntime.LOCAL_ON_DEVICE &&
+        settings.runtimeControls.engine == LocalRuntimeEngine.LITERT_LM &&
+        settings.localModelPath.isNotBlank() &&
+        !settings.localModelPath.endsWith(".litertlm", ignoreCase = true)
+    ) {
+        issues += ValidationIssue(
+            ValidationSeverity.WARNING,
+            "localModelPath",
+            "LiteRT-LM usually expects a .litertlm package path (or a runtime alias mapped by your bridge)."
         )
     }
 
