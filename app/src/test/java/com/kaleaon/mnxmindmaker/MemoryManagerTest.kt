@@ -31,9 +31,7 @@ class MemoryManagerTest {
     @Test
     fun `session only policy excludes persistent semantic memories`() {
         val manager = MemoryManager()
-        manager.setPolicy(
-            MemoryManager.MemoryPolicySettings(mode = MemoryManager.MemoryPolicyMode.SESSION_ONLY)
-        )
+        manager.setPolicy(MemoryManager.MemoryPolicySettings(mode = MemoryManager.MemoryPolicyMode.SESSION_ONLY))
 
         manager.appendSessionTurn(
             MemoryManager.SessionTurn(role = "user", content = "Need launch checklist for deployment")
@@ -62,12 +60,8 @@ class MemoryManagerTest {
     fun `persistent memories can be rehydrated after manager re-instantiation`() {
         val now = 150_000L
         val firstManager = MemoryManager().apply {
-            setPolicy(
-                MemoryManager.MemoryPolicySettings(mode = MemoryManager.MemoryPolicyMode.PERSISTENT)
-            )
-            appendSessionTurn(
-                MemoryManager.SessionTurn(role = "user", content = "ephemeral", timestampMs = 99_000L)
-            )
+            setPolicy(MemoryManager.MemoryPolicySettings(mode = MemoryManager.MemoryPolicyMode.PERSISTENT))
+            appendSessionTurn(MemoryManager.SessionTurn(role = "user", content = "ephemeral", timestampMs = 99_000L))
             upsertProfileMemory(key = "tone", value = "concise", timestampMs = 100_000L)
             upsertSemanticMemory(
                 MindNode(
@@ -75,10 +69,7 @@ class MemoryManagerTest {
                     label = "Release checklist",
                     type = NodeType.MEMORY,
                     description = "Always run smoke tests",
-                    attributes = mutableMapOf(
-                        "timestamp" to "100000",
-                        "current_relevance" to "0.9"
-                    )
+                    attributes = mutableMapOf("timestamp" to "100000", "current_relevance" to "0.9")
                 )
             )
         }
@@ -121,9 +112,7 @@ class MemoryManagerTest {
     @Test
     fun `persistent policy applies sensitivity and supports edit delete`() {
         val manager = MemoryManager()
-        manager.setPolicy(
-            MemoryManager.MemoryPolicySettings(mode = MemoryManager.MemoryPolicyMode.PERSISTENT)
-        )
+        manager.setPolicy(MemoryManager.MemoryPolicySettings(mode = MemoryManager.MemoryPolicyMode.PERSISTENT))
 
         manager.upsertSemanticMemory(
             MindNode(
@@ -167,18 +156,12 @@ class MemoryManagerTest {
         assertFalse(retrieved.any { it.id == "memory-sensitive" })
 
         assertTrue(manager.deleteMemory("memory-safe"))
-        val afterDelete = manager.retrieveForPromptInjection(
-            prompt = "writing style",
-            task = "respond",
-            limit = 10
-        )
+        val afterDelete = manager.retrieveForPromptInjection(prompt = "writing style", task = "respond", limit = 10)
         assertFalse(afterDelete.any { it.id == "memory-safe" })
     }
 
     @Test
     fun `auto expiry purges memories by category and keeps fresh entries`() {
-        val manager = MemoryManager()
-    fun `auto expiry purges memories by category`() {
         val store = RecordingStore()
         val telemetry = RecordingTelemetry()
         val manager = MemoryManager(store, telemetry)
@@ -194,22 +177,10 @@ class MemoryManagerTest {
             )
         )
 
-        manager.appendSessionTurn(
-            MemoryManager.SessionTurn(role = "user", content = "old session", timestampMs = 1_000L)
-        )
-        manager.appendSessionTurn(
-            MemoryManager.SessionTurn(role = "user", content = "fresh session", timestampMs = 49_500L)
-        )
-        manager.upsertProfileMemory(
-            key = "tone-old",
-            value = "friendly",
-            timestampMs = 1_000L
-        )
-        manager.upsertProfileMemory(
-            key = "tone-fresh",
-            value = "direct",
-            timestampMs = 49_900L
-        )
+        manager.appendSessionTurn(MemoryManager.SessionTurn(role = "user", content = "old session", timestampMs = 1_000L))
+        manager.appendSessionTurn(MemoryManager.SessionTurn(role = "user", content = "fresh session", timestampMs = 49_500L))
+        manager.upsertProfileMemory(key = "tone-old", value = "friendly", timestampMs = 1_000L)
+        manager.upsertProfileMemory(key = "tone-fresh", value = "direct", timestampMs = 49_900L)
         manager.upsertSemanticMemory(
             MindNode(
                 id = "semantic-old",
@@ -229,19 +200,13 @@ class MemoryManagerTest {
             )
         )
 
-        val retrieved = manager.retrieveForPromptInjection(
-            prompt = "fresh",
-            task = "any",
-            limit = 10,
-            nowEpochMs = now
-        )
+        val retrieved = manager.retrieveForPromptInjection(prompt = "fresh", task = "any", limit = 10, nowEpochMs = now)
 
         assertFalse(retrieved.any { it.id == "semantic-old" || it.id == "tone-old" || it.description == "old session" })
         assertTrue(retrieved.any { it.id == "semantic-fresh" })
         assertTrue(retrieved.any { it.id == "tone-fresh" })
         assertEquals(3, retrieved.size)
-        assertEquals(0, retrieved.size)
-        assertEquals(listOf("tone"), store.deletedByCategory[MemoryManager.MemoryCategory.PROFILE])
+        assertEquals(listOf("tone-old"), store.deletedByCategory[MemoryManager.MemoryCategory.PROFILE])
         assertEquals(listOf("semantic-old"), store.deletedByCategory[MemoryManager.MemoryCategory.SEMANTIC])
         assertEquals(1, store.deletedByCategory[MemoryManager.MemoryCategory.SESSION]?.size)
         assertEquals(1, manager.getExpiryPurgeCounters()[MemoryManager.MemoryCategory.SESSION])
@@ -267,11 +232,7 @@ class MemoryManagerTest {
                 )
             )
         )
-        manager.upsertProfileMemory(
-            key = "tone",
-            value = "friendly",
-            timestampMs = 1_000L
-        )
+        manager.upsertProfileMemory(key = "tone", value = "friendly", timestampMs = 1_000L)
         manager.editMemory("tone") { node ->
             node.copy(attributes = node.attributes.toMutableMap().apply { put("timestamp", "not-a-number") })
         }
@@ -285,12 +246,7 @@ class MemoryManagerTest {
             )
         )
 
-        val retrieved = manager.retrieveForPromptInjection(
-            prompt = "check",
-            task = "check",
-            limit = 10,
-            nowEpochMs = 50_000L
-        )
+        val retrieved = manager.retrieveForPromptInjection(prompt = "check", task = "check", limit = 10, nowEpochMs = 50_000L)
 
         assertTrue(retrieved.any { it.id == "tone" })
         assertTrue(retrieved.any { it.id == "semantic-invalid-ts" })
@@ -303,9 +259,7 @@ class MemoryManagerTest {
     @Test
     fun `session turn metadata is preserved in retrieved memory attributes`() {
         val manager = MemoryManager()
-        manager.setPolicy(
-            MemoryManager.MemoryPolicySettings(mode = MemoryManager.MemoryPolicyMode.SESSION_ONLY)
-        )
+        manager.setPolicy(MemoryManager.MemoryPolicySettings(mode = MemoryManager.MemoryPolicyMode.SESSION_ONLY))
         manager.appendSessionTurn(
             MemoryManager.SessionTurn(
                 role = "assistant",
@@ -317,11 +271,7 @@ class MemoryManagerTest {
             )
         )
 
-        val retrieved = manager.retrieveForPromptInjection(
-            prompt = "transcript",
-            task = "audit",
-            limit = 5
-        )
+        val retrieved = manager.retrieveForPromptInjection(prompt = "transcript", task = "audit", limit = 5)
 
         val sessionNode = retrieved.first { it.attributes["semantic_subtype"] == "session" }
         assertEquals("conv-42", sessionNode.attributes["conversation_id"])
@@ -329,5 +279,63 @@ class MemoryManagerTest {
         assertEquals("7:0-199", sessionNode.attributes["chunk_span"])
         assertEquals("import", sessionNode.attributes["source"])
         assertEquals("assistant", sessionNode.attributes["role"])
+    }
+
+    @Test
+    fun `query DSL supports attributes dimensions relations timestamps similarity and reusable views`() {
+        val manager = MemoryManager().apply {
+            setPolicy(MemoryManager.MemoryPolicySettings(mode = MemoryManager.MemoryPolicyMode.PERSISTENT))
+            upsertSemanticMemory(
+                MindNode(
+                    id = "mem-1",
+                    label = "Launch checklist",
+                    type = NodeType.MEMORY,
+                    description = "Ship release notes and smoke tests",
+                    parentId = "project-a",
+                    dimensions = mapOf("confidence" to 0.9f),
+                    attributes = mutableMapOf(
+                        "timestamp" to "2000",
+                        "tags" to "release,ship",
+                        "related_to" to "project-a",
+                        "owner" to "ops",
+                        "current_relevance" to "0.9"
+                    )
+                )
+            )
+            upsertSemanticMemory(
+                MindNode(
+                    id = "mem-2",
+                    label = "Personal notes",
+                    type = NodeType.MEMORY,
+                    description = "Buy groceries",
+                    dimensions = mapOf("confidence" to 0.3f),
+                    attributes = mutableMapOf(
+                        "timestamp" to "500",
+                        "owner" to "self",
+                        "current_relevance" to "0.5"
+                    )
+                )
+            )
+        }
+
+        val query = MemoryManager.QueryBuilder()
+            .text("release smoke")
+            .anyLabel("launch")
+            .attribute("owner", "ops")
+            .dimension("confidence", 0.8f, 1.0f)
+            .relatedTo("project-a")
+            .betweenTimestamps(1000L, 3000L)
+            .minSimilarity(0.1f)
+            .limit(5)
+            .build()
+
+        manager.saveFilter("release_ops", query)
+        manager.saveView(MemoryManager.MemoryView(name = "ops-view", filterName = "release_ops", defaultLimit = 3))
+
+        val filtered = manager.runSavedFilter("release_ops")
+        val viewed = manager.runView("ops-view")
+
+        assertEquals(listOf("mem-1"), filtered.map { it.id })
+        assertEquals(listOf("mem-1"), viewed.map { it.id })
     }
 }

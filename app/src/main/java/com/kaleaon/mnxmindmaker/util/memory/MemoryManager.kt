@@ -8,7 +8,9 @@ import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.sqrt
 
 class MemoryManager(
-    private val storage: MemoryStorage = InMemoryMemoryStorage()
+    private val storage: MemoryStorage = InMemoryMemoryStorage(),
+    private val persistenceStore: MemoryPersistenceStore = NoOpMemoryPersistenceStore,
+    private val expiryTelemetry: MemoryExpiryTelemetry = StdoutMemoryExpiryTelemetry
 ) {
 
     enum class MemoryPolicyMode {
@@ -44,6 +46,85 @@ class MemoryManager(
         val sensitivity: String = "low"
     )
 
+    /**
+     * Query DSL for fast memory search across labels, attributes, dimensions,
+     * relations, timestamps, and semantic similarity.
+     */
+    data class MemoryQuery(
+        val rawQuery: String = "",
+        val categories: Set<MemoryCategory> = setOf(MemoryCategory.SESSION, MemoryCategory.PROFILE, MemoryCategory.SEMANTIC),
+        val labelsAny: Set<String> = emptySet(),
+        val attributesAll: Map<String, String> = emptyMap(),
+        val dimensions: Map<String, ClosedFloatingPointRange<Float>> = emptyMap(),
+        val relationIdsAny: Set<String> = emptySet(),
+        val timestampRange: LongRange? = null,
+        val minSemanticSimilarity: Float = 0f,
+        val limit: Int = 20
+    )
+
+    data class MemoryView(
+        val name: String,
+        val filterName: String,
+        val defaultLimit: Int = 20
+    )
+
+    class QueryBuilder {
+        private var rawQuery: String = ""
+        private val categories = mutableSetOf(MemoryCategory.SESSION, MemoryCategory.PROFILE, MemoryCategory.SEMANTIC)
+        private val labelsAny = mutableSetOf<String>()
+        private val attributesAll = mutableMapOf<String, String>()
+        private val dimensions = mutableMapOf<String, ClosedFloatingPointRange<Float>>()
+        private val relationIdsAny = mutableSetOf<String>()
+        private var timestampRange: LongRange? = null
+        private var minSemanticSimilarity: Float = 0f
+        private var limit: Int = 20
+
+        fun text(value: String) = apply { rawQuery = value }
+
+        fun category(category: MemoryCategory) = apply {
+            if (categories.size == MemoryCategory.entries.size) categories.clear()
+            categories += category
+        }
+
+        fun anyLabel(vararg labels: String) = apply {
+            labels.mapTo(labelsAny) { it.trim().lowercase() }.removeAll { it.isBlank() }
+        }
+
+        fun attribute(key: String, value: String) = apply {
+            attributesAll[key.trim()] = value.trim()
+        }
+
+        fun dimension(name: String, min: Float, max: Float) = apply {
+            dimensions[name.trim()] = min.coerceAtLeast(0f)..max.coerceAtMost(1f)
+        }
+
+        fun relatedTo(vararg ids: String) = apply {
+            ids.mapTo(relationIdsAny) { it.trim() }.removeAll { it.isBlank() }
+        }
+
+        fun betweenTimestamps(startInclusive: Long, endInclusive: Long) = apply {
+            timestampRange = startInclusive..endInclusive
+        }
+
+        fun minSimilarity(value: Float) = apply {
+            minSemanticSimilarity = value.coerceIn(0f, 1f)
+        }
+
+        fun limit(value: Int) = apply { limit = value.coerceAtLeast(1) }
+
+        fun build(): MemoryQuery = MemoryQuery(
+            rawQuery = rawQuery,
+            categories = categories.toSet(),
+            labelsAny = labelsAny.toSet(),
+            attributesAll = attributesAll.toMap(),
+            dimensions = dimensions.toMap(),
+            relationIdsAny = relationIdsAny.toSet(),
+            timestampRange = timestampRange,
+            minSemanticSimilarity = minSemanticSimilarity,
+            limit = limit
+        )
+    }
+
     interface MemoryPersistenceStore {
         fun deleteExpired(category: MemoryCategory, memoryIds: List<String>)
     }
@@ -51,20 +132,6 @@ class MemoryManager(
     interface MemoryExpiryTelemetry {
         fun onExpiredRemoved(category: MemoryCategory, removedCount: Int, malformedTimestampCount: Int)
     }
-
-    private object NoOpMemoryPersistenceStore : MemoryPersistenceStore {
-        override fun deleteExpired(category: MemoryCategory, memoryIds: List<String>) = Unit
-    }
-
-    private object StdoutMemoryExpiryTelemetry : MemoryExpiryTelemetry {
-        override fun onExpiredRemoved(category: MemoryCategory, removedCount: Int, malformedTimestampCount: Int) {
-            println(
-                "MemoryManager.purgeExpired category=$category removed=$removedCount malformed_timestamps=$malformedTimestampCount"
-            )
-        }
-    }
-
-    private data class PurgeSelection(val expiredIds: List<String>, val malformedTimestampCount: Int)
 
     data class PersistedMemorySnapshot(
         val sessionTurns: List<SessionTurn> = emptyList(),
@@ -77,17 +144,28 @@ class MemoryManager(
         fun saveSnapshot(snapshot: PersistedMemorySnapshot)
     }
 
+    data class MemoryStatus(
+        val mode: MemoryPolicyMode,
+        val sessionTurnCount: Int,
+        val profileMemoryCount: Int,
+        val semanticMemoryCount: Int,
+        val expiryByCategoryMs: Map<MemoryCategory, Long>
+    )
+
+    private data class PurgeSelection(val expiredIds: List<String>, val malformedTimestampCount: Int)
+
     private val sessionTurns = mutableListOf<SessionTurn>()
     private val profileMemories = ConcurrentHashMap<String, MindNode>()
     private val semanticIndex = SemanticMemoryVectorIndex()
     private val expiryPurgeCounters = ConcurrentHashMap<MemoryCategory, Int>()
-    private val persistenceStore: MemoryPersistenceStore
-    private val expiryTelemetry: MemoryExpiryTelemetry
+    private val savedFilters = ConcurrentHashMap<String, MemoryQuery>()
+    private val savedViews = ConcurrentHashMap<String, MemoryView>()
 
     @Volatile
     private var policySettings: MemoryPolicySettings = MemoryPolicySettings()
 
     constructor() : this(
+        storage = InMemoryMemoryStorage(),
         persistenceStore = NoOpMemoryPersistenceStore,
         expiryTelemetry = StdoutMemoryExpiryTelemetry
     )
@@ -95,11 +173,14 @@ class MemoryManager(
     constructor(
         persistenceStore: MemoryPersistenceStore,
         expiryTelemetry: MemoryExpiryTelemetry = StdoutMemoryExpiryTelemetry
-    ) {
-        this.persistenceStore = persistenceStore
-        this.expiryTelemetry = expiryTelemetry
-        MemoryCategory.entries.forEach { expiryPurgeCounters[it] = 0 }
+    ) : this(
+        storage = InMemoryMemoryStorage(),
+        persistenceStore = persistenceStore,
+        expiryTelemetry = expiryTelemetry
+    )
+
     init {
+        MemoryCategory.entries.forEach { expiryPurgeCounters[it] = 0 }
         restoreFromStorage()
     }
 
@@ -121,7 +202,6 @@ class MemoryManager(
         if (policySettings.mode != MemoryPolicyMode.PERSISTENT) return
         val seedRoute = MemoryRouting.inferRoute(prompt = node.label, task = node.description)
         semanticIndex.upsert(MemoryRouting.applyCanonicalRoute(node, seedRoute))
-        semanticIndex.upsert(node)
         persistAndRefresh()
     }
 
@@ -141,6 +221,7 @@ class MemoryManager(
             attributes = mutableMapOf(
                 "semantic_subtype" to "profile",
                 "preference_key" to key,
+                "memory_category" to MemoryCategory.PROFILE.name.lowercase(),
                 "sensitivity" to sensitivity,
                 "timestamp" to timestampMs.toString(),
                 "current_relevance" to "0.85"
@@ -178,34 +259,15 @@ class MemoryManager(
         return semanticRemoved || profileRemoved
     }
 
-    fun getMemory(memoryId: String): MindNode? =
-        semanticIndex.get(memoryId) ?: profileMemories[memoryId]
+    fun getMemory(memoryId: String): MindNode? = semanticIndex.get(memoryId) ?: profileMemories[memoryId]
 
-    fun searchMemories(query: String, limit: Int): List<MindNode> {
-        if (query.isBlank() || limit <= 0) return emptyList()
-        val sessionNodes = sessionTurns.map { it.toMindNode() }
-        val profileNodes = profileMemories.values.toList()
-        val semanticNodes = if (policySettings.mode == MemoryPolicyMode.PERSISTENT) {
-            semanticIndex.query(query, topK = limit * 3)
-        } else {
-            emptyList()
+    fun clearSession(clearAllCategories: Boolean = false) {
+        sessionTurns.clear()
+        if (clearAllCategories) {
+            profileMemories.clear()
+            semanticIndex.clearAll()
         }
-        val all = sessionNodes + profileNodes + semanticNodes
-        return MemoryRetrievalService.retrieveWithSuggestions(
-            memories = all,
-            context = MemoryRetrievalService.RetrievalContext(prompt = query, task = "memory_search"),
-            limit = limit,
-            filters = MemoryRetrievalService.RetrievalFilters(
-                minRelevance = 0f,
-                allowedSensitivity = setOf(
-                    MemoryRetrievalService.SensitivityLevel.LOW,
-                    MemoryRetrievalService.SensitivityLevel.MEDIUM,
-                    MemoryRetrievalService.SensitivityLevel.HIGH,
-                    MemoryRetrievalService.SensitivityLevel.RESTRICTED
-                ),
-                allowSensitiveBoot = true
-            )
-        ).memories
+        persistAndRefresh()
     }
 
     fun status(nowEpochMs: Long = System.currentTimeMillis()): MemoryStatus {
@@ -219,22 +281,78 @@ class MemoryManager(
         )
     }
 
-    data class MemoryStatus(
-        val mode: MemoryPolicyMode,
-        val sessionTurnCount: Int,
-        val profileMemoryCount: Int,
-        val semanticMemoryCount: Int,
-        val expiryByCategoryMs: Map<MemoryCategory, Long>
-    )
+    fun saveFilter(name: String, query: MemoryQuery) {
+        savedFilters[name.trim().lowercase()] = query
+    }
 
-    fun clearSession() {
-    fun clearSession(clearAllCategories: Boolean = false) {
-        sessionTurns.clear()
-        if (clearAllCategories) {
-            profileMemories.clear()
-            semanticIndex.clearAll()
-        }
-        persistAndRefresh()
+    fun runSavedFilter(name: String): List<MindNode> {
+        val query = savedFilters[name.trim().lowercase()] ?: return emptyList()
+        return searchMemories(query)
+    }
+
+    fun saveView(view: MemoryView) {
+        savedViews[view.name.trim().lowercase()] = view
+    }
+
+    fun runView(name: String): List<MindNode> {
+        val view = savedViews[name.trim().lowercase()] ?: return emptyList()
+        val filter = savedFilters[view.filterName.trim().lowercase()] ?: return emptyList()
+        return searchMemories(filter.copy(limit = view.defaultLimit))
+    }
+
+    fun searchMemories(query: String, limit: Int): List<MindNode> {
+        if (query.isBlank() || limit <= 0) return emptyList()
+        return searchMemories(
+            QueryBuilder()
+                .text(query)
+                .minSimilarity(0f)
+                .limit(limit)
+                .build()
+        )
+    }
+
+    fun searchMemories(query: MemoryQuery): List<MindNode> {
+        if (query.limit <= 0) return emptyList()
+        val candidatePool = gatherCandidates(query.categories)
+        val scored = candidatePool
+            .asSequence()
+            .map { it to semanticSimilarity(it, query.rawQuery) }
+            .filter { (node, similarity) ->
+                matchesLabels(node, query.labelsAny) &&
+                    matchesAttributes(node, query.attributesAll) &&
+                    matchesDimensions(node, query.dimensions) &&
+                    matchesRelations(node, query.relationIdsAny) &&
+                    matchesTimestamp(node, query.timestampRange) &&
+                    similarity >= query.minSemanticSimilarity
+            }
+            .sortedWith(
+                compareByDescending<Pair<MindNode, Float>> { it.second }
+                    .thenByDescending { parseTimestamp(it.first.attributes["timestamp"]) ?: 0L }
+                    .thenBy { it.first.id }
+            )
+            .take(query.limit * 3)
+            .map { (node, similarity) ->
+                node.copy(attributes = node.attributes.toMutableMap().apply {
+                    put("vector_similarity", "%.4f".format(similarity))
+                })
+            }
+            .toList()
+
+        return MemoryRetrievalService.retrieveWithSuggestions(
+            memories = scored,
+            context = MemoryRetrievalService.RetrievalContext(prompt = query.rawQuery, task = "memory_query_dsl"),
+            limit = query.limit,
+            filters = MemoryRetrievalService.RetrievalFilters(
+                minRelevance = 0f,
+                allowedSensitivity = setOf(
+                    MemoryRetrievalService.SensitivityLevel.LOW,
+                    MemoryRetrievalService.SensitivityLevel.MEDIUM,
+                    MemoryRetrievalService.SensitivityLevel.HIGH,
+                    MemoryRetrievalService.SensitivityLevel.RESTRICTED
+                ),
+                allowSensitiveBoot = true
+            )
+        ).memories
     }
 
     fun retrieveForPromptInjection(
@@ -273,41 +391,82 @@ class MemoryManager(
         ).memories
     }
 
+    private fun gatherCandidates(categories: Set<MemoryCategory>): List<MindNode> {
+        val includeSession = MemoryCategory.SESSION in categories
+        val includeProfile = MemoryCategory.PROFILE in categories
+        val includeSemantic = MemoryCategory.SEMANTIC in categories && policySettings.mode == MemoryPolicyMode.PERSISTENT
+
+        val sessions = if (includeSession) sessionTurns.map { it.toMindNode() } else emptyList()
+        val profiles = if (includeProfile) profileMemories.values.toList() else emptyList()
+        val semantics = if (includeSemantic) semanticIndex.allMemories() else emptyList()
+        return sessions + profiles + semantics
+    }
+
+    private fun matchesLabels(node: MindNode, labelsAny: Set<String>): Boolean {
+        if (labelsAny.isEmpty()) return true
+        val label = node.label.lowercase()
+        return labelsAny.any { label.contains(it) }
+    }
+
+    private fun matchesAttributes(node: MindNode, attributesAll: Map<String, String>): Boolean {
+        if (attributesAll.isEmpty()) return true
+        return attributesAll.all { (key, value) -> node.attributes[key] == value }
+    }
+
+    private fun matchesDimensions(
+        node: MindNode,
+        dimensions: Map<String, ClosedFloatingPointRange<Float>>
+    ): Boolean {
+        if (dimensions.isEmpty()) return true
+        return dimensions.all { (key, range) ->
+            val value = node.dimensions[key] ?: return@all false
+            value in range
+        }
+    }
+
+    private fun matchesRelations(node: MindNode, relationIdsAny: Set<String>): Boolean {
+        if (relationIdsAny.isEmpty()) return true
+        val relatedRaw = node.attributes["related_to"].orEmpty()
+        val relatedSet = relatedRaw.split(',', ';', '|').map { it.trim() }.filter { it.isNotBlank() }.toSet()
+        return relationIdsAny.any { it == node.parentId || it in relatedSet }
+    }
+
+    private fun matchesTimestamp(node: MindNode, range: LongRange?): Boolean {
+        if (range == null) return true
+        val timestamp = parseTimestamp(node.attributes["timestamp"]) ?: return false
+        return timestamp in range
+    }
+
+    private fun semanticSimilarity(node: MindNode, rawQuery: String): Float {
+        if (rawQuery.isBlank()) return 1f
+        return semanticIndex.similarity(rawQuery, node)
+    }
+
     private fun purgeExpired(nowEpochMs: Long) {
         val expiryMap = policySettings.expiryByCategoryMs
+
         purgeExpiredByCategory(MemoryCategory.SESSION, expiryMap[MemoryCategory.SESSION]) { maxAgeMs ->
             PurgeSelection(
-                expiredIds = sessionTurns
-                    .filter { nowEpochMs - it.timestampMs > maxAgeMs }
-                    .map { it.id },
+                expiredIds = sessionTurns.filter { nowEpochMs - it.timestampMs > maxAgeMs }.map { it.id },
                 malformedTimestampCount = 0
             )
         }?.let { expiredIds ->
-            sessionTurns.removeAll { it.id in expiredIds.toSet() }
+            if (expiredIds.isNotEmpty()) {
+                val expiredSet = expiredIds.toSet()
+                sessionTurns.removeAll { it.id in expiredSet }
+            }
         }
 
         purgeExpiredByCategory(MemoryCategory.PROFILE, expiryMap[MemoryCategory.PROFILE]) { maxAgeMs ->
-            profileMemories.values.selectExpiredByTimestamp(
-                nowEpochMs = nowEpochMs,
-                maxAgeMs = maxAgeMs
-            )
+            profileMemories.values.selectExpiredByTimestamp(nowEpochMs, maxAgeMs)
         }?.let { expiredIds ->
             expiredIds.forEach { profileMemories.remove(it) }
         }
 
         purgeExpiredByCategory(MemoryCategory.SEMANTIC, expiryMap[MemoryCategory.SEMANTIC]) { maxAgeMs ->
-            semanticIndex.memories().selectExpiredByTimestamp(
-                nowEpochMs = nowEpochMs,
-                maxAgeMs = maxAgeMs
-            )
+            semanticIndex.memories().selectExpiredByTimestamp(nowEpochMs, maxAgeMs)
         }?.let { expiredIds ->
             semanticIndex.deleteMany(expiredIds)
-        var shouldPersist = false
-
-        val sessionExpiry = expiryMap[MemoryCategory.SESSION]
-        if (sessionExpiry != null) {
-            val removed = sessionTurns.removeAll { nowEpochMs - it.timestampMs > sessionExpiry }
-            if (removed) shouldPersist = true
         }
     }
 
@@ -318,19 +477,10 @@ class MemoryManager(
     ): List<String>? {
         if (maxAgeMs == null) return null
         val selection = selectExpired(maxAgeMs)
-        if (selection.expiredIds.isEmpty()) {
-            expiryTelemetry.onExpiredRemoved(category, 0, selection.malformedTimestampCount)
-            return emptyList()
-        val profileExpiry = expiryMap[MemoryCategory.PROFILE]
-        if (profileExpiry != null) {
-            val toRemove = profileMemories.values
-                .filter { nowEpochMs - (it.attributes["timestamp"]?.toLongOrNull() ?: nowEpochMs) > profileExpiry }
-                .map { it.id }
-            toRemove.forEach { profileMemories.remove(it) }
-            if (toRemove.isNotEmpty()) shouldPersist = true
+        if (selection.expiredIds.isNotEmpty()) {
+            persistenceStore.deleteExpired(category, selection.expiredIds)
+            expiryPurgeCounters.compute(category) { _, count -> (count ?: 0) + selection.expiredIds.size }
         }
-        persistenceStore.deleteExpired(category, selection.expiredIds)
-        expiryPurgeCounters.compute(category) { _, count -> (count ?: 0) + selection.expiredIds.size }
         expiryTelemetry.onExpiredRemoved(category, selection.expiredIds.size, selection.malformedTimestampCount)
         return selection.expiredIds
     }
@@ -345,15 +495,7 @@ class MemoryManager(
         return PurgeSelection(expiredIds = expiredIds, malformedTimestampCount = malformedTimestampCount)
     }
 
-    private fun parseTimestamp(rawTimestamp: String?): Long? {
-        return rawTimestamp?.toLongOrNull()
-        val semanticPurged = semanticIndex.purgeExpired(nowEpochMs, expiryMap[MemoryCategory.SEMANTIC])
-        if (semanticPurged) shouldPersist = true
-
-        if (shouldPersist) {
-            persistAndRefresh()
-        }
-    }
+    private fun parseTimestamp(rawTimestamp: String?): Long? = rawTimestamp?.toLongOrNull()
 
     private fun restoreFromStorage() {
         val snapshot = storage.loadSnapshot()
@@ -402,6 +544,18 @@ class MemoryManager(
             )
         )
     }
+
+    private object NoOpMemoryPersistenceStore : MemoryPersistenceStore {
+        override fun deleteExpired(category: MemoryCategory, memoryIds: List<String>) = Unit
+    }
+
+    private object StdoutMemoryExpiryTelemetry : MemoryExpiryTelemetry {
+        override fun onExpiredRemoved(category: MemoryCategory, removedCount: Int, malformedTimestampCount: Int) {
+            println(
+                "MemoryManager.purgeExpired category=$category removed=$removedCount malformed_timestamps=$malformedTimestampCount"
+            )
+        }
+    }
 }
 
 private class InMemoryMemoryStorage : MemoryManager.MemoryStorage {
@@ -421,7 +575,7 @@ private class SemanticMemoryVectorIndex {
 
     fun upsert(node: MindNode) {
         memories[node.id] = node
-        vectors[node.id] = tokenizeToUnitVector("${node.label} ${node.description} ${node.attributes["tags"] ?: ""}")
+        vectors[node.id] = tokenizeToUnitVector(toEmbeddingText(node))
     }
 
     fun get(id: String): MindNode? = memories[id]
@@ -432,12 +586,21 @@ private class SemanticMemoryVectorIndex {
         return removed
     }
 
+    fun deleteMany(ids: List<String>) {
+        ids.forEach {
+            memories.remove(it)
+            vectors.remove(it)
+        }
+    }
+
     fun clearAll() {
         memories.clear()
         vectors.clear()
     }
 
     fun allMemories(): List<MindNode> = memories.values.toList()
+
+    fun memories(): Collection<MindNode> = memories.values.toList()
 
     fun replaceAll(nodes: List<MindNode>) {
         clearAll()
@@ -467,25 +630,27 @@ private class SemanticMemoryVectorIndex {
             .toList()
     }
 
-    fun memories(): Collection<MindNode> = memories.values.toList()
-    fun purgeExpired(nowEpochMs: Long, maxAgeMs: Long?): Boolean {
-        if (maxAgeMs == null) return false
-        val expiredIds = memories.values
-            .filter { memory ->
-                val ts = memory.attributes["timestamp"]?.toLongOrNull() ?: nowEpochMs
-                nowEpochMs - ts > maxAgeMs
-            }
-            .map { it.id }
-
-    fun deleteMany(ids: List<String>) {
-        ids.forEach {
-            memories.remove(it)
-            vectors.remove(it)
-        }
-        return expiredIds.isNotEmpty()
+    fun similarity(query: String, memory: MindNode): Float {
+        if (query.isBlank()) return 1f
+        val queryVector = tokenizeToUnitVector(query)
+        if (queryVector.isEmpty()) return 0f
+        val memoryVector = vectors[memory.id] ?: tokenizeToUnitVector(toEmbeddingText(memory))
+        return cosineSimilarity(queryVector, memoryVector)
     }
 
     fun size(): Int = memories.size
+
+    private fun toEmbeddingText(memory: MindNode): String {
+        return buildString {
+            append(memory.label)
+            append(' ')
+            append(memory.description)
+            append(' ')
+            append(memory.attributes["tags"].orEmpty())
+            append(' ')
+            append(memory.attributes.values.joinToString(" "))
+        }
+    }
 
     private fun tokenizeToUnitVector(text: String): Map<String, Float> {
         val counts = text.lowercase()
