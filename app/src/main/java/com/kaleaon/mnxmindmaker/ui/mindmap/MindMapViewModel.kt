@@ -36,8 +36,14 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
     private val llmRepository = LlmSettingsRepository(application)
     private val continuityManager = ContinuityManager(application)
     private val llmClient = LlmApiClient()
+    private val mutationManager = MindMutationTransactionManager(
+        persistence = MindMutationTransactionManager.FilePersistence(
+            File(application.filesDir, "mind/mutation-log.json")
+        ),
+        initialGraphFactory = ::newDefaultGraph
+    )
 
-    private val _graph = MutableLiveData(newDefaultGraph())
+    private val _graph = MutableLiveData(mutationManager.currentGraph())
     val graph: LiveData<MindGraph> get() = _graph
 
     private val _selectedNode = MutableLiveData<MindNode?>()
@@ -92,38 +98,41 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun addNode(label: String, type: NodeType, description: String = "") {
-        val current = _graph.value ?: return
-        val parentId = _selectedNode.value?.id
-        val node = MindNode(
-            label = label,
-            type = type,
-            description = description,
-            x = (100..700).random().toFloat(),
-            y = (100..600).random().toFloat(),
-            parentId = parentId,
-            dimensions = DimensionMapper.defaultDimensions(type)
-        )
-        val updatedNodes = current.nodes.toMutableList().also { it.add(node) }
-        val updatedEdges = current.edges.toMutableList()
-        if (parentId != null) updatedEdges.add(MindEdge(fromNodeId = parentId, toNodeId = node.id))
-        _graph.value = current.copy(nodes = updatedNodes, edges = updatedEdges)
-        _selectedNode.value = node
-        refreshAudit()
+        var addedNode: MindNode? = null
+        applyGraphMutation("add_node") { current ->
+            val parentId = _selectedNode.value?.id
+            val node = MindNode(
+                label = label,
+                type = type,
+                description = description,
+                x = (100..700).random().toFloat(),
+                y = (100..600).random().toFloat(),
+                parentId = parentId,
+                dimensions = DimensionMapper.defaultDimensions(type)
+            )
+            addedNode = node
+            val updatedNodes = current.nodes.toMutableList().also { it.add(node) }
+            val updatedEdges = current.edges.toMutableList()
+            if (parentId != null) updatedEdges.add(MindEdge(fromNodeId = parentId, toNodeId = node.id))
+            current.copy(nodes = updatedNodes, edges = updatedEdges)
+        }
+        _selectedNode.value = addedNode
     }
 
     fun removeNode(nodeId: String) {
-        val current = _graph.value ?: return
-        val updatedNodes = current.nodes.filter { it.id != nodeId }.toMutableList()
-        val updatedEdges = current.edges.filter { it.fromNodeId != nodeId && it.toNodeId != nodeId }.toMutableList()
-        _graph.value = current.copy(nodes = updatedNodes, edges = updatedEdges)
+        applyGraphMutation("remove_node") { current ->
+            val updatedNodes = current.nodes.filter { it.id != nodeId }.toMutableList()
+            val updatedEdges = current.edges.filter { it.fromNodeId != nodeId && it.toNodeId != nodeId }.toMutableList()
+            current.copy(nodes = updatedNodes, edges = updatedEdges)
+        }
         if (_selectedNode.value?.id == nodeId) _selectedNode.value = null
-        refreshAudit()
     }
 
     fun updateNodePosition(nodeId: String, x: Float, y: Float) {
-        val current = _graph.value ?: return
-        val updatedNodes = current.nodes.map { if (it.id == nodeId) it.copy(x = x, y = y) else it }
-        _graph.value = current.copy(nodes = updatedNodes.toMutableList())
+        applyGraphMutation("move_node") { current ->
+            val updatedNodes = current.nodes.map { if (it.id == nodeId) it.copy(x = x, y = y) else it }
+            current.copy(nodes = updatedNodes.toMutableList())
+        }
     }
 
     fun selectNode(node: MindNode?) {
@@ -131,10 +140,9 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun loadGraph(graph: MindGraph) {
-        _graph.value = graph
+        applyGraphMutation("load_graph") { graph }
         _selectedNode.value = null
         acceptedFindingIds.clear()
-        refreshAudit()
     }
 
     fun runContinuityAudit() = refreshAudit()
@@ -164,15 +172,16 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
             dimensions = DimensionMapper.defaultDimensions(NodeType.MEMORY)
         )
 
-        val edges = current.edges.toMutableList()
-        finding.nodeIds.forEach { nodeId ->
-            if (current.nodes.any { it.id == nodeId }) {
-                edges += MindEdge(fromNodeId = nodeId, toNodeId = correctiveNode.id, label = "corrects", strength = 0.85f)
+        applyGraphMutation("add_corrective_node") { graph ->
+            val edges = graph.edges.toMutableList()
+            finding.nodeIds.forEach { nodeId ->
+                if (graph.nodes.any { it.id == nodeId }) {
+                    edges += MindEdge(fromNodeId = nodeId, toNodeId = correctiveNode.id, label = "corrects", strength = 0.85f)
+                }
             }
+            graph.copy(nodes = graph.nodes.toMutableList().also { it += correctiveNode }, edges = edges)
         }
-        _graph.value = current.copy(nodes = current.nodes.toMutableList().also { it += correctiveNode }, edges = edges)
         acceptedFindingIds += findingId
-        refreshAudit()
     }
 
     fun refreshSnapshotTimeline() {
@@ -197,10 +206,9 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
             _isLoading.value = true
             try {
                 val restored = withContext(Dispatchers.IO) { continuityManager.restoreSnapshot(snapshotId) }
-                _graph.value = restored
+                applyGraphMutation("restore_snapshot") { restored }
                 _selectedNode.value = null
                 _snapshotActionMessage.value = "Snapshot restored: ${snapshotId.take(8)}"
-                refreshAudit()
             } catch (e: Exception) {
                 _error.value = "Restore failed: ${e.message}"
             } finally {
@@ -244,10 +252,9 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
             _isLoading.value = true
             try {
                 val imported = withContext(Dispatchers.IO) { mnxRepository.importFromMnx(stream) }
-                _graph.value = imported
+                applyGraphMutation("import_mnx") { imported }
                 _selectedNode.value = null
                 acceptedFindingIds.clear()
-                refreshAudit()
             } catch (e: Exception) {
                 _error.value = "Import failed: ${e.message}"
             } finally {
@@ -503,6 +510,50 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
 
     fun clearExportedFile() {
         _exportedFile.value = null
+    }
+
+    fun undoLastMutation() {
+        when (val result = mutationManager.undo()) {
+            is UndoRedoResult.Applied -> {
+                _graph.value = result.graph
+                _selectedNode.value = null
+                refreshAudit()
+            }
+            UndoRedoResult.NoOp -> Unit
+        }
+    }
+
+    fun redoLastMutation() {
+        when (val result = mutationManager.redo()) {
+            is UndoRedoResult.Applied -> {
+                _graph.value = result.graph
+                _selectedNode.value = null
+                refreshAudit()
+            }
+            UndoRedoResult.NoOp -> Unit
+        }
+    }
+
+    private fun applyGraphMutation(
+        mutationName: String,
+        mutate: (MindGraph) -> MindGraph
+    ) {
+        val expectedVersion = mutationManager.currentVersion()
+        val expectedHash = mutationManager.currentHash()
+        when (val tx = mutationManager.executeTransaction(mutationName, expectedVersion, expectedHash, mutate)) {
+            is TransactionResult.Committed -> {
+                _graph.value = tx.graph
+                refreshAudit()
+            }
+            is TransactionResult.Conflict -> {
+                _error.value = tx.message
+                _graph.value = mutationManager.currentGraph()
+            }
+            is TransactionResult.RolledBack -> {
+                _error.value = "Mutation rolled back: ${tx.message}"
+                _graph.value = mutationManager.currentGraph()
+            }
+        }
     }
 
     private fun newDefaultGraph(): MindGraph {
