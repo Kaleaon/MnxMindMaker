@@ -66,6 +66,10 @@
     <string name="default_import_name">Imported Mind</string>
     <string name="section_mapping_preview">%1$d nodes mapped to MNX sections:\n%2$s</string>
     <string name="import_file_loaded">Loaded %1$s — tap Parse &amp; Map to import</string>
+    <string name="import_intent_success">Imported %1$d nodes from shared file</string>
+    <string name="import_intent_invalid_uri">Could not open shared file: invalid URI</string>
+    <string name="import_intent_unsupported">Shared file type is not supported for import</string>
+    <string name="import_intent_unknown_error">unknown error</string>
 
     <!-- Ktheme -->
     <string name="theme_section_title">App Theme</string>
