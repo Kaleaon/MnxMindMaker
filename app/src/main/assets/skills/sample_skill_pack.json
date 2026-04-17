@@ -15,6 +15,14 @@
       "risk": {
         "operation_class": "READ_ONLY",
         "requires_confirmation": false
+      },
+      "playbook": {
+        "summary": "Follow a deterministic read path before returning.",
+        "steps": [
+          "Call graph summary reader",
+          "Return concise answer with key counts"
+        ],
+        "source": "https://github.com/agents-io/PokeClaw"
       }
     }
   ]

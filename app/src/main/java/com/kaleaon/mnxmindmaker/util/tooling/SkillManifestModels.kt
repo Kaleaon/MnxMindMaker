@@ -15,12 +15,24 @@ data class ManifestToolSpec(
     val description: String,
     val handlerId: String,
     val inputSchema: JSONObject,
-    val risk: ManifestRiskFlags = ManifestRiskFlags()
+    val risk: ManifestRiskFlags = ManifestRiskFlags(),
+    val playbook: ManifestPlaybook? = null
 )
 
 data class ManifestRiskFlags(
     val operationClass: ToolOperationClass? = null,
     val requiresConfirmation: Boolean? = null
+)
+
+/**
+ * Optional guided workflow metadata inspired by local-first agent playbooks.
+ * This is appended into tool descriptions to help smaller models follow stable
+ * step-by-step tool usage patterns.
+ */
+data class ManifestPlaybook(
+    val summary: String? = null,
+    val steps: List<String> = emptyList(),
+    val source: String? = null
 )
 
 data class LoadedSkillPack(
