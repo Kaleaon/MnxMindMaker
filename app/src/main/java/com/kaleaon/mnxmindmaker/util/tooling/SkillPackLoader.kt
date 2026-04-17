@@ -50,9 +50,10 @@ class SkillPackLoader(
 
             val tools = manifest.tools.map { tool ->
                 val operationClass = tool.risk.operationClass ?: defaultOperationClassForHandler(tool.handlerId)
+                val description = buildToolDescription(tool)
                 ToolSpec(
                     name = tool.name,
-                    description = tool.description,
+                    description = description,
                     operationClass = operationClass,
                     inputSchema = JSONObject(tool.inputSchema.toString()),
                     requiresConfirmation = tool.risk.requiresConfirmation ?: (operationClass != ToolOperationClass.READ_ONLY)
@@ -81,6 +82,19 @@ class SkillPackLoader(
                 handlerId.startsWith("graph.write") || handlerId.startsWith("memory.write") -> ToolOperationClass.MUTATING
                 else -> ToolOperationClass.MUTATING
             }
+        }
+
+        private fun buildToolDescription(tool: ManifestToolSpec): String {
+            val playbook = tool.playbook ?: return tool.description
+            val sections = mutableListOf<String>()
+            sections += tool.description
+            playbook.summary?.takeIf { it.isNotBlank() }?.let { sections += "Playbook: $it" }
+            if (playbook.steps.isNotEmpty()) {
+                val condensedSteps = playbook.steps.joinToString(separator = " -> ")
+                sections += "Suggested sequence: $condensedSteps"
+            }
+            playbook.source?.takeIf { it.isNotBlank() }?.let { sections += "Reference: $it" }
+            return sections.joinToString(separator = "\n")
         }
     }
 }
