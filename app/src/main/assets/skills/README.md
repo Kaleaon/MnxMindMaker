@@ -53,3 +53,9 @@ internal handler IDs in code (`ToolRegistry`).
 ## Why playbooks?
 
 Inspired by PokeClaw's local-first "tools + skills" approach, `playbook` metadata lets each tool carry a compact recipe so smaller models can follow reliable execution sequences instead of improvising each turn.
+
+
+## Included packs
+
+- `sample_skill_pack.json` — disabled reference manifest.
+- `openclaw_assistant_extension_pack.json` — enabled OpenClaw-inspired read-only command-style tool aliases (`status_overview`, `tools_inventory_compact`, `memory_lookup_fast`).
