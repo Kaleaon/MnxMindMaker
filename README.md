@@ -14,6 +14,7 @@ A standalone Android APK for designing AI minds and exporting them to the
 | **MNX Import / Export** | Read and write `.mnx` binary files — fully compatible with [TronProtocol](https://github.com/Kaleaon/TronProtocol)'s codec (magic, CRC32 per section, SHA-256 footer) |
 | **Interchange Import / Export** | Adds provider-neutral exports via `.mnxj` (strict JSON) and `.mnxb` (ZIP bundle with `manifest.json` + `payload/graph.json` + optional `blobs/` files), including explicit schema versioning and compatibility hooks |
 | **Data Import** | Paste or load plain text or JSON; the mapper heuristically assigns node types and populates default dimensions automatically |
+| **ToolNeuron Integration Path** | Includes ToolNeuron-aligned model discovery and deployment guidance for local-first Android AI stacks |
 | **LLM API Settings** | Configure API keys, model names, and base URLs for **Anthropic** (Claude), **OpenAI** (GPT), **Google Gemini**, and **vLLM Gemma 4** (self-hosted OpenAI-compatible endpoint) |
 | **Continuity Metadata** | Supports kernel/memory/drift metadata fields (for example `protection_level`, `kernel_section`, `memory_class`, `raw_record`, `interpretation`, `drift_type`, and related schema attributes) |
 | **Runtime Slices** | Includes `STATE` and `DRIFT_RULE` node support plus boot-packet slice generation (kernel, state, warning, memory, and drift-rule bundles) |
@@ -178,6 +179,7 @@ This ordering keeps existing cloud-provider integrations (Anthropic/OpenAI/Gemin
 - [`docs/llmedge-Integration-Notes.md`](docs/llmedge-Integration-Notes.md)
 - [`docs/LiteRT-LM-Integration-Notes.md`](docs/LiteRT-LM-Integration-Notes.md)
 - [`docs/Release-Notes-Deployment-and-Local-Runtime.md`](docs/Release-Notes-Deployment-and-Local-Runtime.md)
+- [`docs/ToolNeuron-Integration-Notes.md`](docs/ToolNeuron-Integration-Notes.md)
 - [`docs/AI-Mind-Evolution-Framework.md`](docs/AI-Mind-Evolution-Framework.md)
 - [`docs/AI-Mind-Evolution-Prompt-Pack.md`](docs/AI-Mind-Evolution-Prompt-Pack.md)
 - [`docs/AI-Mind-Evolution-State-Schema.json`](docs/AI-Mind-Evolution-State-Schema.json)
@@ -213,6 +215,10 @@ Supported refresh providers and token endpoints currently implemented:
 
 - **Claude (Anthropic)**: `https://api.anthropic.com/oauth/token`
 - **ChatGPT (OpenAI)**: `https://api.openai.com/v1/oauth/token`
+
+Additional linked account support:
+
+- **Hugging Face** access-token linking for authenticated model retrieval from Hub.
 
 If either OAuth client credential is missing, refresh is blocked locally and the
 UI explains exactly which credential is required.

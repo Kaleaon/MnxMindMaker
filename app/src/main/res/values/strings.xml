@@ -176,10 +176,13 @@
     <string name="account_linking_section_title">Account Linking</string>
     <string name="link_claude_account">Link Claude account</string>
     <string name="link_chatgpt_account">Link ChatGPT account</string>
+    <string name="link_huggingface_account">Link Hugging Face account</string>
     <string name="link_refresh_claude">Refresh Claude token</string>
     <string name="link_refresh_chatgpt">Refresh ChatGPT token</string>
+    <string name="link_refresh_huggingface">Refresh Hugging Face token</string>
     <string name="link_revoke_claude">Revoke Claude link</string>
     <string name="link_revoke_chatgpt">Revoke ChatGPT link</string>
+    <string name="link_revoke_huggingface">Revoke Hugging Face link</string>
     <string name="link_provider_title">Link %1$s account</string>
     <string name="link_account_action">Link account</string>
     <string name="link_access_token_hint">Access token</string>

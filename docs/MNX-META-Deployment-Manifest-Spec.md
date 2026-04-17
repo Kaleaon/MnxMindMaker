@@ -22,7 +22,7 @@ persona:
   display_name: "string"
 runtime:
   profile: "cloud|hybrid|local"
-  provider: "openai|anthropic|gemini|vllm|llmedge|custom"
+  provider: "openai|anthropic|gemini|vllm|llmedge|toolneuron|huggingface|custom"
   model: "string"
   endpoint: "https://... or http://..."
 policy:

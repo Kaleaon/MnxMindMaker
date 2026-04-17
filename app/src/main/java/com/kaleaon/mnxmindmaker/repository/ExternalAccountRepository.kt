@@ -122,6 +122,9 @@ class ExternalAccountRepository(context: Context) {
 
     fun allLinkStates(): List<ExternalAccountLink> = ExternalProvider.entries.map { getLinkState(it) }
 
+
+    fun getAccessToken(provider: ExternalProvider): String? = vault.getString(accessKey(provider))
+
     private fun persistCapabilities(provider: ExternalProvider, metadata: ProviderCapabilityMetadata) {
         val json = JSONObject()
             .put("supportsToolUse", metadata.supportsToolUse)
