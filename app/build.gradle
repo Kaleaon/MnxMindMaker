@@ -7,6 +7,8 @@ plugins {
 def generatedComplianceAssetsDir = layout.buildDirectory.dir("generated/complianceAssets/main")
 def llmedgeAarOrJar = fileTree(dir: 'libs', include: ['llmedge*.aar', 'llmedge*.jar'])
 def hasLlmedgeAarOrJar = !llmedgeAarOrJar.isEmpty()
+def liteRtLmAarOrJar = fileTree(dir: 'libs', include: ['litert-lm*.aar', 'litert-lm*.jar', 'litertlm*.aar', 'litertlm*.jar'])
+def hasLiteRtLmAarOrJar = !liteRtLmAarOrJar.isEmpty()
 
 android {
     namespace 'com.kaleaon.mnxmindmaker'
@@ -77,6 +79,11 @@ dependencies {
         implementation project(':llmedge')
     } else if (hasLlmedgeAarOrJar) {
         implementation llmedgeAarOrJar
+    }
+    if (findProject(':litertlm') != null) {
+        implementation project(':litertlm')
+    } else if (hasLiteRtLmAarOrJar) {
+        implementation liteRtLmAarOrJar
     }
 
     testImplementation 'junit:junit:4.13.2'

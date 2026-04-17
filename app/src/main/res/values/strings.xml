@@ -113,6 +113,7 @@
     <string name="hint_openai_compatible_self_hosted_key">Optional bearer token for your self-hosted OpenAI-compatible endpoint.</string>
     <string name="hint_gemini_key">Get your key at aistudio.google.com</string>
     <string name="hint_vllm_key">Optional for local vLLM. Leave blank to use Bearer EMPTY.</string>
+    <string name="hint_local_litert_model_path">Use a local .litertlm model package path (or bridge-provided path) with a LiteRT-LM runtime endpoint.</string>
     <string name="anthropic_api_info">Anthropic Claude — powerful reasoning, long context</string>
     <string name="openai_api_info">OpenAI GPT — broad capability, wide model choice</string>
     <string name="gemini_api_info">Google Gemini — multimodal, large context window</string>
@@ -202,6 +203,7 @@
     <string name="link_status_not_linked">%1$s: not linked</string>
     <string name="link_status_linked">%1$s: linked (expiry %2$s) • models: %3$d • tools: %4$s • rate limit: %5$s</string>
     <string name="compute_backend_label">Runtime Device</string>
+    <string name="local_runtime_engine_label">Local Runtime Engine</string>
     <string name="context_window_label">Context Window</string>
     <string name="quantization_profile_label">Quantization Profile</string>
     <string name="max_ram_label">Max RAM (MB)</string>

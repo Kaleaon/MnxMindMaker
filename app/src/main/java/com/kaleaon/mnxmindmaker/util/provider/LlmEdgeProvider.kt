@@ -2,6 +2,7 @@ package com.kaleaon.mnxmindmaker.util.provider
 
 import com.kaleaon.mnxmindmaker.model.LlmProvider
 import com.kaleaon.mnxmindmaker.model.LlmSettings
+import com.kaleaon.mnxmindmaker.model.LocalRuntimeEngine
 import com.kaleaon.mnxmindmaker.util.LlmApiException
 import com.kaleaon.mnxmindmaker.util.tooling.AssistantTurn
 import okhttp3.MediaType.Companion.toMediaType
@@ -37,7 +38,7 @@ class LlmEdgeProvider(
                     if (request.settings.localModelPath.isNotBlank()) {
                         put("local_model_path", request.settings.localModelPath)
                     }
-                    put("runtime", "llmedge")
+                    put("runtime", request.settings.runtimeControls.engine.runtimeTag())
                 })
             }
 
@@ -66,7 +67,7 @@ class LlmEdgeProvider(
 
         return try {
             val probe = Request.Builder()
-                .url("${settings.baseUrl}/models")
+                .url("${settings.baseUrl.trimEnd('/')}/${settings.runtimeControls.engine.healthProbePath()}")
                 .get()
                 .build()
 
@@ -98,6 +99,16 @@ class LlmEdgeProvider(
             else -> "$prefix: ${throwable.message ?: throwable.javaClass.simpleName}"
         }
         return LlmApiException(message, throwable)
+    }
+
+    private fun LocalRuntimeEngine.runtimeTag(): String = when (this) {
+        LocalRuntimeEngine.LLMEDGE -> "llmedge"
+        LocalRuntimeEngine.LITERT_LM -> "litert-lm"
+    }
+
+    private fun LocalRuntimeEngine.healthProbePath(): String = when (this) {
+        LocalRuntimeEngine.LLMEDGE,
+        LocalRuntimeEngine.LITERT_LM -> "models"
     }
 
     companion object {
