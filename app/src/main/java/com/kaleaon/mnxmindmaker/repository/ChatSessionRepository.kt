@@ -3,6 +3,7 @@ package com.kaleaon.mnxmindmaker.repository
 import android.content.Context
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -16,6 +17,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
+import kotlinx.serialization.json.put
 import java.io.File
 import java.util.UUID
 
@@ -112,6 +114,27 @@ class ChatSessionRepository(
         val now = System.currentTimeMillis()
         val updatedSessions = state.sessions.map { session ->
             if (session.sessionId != sessionId) session else session.copy(updatedTimestamp = now, messages = messages)
+        }
+        val updated = state.copy(updatedTimestamp = now, sessions = updatedSessions)
+        saveStateLocked(updated)
+        updated
+    }
+
+    fun updateActiveParticipants(sessionId: String, participantIds: Set<String>): PersistedChatStore = synchronized(lock) {
+        val state = loadStateLocked()
+        val now = System.currentTimeMillis()
+        val normalized = participantIds
+            .asSequence()
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .distinct()
+            .sorted()
+            .toList()
+        val updatedSessions = state.sessions.map { session ->
+            if (session.sessionId != sessionId) session else session.copy(
+                updatedTimestamp = now,
+                activeParticipants = normalized
+            )
         }
         val updated = state.copy(updatedTimestamp = now, sessions = updatedSessions)
         saveStateLocked(updated)
@@ -329,6 +352,7 @@ class ChatSessionRepository(
                 }
             }
         }
+        return migratePayloadForVersion(payload = payload, version = version)
     }
 
     private fun recoverFromCorruptionLocked(): PersistedChatStore {
@@ -360,5 +384,57 @@ class ChatSessionRepository(
         private const val CONTENT_FIELD = "content"
         private const val USER_ACTOR = "USER"
         private const val ASSISTANT_ACTOR = "ASSISTANT"
+
+        internal fun migratePayloadForVersion(payload: JsonObject, version: Int): JsonObject {
+            if (version >= ChatPersistenceSchema.CURRENT_VERSION) return payload
+
+            var migrated = payload
+            var currentVersion = version
+            while (currentVersion < ChatPersistenceSchema.CURRENT_VERSION) {
+                migrated = when (currentVersion) {
+                    1 -> migrateV1ToV2(migrated)
+                    else -> migrated
+                }
+                currentVersion += 1
+            }
+            return migrated
+        }
+
+        private fun migrateV1ToV2(payload: JsonObject): JsonObject {
+            val sessions = payload["sessions"]?.jsonArray ?: JsonArray(emptyList())
+            val upgradedSessions = buildJsonArray {
+                sessions.forEach { element ->
+                    val session = element.jsonObject
+                    val upgradedMessages = buildJsonArray {
+                        session["messages"]?.jsonArray?.forEach { messageElement ->
+                            val message = messageElement.jsonObject
+                            add(
+                                buildJsonObject {
+                                    message.forEach { (key, value) -> put(key, value) }
+                                    if (message["actorLabel"]?.jsonPrimitive?.contentOrNull.isNullOrBlank()) {
+                                        put("actorLabel", "assistant")
+                                    }
+                                }
+                            )
+                        }
+                    }
+                    add(
+                        buildJsonObject {
+                            session.forEach { (key, value) -> put(key, value) }
+                            if (session["conversationMode"]?.jsonPrimitive?.contentOrNull.isNullOrBlank()) {
+                                put("conversationMode", "multi_actor")
+                            }
+                            put("messages", upgradedMessages)
+                        }
+                    )
+                }
+            }
+
+            return buildJsonObject {
+                payload.forEach { (key, value) -> put(key, value) }
+                put(SCHEMA_VERSION_FIELD, ChatPersistenceSchema.CURRENT_VERSION)
+                put("sessions", upgradedSessions)
+            }
+        }
     }
 }

@@ -7,21 +7,21 @@
     android:background="@color/colorSurface">
 
     <TextView
-        android:id="@+id/tv_chat_prompt"
+        android:id="@+id/tv_chat_speaker"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:textStyle="bold"
         android:textColor="@color/colorOnSurface" />
 
     <TextView
-        android:id="@+id/tv_chat_response"
+        android:id="@+id/tv_chat_content"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="4dp"
         android:textColor="@color/colorOnSurface" />
 
     <TextView
-        android:id="@+id/tv_chat_provenance"
+        android:id="@+id/tv_chat_metadata"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="6dp"

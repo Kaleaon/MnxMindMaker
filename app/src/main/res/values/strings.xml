@@ -44,6 +44,14 @@
     <string name="side_by_side_provider_compare_title">Side-by-side provider compare</string>
     <string name="new_thread">New Thread</string>
     <string name="chat_thread_meta">Created %1$s • Updated %2$s • Provider %3$s</string>
+    <string name="chat_participants_label">Active participants</string>
+    <string name="chat_unresolved_mentions_title">Unresolved mentions</string>
+    <string name="chat_unresolved_mentions_message">These mind handles were not found: %1$s\n\n%2$s\n\nYou can correct the prompt before sending.</string>
+    <string name="chat_unresolved_mentions_inline">Unresolved mentions: %1$s</string>
+    <string name="chat_mentions_suggestions">Available handles: %1$s</string>
+    <string name="chat_mentions_no_suggestions">No known mind handles in the current graph.</string>
+    <string name="chat_fix_and_send">Fix &amp; send</string>
+    <string name="send_anyway">Send anyway</string>
     <string name="provider_auto">Auto</string>
     <string name="provider_local">Local</string>
     <string name="provider_claude">Claude</string>
@@ -58,6 +66,10 @@
     <string name="default_import_name">Imported Mind</string>
     <string name="section_mapping_preview">%1$d nodes mapped to MNX sections:\n%2$s</string>
     <string name="import_file_loaded">Loaded %1$s — tap Parse &amp; Map to import</string>
+    <string name="import_intent_success">Imported %1$d nodes from shared file</string>
+    <string name="import_intent_invalid_uri">Could not open shared file: invalid URI</string>
+    <string name="import_intent_unsupported">Shared file type is not supported for import</string>
+    <string name="import_intent_unknown_error">unknown error</string>
 
     <!-- Ktheme -->
     <string name="theme_section_title">App Theme</string>
@@ -172,11 +184,19 @@
     <string name="link_access_token_hint">Access token</string>
     <string name="link_refresh_token_hint">Refresh token (optional)</string>
     <string name="link_expiry_hint">Access token expires in seconds (optional)</string>
+    <string name="link_oauth_client_id_hint">OAuth client ID (required for refresh)</string>
+    <string name="link_oauth_client_secret_hint">OAuth client secret (required for refresh)</string>
     <string name="link_access_required">Access token is required.</string>
+    <string name="link_oauth_client_pair_required">Enter both OAuth client ID and client secret, or leave both blank.</string>
+    <string name="link_oauth_client_required_for_refresh">%1$s refresh requires OAuth client ID and client secret. Enter them to enable refresh.</string>
     <string name="link_success">%1$s account linked.</string>
     <string name="link_refresh_success">%1$s access token refreshed.</string>
-    <string name="link_refresh_failed">%1$s refresh failed. Link an account with a refresh token first.</string>
+    <string name="link_refresh_missing_refresh_token">%1$s refresh is unavailable because no refresh token is linked.</string>
+    <string name="link_refresh_missing_client_config">%1$s refresh is unavailable because OAuth client ID/secret are not configured.</string>
     <string name="link_refresh_provider_rejected">%1$s rejected the refresh token. Re-link this account to continue.</string>
+    <string name="link_refresh_network_error">%1$s refresh failed due to a network or transport issue. Try again.</string>
+    <string name="link_refresh_invalid_response">%1$s refresh returned an invalid response. Re-link the account and retry.</string>
+    <string name="link_refresh_disabled_reason">%1$s refresh disabled: link a refresh token and configure OAuth client credentials.</string>
     <string name="link_revoke_success">%1$s account link revoked.</string>
     <string name="link_expiry_unknown">unknown</string>
     <string name="link_status_not_linked">%1$s: not linked</string>

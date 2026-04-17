@@ -3,6 +3,7 @@ package com.kaleaon.mnxmindmaker.continuity
 import android.content.Context
 import com.kaleaon.mnxmindmaker.model.MindGraph
 import com.kaleaon.mnxmindmaker.repository.MnxRepository
+import com.kaleaon.mnxmindmaker.security.EncryptedArtifactStore
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -10,6 +11,8 @@ import java.security.MessageDigest
 import java.util.UUID
 
 class ContinuityManager(context: Context) {
+
+    private val encryptedStore = EncryptedArtifactStore(context)
 
     data class SnapshotRecord(
         val snapshotId: String,
@@ -123,7 +126,7 @@ class ContinuityManager(context: Context) {
 
     private fun readTimeline(): List<SnapshotRecord> {
         if (!timelineFile.exists()) return emptyList()
-        val json = timelineFile.readText()
+        val json = String(encryptedStore.readDecryptedBytes(timelineFile, "snapshot_index"))
         if (json.isBlank()) return emptyList()
         val array = JSONArray(json)
         return buildList {
@@ -163,6 +166,6 @@ class ContinuityManager(context: Context) {
                 }
             )
         }
-        timelineFile.writeText(array.toString())
+        encryptedStore.writeEncryptedBytes(timelineFile, array.toString().toByteArray(), "snapshot_index")
     }
 }

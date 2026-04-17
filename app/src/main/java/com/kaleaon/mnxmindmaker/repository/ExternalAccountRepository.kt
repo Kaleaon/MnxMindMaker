@@ -47,15 +47,45 @@ class ExternalAccountRepository(context: Context) {
         return refreshAccessTokenDetailed(provider) == RefreshStatus.SUCCESS
     }
 
+    fun saveOAuthClientConfig(provider: ExternalProvider, clientId: String, clientSecret: String) {
+        val config = TOKEN_REFRESH_CONFIGS[provider] ?: return
+        vault.putString(config.clientIdKey, clientId.trim())
+        vault.putString(config.clientSecretKey, clientSecret.trim())
+    }
+
+    fun hasOAuthClientConfig(provider: ExternalProvider): Boolean {
+        val config = TOKEN_REFRESH_CONFIGS[provider] ?: return false
+        val clientId = vault.getString(config.clientIdKey)
+        val clientSecret = vault.getString(config.clientSecretKey)
+        return !clientId.isNullOrBlank() && !clientSecret.isNullOrBlank()
+    }
+
+    fun canRefreshLinkedAccount(provider: ExternalProvider): Boolean {
+        val refresh = vault.getString(refreshKey(provider))
+        val config = TOKEN_REFRESH_CONFIGS[provider] ?: return false
+        return validateRefreshPrerequisites(
+            refreshToken = refresh,
+            clientId = vault.getString(config.clientIdKey),
+            clientSecret = vault.getString(config.clientSecretKey)
+        ) == RefreshStatus.SUCCESS
+    }
+
     fun refreshAccessTokenDetailed(provider: ExternalProvider): RefreshStatus {
         val refresh = vault.getString(refreshKey(provider)) ?: return RefreshStatus.MISSING_REFRESH_TOKEN
         if (refresh.isBlank()) return RefreshStatus.MISSING_REFRESH_TOKEN
         val config = TOKEN_REFRESH_CONFIGS[provider] ?: return RefreshStatus.INVALID_RESPONSE
+        val precheck = validateRefreshPrerequisites(
+            refreshToken = refresh,
+            clientId = vault.getString(config.clientIdKey),
+            clientSecret = vault.getString(config.clientSecretKey)
+        )
+        if (precheck != RefreshStatus.SUCCESS) return precheck
 
         val refreshHttpResult = executeRefreshRequest(config, refresh)
         val responseBody = when (refreshHttpResult) {
             is RefreshHttpResult.Success -> refreshHttpResult.body
             RefreshHttpResult.ProviderRejected -> return RefreshStatus.PROVIDER_REJECTED
+            RefreshHttpResult.MissingClientConfig -> return RefreshStatus.MISSING_CLIENT_CONFIG
             RefreshHttpResult.TransportFailure -> return RefreshStatus.NETWORK_ERROR
         }
         val payload = parseTokenRefreshResponse(responseBody) ?: return RefreshStatus.INVALID_RESPONSE
@@ -128,7 +158,7 @@ class ExternalAccountRepository(context: Context) {
     private fun executeRefreshRequest(config: TokenRefreshConfig, refreshToken: String): RefreshHttpResult {
         val clientId = vault.getString(config.clientIdKey)
         val clientSecret = vault.getString(config.clientSecretKey)
-        if (clientId.isNullOrBlank() || clientSecret.isNullOrBlank()) return RefreshHttpResult.TransportFailure
+        if (clientId.isNullOrBlank() || clientSecret.isNullOrBlank()) return RefreshHttpResult.MissingClientConfig
 
         val formBody = FormBody.Builder()
             .add("grant_type", config.grantType)
@@ -192,12 +222,23 @@ class ExternalAccountRepository(context: Context) {
         internal fun expiryFromNow(nowEpochMs: Long, expiresInSeconds: Long): Long {
             return nowEpochMs + TimeUnit.SECONDS.toMillis(expiresInSeconds)
         }
+
+        internal fun validateRefreshPrerequisites(
+            refreshToken: String?,
+            clientId: String?,
+            clientSecret: String?
+        ): RefreshStatus {
+            if (refreshToken.isNullOrBlank()) return RefreshStatus.MISSING_REFRESH_TOKEN
+            if (clientId.isNullOrBlank() || clientSecret.isNullOrBlank()) return RefreshStatus.MISSING_CLIENT_CONFIG
+            return RefreshStatus.SUCCESS
+        }
     }
 }
 
 enum class RefreshStatus {
     SUCCESS,
     MISSING_REFRESH_TOKEN,
+    MISSING_CLIENT_CONFIG,
     PROVIDER_REJECTED,
     NETWORK_ERROR,
     INVALID_RESPONSE
@@ -219,5 +260,6 @@ data class RefreshedTokenPayload(
 private sealed interface RefreshHttpResult {
     data class Success(val body: String) : RefreshHttpResult
     data object ProviderRejected : RefreshHttpResult
+    data object MissingClientConfig : RefreshHttpResult
     data object TransportFailure : RefreshHttpResult
 }

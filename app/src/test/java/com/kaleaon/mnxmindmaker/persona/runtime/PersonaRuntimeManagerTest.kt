@@ -12,6 +12,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
+import java.util.concurrent.atomic.AtomicInteger
 
 class PersonaRuntimeManagerTest {
 
@@ -163,5 +164,36 @@ class PersonaRuntimeManagerTest {
 
         assertEquals(PersonaRuntimePhase.IDLE, status.phase)
         assertEquals("any", status.personaId)
+    }
+
+    @Test
+    fun `activate persona short-circuits when already active`() {
+        val manifestLookups = AtomicInteger(0)
+        val manager = PersonaRuntimeManager(
+            providerRouter = ProviderRouter(emptyList()),
+            toolOrchestratorFactory = { _, _, _ -> throw UnsupportedOperationException("not used in activation test") },
+            settingsProvider = {
+                listOf(
+                    LlmSettings(
+                        provider = LlmProvider.LOCAL_ON_DEVICE,
+                        enabled = true,
+                        localModelPath = "/tmp/model.gguf",
+                        outboundClassification = DataClassification.PUBLIC
+                    )
+                )
+            },
+            privacyModeProvider = { PrivacyMode.HYBRID },
+            manifestProvider = {
+                manifestLookups.incrementAndGet()
+                PersonaDeploymentManifest(personaId = it, allowedProviders = setOf(LlmProvider.LOCAL_ON_DEVICE))
+            }
+        )
+
+        val first = manager.activatePersona("mentor")
+        val second = manager.activatePersona("mentor")
+
+        assertEquals(PersonaRuntimePhase.ACTIVE, first.phase)
+        assertEquals(PersonaRuntimePhase.ACTIVE, second.phase)
+        assertEquals(1, manifestLookups.get())
     }
 }
