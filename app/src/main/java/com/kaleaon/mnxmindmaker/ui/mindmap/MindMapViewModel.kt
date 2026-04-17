@@ -358,10 +358,8 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
                     _chatMessages.value = seededMessages
                     persistChatMessages(activeSessionId, seededMessages)
                 }
-                val result = withContext(Dispatchers.IO) { runSingleChat(prompt, choice) }
                 val result = withContext(Dispatchers.IO) { runSingleChat(dispatchPrompt, choice) }
                 if (result != null) {
-                    val nextMessages = _chatMessages.value.orEmpty() + result.copy(prompt = cleanedPrompt)
                     val userMessageId = UUID.randomUUID().toString()
                     val userMessage = ChatMessage(
                         id = userMessageId,
@@ -592,14 +590,12 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
                 response = pipelineResult.responseText,
                 createdTimestamp = System.currentTimeMillis(),
                 role = ChatRole.MIND,
-                actorLabel = "Mind (${provider.displayName})",
-                isAiGenerated = true,
-                role = ChatRole.MIND,
                 actorId = primarySettings.provider.name,
                 actorLabel = primarySettings.provider.displayName,
                 content = pipelineResult.responseText,
                 providerChoice = choice,
                 replyToMessageId = null,
+                isAiGenerated = true,
                 provenance = MessageProvenance(
                     provider = provider,
                     model = primarySettings.model,
@@ -626,27 +622,19 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
                 return ChatMessage(
                     id = UUID.randomUUID().toString(),
                     prompt = prompt,
-                    createdTimestamp = System.currentTimeMillis(),
-                    response = "[Fallback mode] $traceAwareMessage\n\n${fallbackTurn.text}",
-                    role = ChatRole.MIND,
-                    actorLabel = "Mind (${primarySettings.provider.displayName})",
-                    isAiGenerated = true,
                     role = ChatRole.MIND,
                     actorId = primarySettings.provider.name,
                     actorLabel = primarySettings.provider.displayName,
                     content = "[Fallback mode] $traceAwareMessage\n\n${fallbackTurn.text}",
                     createdTimestamp = System.currentTimeMillis(),
                     providerChoice = choice,
-                    prompt = prompt,
                     response = fallbackTurn.text,
+                    isAiGenerated = true,
                     provenance = MessageProvenance(
-                        provider = settings.provider,
-                        model = turn.raw?.optString("model").takeUnless { it.isNullOrBlank() } ?: settings.model,
-                        toolCalls = turn.toolInvocations.map { it.toolName },
-                        failoverEvents = failoverEvents.toList(),
                         provider = primarySettings.provider,
                         model = fallbackTurn.raw?.optString("model").takeUnless { it.isNullOrBlank() } ?: primarySettings.model,
                         toolCalls = listOf("orchestrator_error: ${orchestratedError::class.java.simpleName}"),
+                        failoverEvents = failoverEvents.toList(),
                         latencyMs = latency,
                         promptTokens = extractPromptTokens(fallbackTurn.raw),
                         completionTokens = extractCompletionTokens(fallbackTurn.raw),
@@ -659,7 +647,7 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
                     message = e.message.orEmpty().ifBlank { "Provider request failed" }
                 )
                 lastError = "${settings.provider.displayName}: ${e.message}"
-            } catch (fallbackError: LlmApiException) {
+            } catch (fallbackError: Exception) {
                 lastError = "$traceAwareMessage Fallback failed: ${fallbackError.message}"
             }
         }
@@ -910,8 +898,6 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
             actorLabel = actorLabel,
             content = resolvedContent,
             createdTimestamp = createdTimestamp,
-            role = enumValues<ChatRole>().firstOrNull { it.name == role } ?: ChatRole.MIND,
-            actorLabel = actorLabel,
             isAiGenerated = isAiGenerated,
             providerChoice = choice,
             provenance = MessageProvenance(
@@ -944,14 +930,10 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
     private fun ChatMessage.toPersistedMessage(): PersistedChatMessage {
         return PersistedChatMessage(
             id = id,
-            prompt = prompt,
-            response = response,
-            role = role.name,
-            actorLabel = actorLabel,
-            isAiGenerated = isAiGenerated,
             role = role.name,
             actorId = actorId,
             actorLabel = actorLabel,
+            isAiGenerated = isAiGenerated,
             content = content,
             addressedActorIds = addressedActorIds,
             replyToMessageId = replyToMessageId,

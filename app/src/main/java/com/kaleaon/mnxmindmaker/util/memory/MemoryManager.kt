@@ -17,15 +17,6 @@ class MemoryManager(
     private val remoteEmbeddingProvider: EmbeddingProvider? = null
 ) {
 
-    constructor(
-        persistenceStore: MemoryPersistenceStore,
-        expiryTelemetry: MemoryExpiryTelemetry = StdoutMemoryExpiryTelemetry
-    ) : this(
-        storage = InMemoryMemoryStorage(),
-        persistenceStore = persistenceStore,
-        expiryTelemetry = expiryTelemetry
-    )
-
     enum class MemoryPolicyMode {
         OFF,
         SESSION_ONLY,
@@ -55,6 +46,8 @@ class MemoryManager(
         val sessionCompactionEnabled: Boolean = true,
         val sessionCompactionMinAgeMs: Long = 12L * 60 * 60 * 1000,
         val maxCompactedSessionChars: Int = 4_000
+    )
+
     data class EmbeddingPolicy(
         val privacyMode: PrivacyMode = PrivacyMode.HYBRID,
         val preferLocal: Boolean = true
@@ -117,28 +110,6 @@ class MemoryManager(
         fun onExpiredRemoved(category: MemoryCategory, removedCount: Int, malformedTimestampCount: Int)
     }
 
-    data class PersistedMemorySnapshot(
-        val sessionTurns: List<SessionTurn> = emptyList(),
-        val profileMemories: List<MindNode> = emptyList(),
-        val semanticMemories: List<MindNode> = emptyList()
-    )
-
-    interface MemoryStorage {
-        fun loadSnapshot(): PersistedMemorySnapshot
-        fun saveSnapshot(snapshot: PersistedMemorySnapshot)
-    }
-
-    data class MemoryStatus(
-        val mode: MemoryPolicyMode,
-        val sessionTurnCount: Int,
-        val profileMemoryCount: Int,
-        val semanticMemoryCount: Int,
-        val expiryByCategoryMs: Map<MemoryCategory, Long>,
-        val embeddingCacheEntries: Int
-    )
-
-    private data class PurgeSelection(val expiredIds: List<String>, val malformedTimestampCount: Int)
-
     private object NoOpMemoryPersistenceStore : MemoryPersistenceStore {
         override fun deleteExpired(category: MemoryCategory, memoryIds: List<String>) = Unit
     }
@@ -166,9 +137,6 @@ class MemoryManager(
         fun saveSnapshot(snapshot: PersistedMemorySnapshot)
     }
 
-    private val sessionTurns = mutableListOf<SessionTurn>()
-    private val profileMemories = ConcurrentHashMap<String, MindNode>()
-    private val semanticIndex = SemanticMemoryVectorIndex()
     private val archivedMemories = ConcurrentHashMap<String, ArchivedMemoryRecord>()
     private val sessionTurns = mutableListOf<SessionTurn>()
     private val profileMemories = ConcurrentHashMap<String, MindNode>()
@@ -183,15 +151,6 @@ class MemoryManager(
     private var policySettings: MemoryPolicySettings = MemoryPolicySettings()
 
     constructor() : this(storage = InMemoryMemoryStorage())
-
-    constructor(
-        persistenceStore: MemoryPersistenceStore,
-        expiryTelemetry: MemoryExpiryTelemetry = StdoutMemoryExpiryTelemetry
-    ) : this(
-        storage = InMemoryMemoryStorage(),
-        persistenceStore = persistenceStore,
-        expiryTelemetry = expiryTelemetry
-    )
 
     init {
         MemoryCategory.entries.forEach { expiryPurgeCounters[it] = 0 }
@@ -235,7 +194,6 @@ class MemoryManager(
             attributes = mutableMapOf(
                 "semantic_subtype" to "profile",
                 "preference_key" to key,
-                "memory_category" to MemoryCategory.PROFILE.name.lowercase(),
                 "sensitivity" to sensitivity,
                 "timestamp" to timestampMs.toString(),
                 "last_accessed_timestamp" to timestampMs.toString(),
@@ -333,12 +291,6 @@ class MemoryManager(
         val expiryByCategoryMs: Map<MemoryCategory, Long>,
         val lastMaintenanceRunMs: Long?
     )
-
-            expiryByCategoryMs = policySettings.expiryByCategoryMs,
-            embeddingCacheEntries = semanticIndex.cacheSize()
-        )
-    }
-
     fun clearSession(clearAllCategories: Boolean = false) {
         sessionTurns.clear()
         if (clearAllCategories) {
