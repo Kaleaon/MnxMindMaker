@@ -27,6 +27,7 @@ data class PersistedChatMessage(
     val id: String,
     val prompt: String,
     val response: String,
+    val turns: List<PersistedChatTurn> = emptyList(),
     val providerChoice: String = "AUTO",
     val provider: String = "OPENAI",
     val model: String = "",
@@ -43,6 +44,13 @@ data class PersistedChatMessage(
     val createdTimestamp: Long = System.currentTimeMillis()
 )
 
+@Serializable
+data class PersistedChatTurn(
+    val actor: String,
+    val content: String,
+    val createdTimestamp: Long = System.currentTimeMillis()
+)
+
 object ChatPersistenceSchema {
-    const val CURRENT_VERSION = 1
+    const val CURRENT_VERSION = 2
 }
