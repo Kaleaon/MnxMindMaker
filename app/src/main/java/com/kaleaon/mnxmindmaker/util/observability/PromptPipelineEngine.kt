@@ -3,6 +3,11 @@ package com.kaleaon.mnxmindmaker.util.observability
 import com.kaleaon.mnxmindmaker.model.LlmSettings
 import com.kaleaon.mnxmindmaker.model.MindNode
 import com.kaleaon.mnxmindmaker.util.MemoryRetrievalService
+import com.kaleaon.mnxmindmaker.util.moderation.ModerationAction
+import com.kaleaon.mnxmindmaker.util.moderation.ModerationPipeline
+import com.kaleaon.mnxmindmaker.util.moderation.ModerationRequest
+import com.kaleaon.mnxmindmaker.util.moderation.ModerationStage
+import com.kaleaon.mnxmindmaker.util.moderation.SensitiveEntityModerationPolicy
 import com.kaleaon.mnxmindmaker.util.tooling.ToolOrchestrator
 import java.util.UUID
 
@@ -27,6 +32,7 @@ data class PromptPipelineResult(
  */
 class PromptPipelineEngine(
     private val traceStore: TraceStore,
+    private val moderationPipeline: ModerationPipeline = ModerationPipeline(listOf(SensitiveEntityModerationPolicy())),
     private val nowMs: () -> Long = { System.currentTimeMillis() }
 ) {
     companion object {
@@ -44,9 +50,28 @@ class PromptPipelineEngine(
         val tracer = RequestTracer(requestId = UUID.randomUUID().toString(), nowMs = nowMs)
 
         return try {
+            val promptModeration = moderationPipeline.moderate(
+                ModerationRequest(
+                    text = request.prompt,
+                    stage = ModerationStage.PROMPT,
+                    policyId = "prompt_input"
+                )
+            )
             tracer.recordPromptPipeline("incoming", request.prompt)
+            tracer.recordPromptPipeline("prompt_moderation_action", promptModeration.action.name)
+            if (promptModeration.action == ModerationAction.DENY) {
+                val trace = tracer.finish()
+                traceStore.append(trace)
+                return PromptPipelineResult(
+                    responseText = "Request blocked by moderation policy.",
+                    retrievalHits = emptyList(),
+                    trace = trace
+                )
+            }
+
+            val moderatedPrompt = promptModeration.text
             val retrievalContext = MemoryRetrievalService.RetrievalContext(
-                prompt = request.prompt,
+                prompt = moderatedPrompt,
                 task = request.task,
                 nowEpochMs = nowMs()
             )
@@ -100,7 +125,7 @@ class PromptPipelineEngine(
             tracer.recordPromptPipeline("assembled_system_prompt", systemPrompt)
 
             val orchestrator = orchestratorFactory(tracer, settings)
-            val response = orchestrator.run(systemPrompt, request.prompt)
+            val response = orchestrator.run(systemPrompt, moderatedPrompt)
 
             val trace = tracer.finish()
             traceStore.append(trace)
