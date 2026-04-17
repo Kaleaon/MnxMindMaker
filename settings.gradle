@@ -21,3 +21,9 @@ if (llmedgeModuleDir.exists() && file('llmedge/build.gradle').exists()) {
     include(':llmedge')
     project(':llmedge').projectDir = llmedgeModuleDir
 }
+
+def liteRtLmModuleDir = file('litertlm')
+if (liteRtLmModuleDir.exists() && file('litertlm/build.gradle').exists()) {
+    include(':litertlm')
+    project(':litertlm').projectDir = liteRtLmModuleDir
+}

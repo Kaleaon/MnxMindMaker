@@ -24,6 +24,7 @@ import com.kaleaon.mnxmindmaker.model.LlmProvider
 import com.kaleaon.mnxmindmaker.model.LlmRuntime
 import com.kaleaon.mnxmindmaker.model.LlmSettings
 import com.kaleaon.mnxmindmaker.model.LocalModelProfile
+import com.kaleaon.mnxmindmaker.model.LocalRuntimeEngine
 import com.kaleaon.mnxmindmaker.model.ExternalProvider
 import com.kaleaon.mnxmindmaker.model.LocalRuntimeControls
 import com.kaleaon.mnxmindmaker.model.ModelManager
@@ -135,6 +136,11 @@ class SettingsFragment : Fragment() {
             android.R.layout.simple_spinner_item,
             ComputeBackend.entries.map { it.label }
         ).also { it.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item) }
+        binding.spinnerLocalRuntimeEngine.adapter = ArrayAdapter(
+            requireContext(),
+            android.R.layout.simple_spinner_item,
+            LocalRuntimeEngine.entries.map { it.displayName }
+        ).also { it.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item) }
         binding.spinnerRetrievalModePreference.adapter = ArrayAdapter(
             requireContext(),
             android.R.layout.simple_spinner_item,
@@ -170,7 +176,7 @@ class SettingsFragment : Fragment() {
             )
         }
         binding.btnInstallRecommended.setOnClickListener {
-            val result = modelManager.installModelOneClick("qwen2_5_7b")
+            val result = modelManager.installModelOneClick("gemma3n_e2b_litertlm")
             if (result.isSuccess) {
                 val model = result.getOrThrow()
                 modelManager.pinVersion(model.id, model.version, true)
@@ -463,6 +469,9 @@ class SettingsFragment : Fragment() {
         binding.spinnerComputeBackend.setSelection(
             ComputeBackend.entries.indexOf(settings.runtimeControls.computeBackend).coerceAtLeast(0)
         )
+        binding.spinnerLocalRuntimeEngine.setSelection(
+            LocalRuntimeEngine.entries.indexOf(settings.runtimeControls.engine).coerceAtLeast(0)
+        )
 
         val isLocalRuntime = provider.runtime == LlmRuntime.LOCAL_ON_DEVICE
         binding.groupLocalRuntime.visibility = if (isLocalRuntime) View.VISIBLE else View.GONE
@@ -474,7 +483,13 @@ class SettingsFragment : Fragment() {
             LlmProvider.OPENAI_COMPATIBLE_SELF_HOSTED -> getString(R.string.hint_openai_compatible_self_hosted_key)
             LlmProvider.GEMINI -> getString(R.string.hint_gemini_key)
             LlmProvider.VLLM_GEMMA4 -> getString(R.string.hint_vllm_key)
-            LlmProvider.LOCAL_ON_DEVICE -> getString(R.string.hint_local_model_path)
+            LlmProvider.LOCAL_ON_DEVICE -> {
+                if (settings.runtimeControls.engine == LocalRuntimeEngine.LITERT_LM) {
+                    getString(R.string.hint_local_litert_model_path)
+                } else {
+                    getString(R.string.hint_local_model_path)
+                }
+            }
         }
 
         val caps = settings.capabilities
@@ -514,6 +529,9 @@ class SettingsFragment : Fragment() {
         val computeBackend = ComputeBackend.entries.getOrElse(binding.spinnerComputeBackend.selectedItemPosition) {
             ComputeBackend.AUTO
         }
+        val runtimeEngine = LocalRuntimeEngine.entries.getOrElse(binding.spinnerLocalRuntimeEngine.selectedItemPosition) {
+            LocalRuntimeEngine.LLMEDGE
+        }
 
         val privacyMode = if (binding.spinnerPrivacyMode.selectedItemPosition == 0) {
             PrivacyMode.STRICT_LOCAL_ONLY
@@ -534,6 +552,7 @@ class SettingsFragment : Fragment() {
             fallbackOrder = fallbackOrder,
             runtimeControls = LocalRuntimeControls(
                 computeBackend = computeBackend,
+                engine = runtimeEngine,
                 contextWindowTokens = binding.etContextWindow.text?.toString()?.toIntOrNull() ?: localProfile.contextWindowTokens,
                 quantizationProfile = binding.etQuantizationProfile.text?.toString()?.trim().orEmpty().ifBlank { "Q4_K_M" },
                 maxRamMb = binding.etMaxRamMb.text?.toString()?.toIntOrNull() ?: 4096,
@@ -682,6 +701,9 @@ class SettingsFragment : Fragment() {
             },
             runtimeControls = LocalRuntimeControls(
                 computeBackend = ComputeBackend.entries.getOrElse(binding.spinnerComputeBackend.selectedItemPosition) { ComputeBackend.AUTO },
+                engine = LocalRuntimeEngine.entries.getOrElse(binding.spinnerLocalRuntimeEngine.selectedItemPosition) {
+                    LocalRuntimeEngine.LLMEDGE
+                },
                 contextWindowTokens = binding.etContextWindow.text?.toString()?.toIntOrNull() ?: localProfile.contextWindowTokens,
                 quantizationProfile = binding.etQuantizationProfile.text?.toString()?.trim().orEmpty().ifBlank { "Q4_K_M" },
                 maxRamMb = binding.etMaxRamMb.text?.toString()?.toIntOrNull() ?: 4096,

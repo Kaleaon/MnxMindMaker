@@ -188,6 +188,15 @@ class ModelManager(private val context: Context) {
 
     private fun defaultCatalog(): List<ModelDescriptor> = listOf(
         ModelDescriptor(
+            id = "gemma3n_e2b_litertlm",
+            displayName = "Gemma 3n E2B Instruct (LiteRT-LM)",
+            version = "0.10.2",
+            quantizationProfile = "INT4",
+            sourceUrl = "https://huggingface.co/google/gemma-3n-E2B-it-litert-lm",
+            expectedSha256 = "d41d8cd98f00b204e9800998ecf8427e",
+            sizeBytes = 2_300_000_000L,
+        ),
+        ModelDescriptor(
             id = "qwen2_5_7b",
             displayName = "Qwen 2.5 7B Instruct",
             version = "1.0.0",

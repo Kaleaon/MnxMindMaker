@@ -35,7 +35,13 @@ enum class LocalModelProfile(val displayName: String, val contextWindowTokens: I
 enum class ComputeBackend(val label: String) {
     CPU("CPU"),
     GPU("GPU"),
+    NPU("NPU"),
     AUTO("Auto")
+}
+
+enum class LocalRuntimeEngine(val displayName: String) {
+    LLMEDGE("llmedge"),
+    LITERT_LM("LiteRT-LM")
 }
 
 enum class RetrievalModePreference {
@@ -46,6 +52,7 @@ enum class RetrievalModePreference {
 
 data class LocalRuntimeControls(
     val computeBackend: ComputeBackend = ComputeBackend.AUTO,
+    val engine: LocalRuntimeEngine = LocalRuntimeEngine.LLMEDGE,
     val contextWindowTokens: Int = 8192,
     val quantizationProfile: String = "Q4_K_M",
     val maxRamMb: Int = 4096,
@@ -121,7 +128,7 @@ fun LlmProvider.defaultModel(): String = when (this) {
     LlmProvider.OPENAI_COMPATIBLE_SELF_HOSTED -> "openai-compatible/default"
     LlmProvider.GEMINI -> "gemini-1.5-pro"
     LlmProvider.VLLM_GEMMA4 -> "google/gemma-4-E4B-it"
-    LlmProvider.LOCAL_ON_DEVICE -> "local/default"
+    LlmProvider.LOCAL_ON_DEVICE -> "google/gemma-3n-E2B-it-litert-lm"
 }
 
 fun LlmProvider.defaultCapabilities(profile: LocalModelProfile = LocalModelProfile.BALANCED): LlmCapabilityFlags {
