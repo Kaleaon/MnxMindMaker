@@ -13,7 +13,8 @@ data class LocalAuthSession(
 
 enum class ExternalProvider(val displayName: String) {
     CLAUDE("Claude"),
-    CHATGPT("ChatGPT")
+    CHATGPT("ChatGPT"),
+    HUGGING_FACE("Hugging Face")
 }
 
 data class ProviderCapabilityMetadata(

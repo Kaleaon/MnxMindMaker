@@ -2,6 +2,8 @@ package com.kaleaon.mnxmindmaker.model
 
 import android.content.Context
 import android.util.Base64
+import okhttp3.OkHttpClient
+import okhttp3.Request
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -38,6 +40,7 @@ class ModelManager(private val context: Context) {
 
     private val modelRoot: File = File(context.filesDir, "models").apply { mkdirs() }
     private val prefs = context.getSharedPreferences("model_manager", Context.MODE_PRIVATE)
+    private val httpClient = OkHttpClient()
 
     fun discoverModels(): List<ModelDescriptor> {
         val installed = loadInstalledModelMetadata().associateBy { "${it.id}:${it.version}" }
@@ -82,6 +85,45 @@ class ModelManager(private val context: Context) {
             saveInstalledModel(installed)
             installed
         }
+    }
+
+    fun discoverHuggingFaceModels(
+        accessToken: String?,
+        query: String = "tool calling gguf",
+        limit: Int = 10
+    ): List<ModelDescriptor> {
+        val requestBuilder = Request.Builder()
+            .url("https://huggingface.co/api/models?search=${query.replace(" ", "%20")}&limit=$limit")
+            .header("Accept", "application/json")
+        if (!accessToken.isNullOrBlank()) {
+            requestBuilder.header("Authorization", "Bearer $accessToken")
+        }
+        val request = requestBuilder.build()
+        return runCatching {
+            httpClient.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return emptyList()
+                val body = response.body?.string().orEmpty()
+                val payload = JSONArray(body)
+                buildList {
+                    for (i in 0 until payload.length()) {
+                        val model = payload.optJSONObject(i) ?: continue
+                        val modelId = model.optString("id").trim()
+                        if (modelId.isBlank()) continue
+                        add(
+                            ModelDescriptor(
+                                id = "hf_${modelId.replace("/", "_")}",
+                                displayName = modelId,
+                                version = model.optString("lastModified", "latest"),
+                                quantizationProfile = "Unknown",
+                                sourceUrl = "https://huggingface.co/$modelId",
+                                expectedSha256 = "",
+                                sizeBytes = 0L
+                            )
+                        )
+                    }
+                }
+            }
+        }.getOrDefault(emptyList())
     }
 
     fun setDiskQuotaMb(quotaMb: Long) {

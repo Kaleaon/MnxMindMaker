@@ -168,12 +168,28 @@ class SettingsFragment : Fragment() {
         binding.btnSaveSettings.setOnClickListener { saveCurrentProvider() }
         binding.btnRunPreflight.setOnClickListener { runPreflightDiagnostics() }
         binding.btnDiscoverModels.setOnClickListener {
-            val models = modelManager.discoverModels()
-            binding.tvModelManagerSummary.text = getString(
-                R.string.model_discovery_summary,
-                models.size,
-                models.count { it.state == ModelInstallState.INSTALLED }
-            )
+            lifecycleScope.launch {
+                val localCatalogModels = modelManager.discoverModels()
+                val huggingFaceToken = externalAccountRepository.getAccessToken(ExternalProvider.HUGGING_FACE)
+                val huggingFaceModels = withContext(Dispatchers.IO) {
+                    modelManager.discoverHuggingFaceModels(
+                        accessToken = huggingFaceToken,
+                        query = "tool calling gguf"
+                    )
+                }
+                val installedCount = localCatalogModels.count { it.state == ModelInstallState.INSTALLED }
+                val summary = getString(
+                    R.string.model_discovery_summary,
+                    localCatalogModels.size + huggingFaceModels.size,
+                    installedCount
+                )
+                val hfSummary = if (huggingFaceToken.isNullOrBlank()) {
+                    "\nHugging Face: not linked (showing public ToolNeuron-aligned models only)."
+                } else {
+                    "\nHugging Face: linked (${huggingFaceModels.size} models discovered)."
+                }
+                binding.tvModelManagerSummary.text = summary + hfSummary
+            }
         }
         binding.btnInstallRecommended.setOnClickListener {
             val result = modelManager.installModelOneClick("gemma3n_e2b_litertlm")
@@ -249,10 +265,13 @@ class SettingsFragment : Fragment() {
     private fun setupAccountLinkingSection() {
         binding.btnLinkClaude.setOnClickListener { promptLinkAccount(ExternalProvider.CLAUDE) }
         binding.btnLinkChatgpt.setOnClickListener { promptLinkAccount(ExternalProvider.CHATGPT) }
+        binding.btnLinkHuggingface.setOnClickListener { promptLinkAccount(ExternalProvider.HUGGING_FACE) }
         binding.btnRefreshClaude.setOnClickListener { refreshLinkedAccount(ExternalProvider.CLAUDE) }
         binding.btnRefreshChatgpt.setOnClickListener { refreshLinkedAccount(ExternalProvider.CHATGPT) }
+        binding.btnRefreshHuggingface.setOnClickListener { refreshLinkedAccount(ExternalProvider.HUGGING_FACE) }
         binding.btnRevokeClaude.setOnClickListener { revokeLinkedAccount(ExternalProvider.CLAUDE) }
         binding.btnRevokeChatgpt.setOnClickListener { revokeLinkedAccount(ExternalProvider.CHATGPT) }
+        binding.btnRevokeHuggingface.setOnClickListener { revokeLinkedAccount(ExternalProvider.HUGGING_FACE) }
         updateLinkedAccountsStatus()
     }
 
@@ -346,8 +365,10 @@ class SettingsFragment : Fragment() {
     private fun updateLinkedAccountsStatus() {
         val claudeRefreshEnabled = externalAccountRepository.canRefreshLinkedAccount(ExternalProvider.CLAUDE)
         val chatGptRefreshEnabled = externalAccountRepository.canRefreshLinkedAccount(ExternalProvider.CHATGPT)
+        val huggingFaceRefreshEnabled = externalAccountRepository.canRefreshLinkedAccount(ExternalProvider.HUGGING_FACE)
         binding.btnRefreshClaude.isEnabled = claudeRefreshEnabled
         binding.btnRefreshChatgpt.isEnabled = chatGptRefreshEnabled
+        binding.btnRefreshHuggingface.isEnabled = huggingFaceRefreshEnabled
 
         val lines = externalAccountRepository.allLinkStates().map { link ->
             if (!link.linked) {
@@ -375,7 +396,8 @@ class SettingsFragment : Fragment() {
         }
         val refreshHints = listOf(
             if (!claudeRefreshEnabled) getString(R.string.link_refresh_disabled_reason, ExternalProvider.CLAUDE.displayName) else null,
-            if (!chatGptRefreshEnabled) getString(R.string.link_refresh_disabled_reason, ExternalProvider.CHATGPT.displayName) else null
+            if (!chatGptRefreshEnabled) getString(R.string.link_refresh_disabled_reason, ExternalProvider.CHATGPT.displayName) else null,
+            if (!huggingFaceRefreshEnabled) getString(R.string.link_refresh_disabled_reason, ExternalProvider.HUGGING_FACE.displayName) else null
         ).filterNotNull()
         binding.tvLinkedAccountsStatus.text = lines.joinToString(separator = "\n")
             .plus(
