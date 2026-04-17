@@ -1,5 +1,7 @@
 package com.kaleaon.mnxmindmaker.util.tooling
 
+import com.kaleaon.mnxmindmaker.model.DataClassification
+import com.kaleaon.mnxmindmaker.model.LlmProvider
 import com.kaleaon.mnxmindmaker.model.MindGraph
 import org.json.JSONObject
 
@@ -65,7 +67,64 @@ data class DeploymentManifestPolicy(
 
 data class ToolPolicyContext(
     val personaId: String? = null,
-    val deploymentPolicy: DeploymentManifestPolicy? = null
+    val deploymentPolicy: DeploymentManifestPolicy? = null,
+    val declarativePolicies: DeclarativeRuntimePolicies? = null
+)
+
+enum class PolicyDefaultDecision {
+    ALLOW,
+    REQUIRE_APPROVAL,
+    DENY
+}
+
+enum class SensitivityLevel {
+    LOW,
+    MEDIUM,
+    HIGH,
+    RESTRICTED
+}
+
+data class ToolPermissionPolicy(
+    val allowToolNames: Set<String> = emptySet(),
+    val denyToolNames: Set<String> = emptySet(),
+    val defaultDecision: PolicyDefaultDecision = PolicyDefaultDecision.REQUIRE_APPROVAL
+)
+
+data class DataEgressPolicy(
+    val allowRemoteEgress: Boolean = true,
+    val allowHosts: Set<String> = emptySet(),
+    val denyHosts: Set<String> = emptySet(),
+    val maxDataClassification: DataClassification = DataClassification.RESTRICTED
+)
+
+data class ProviderSelectionPolicy(
+    val allowProviders: Set<LlmProvider> = emptySet(),
+    val denyProviders: Set<LlmProvider> = emptySet(),
+    val requireLocalRuntime: Boolean = false
+)
+
+data class SensitivityConstraintPolicy(
+    val maxSensitivity: SensitivityLevel = SensitivityLevel.RESTRICTED
+)
+
+data class AllowedActionPolicy(
+    val allowActions: Set<String> = emptySet(),
+    val denyActions: Set<String> = emptySet()
+)
+
+/** Declarative runtime policy profile applied before model/tool operations. */
+data class DeclarativeRuntimePolicies(
+    val toolPermissions: ToolPermissionPolicy = ToolPermissionPolicy(),
+    val dataEgress: DataEgressPolicy = DataEgressPolicy(),
+    val providerSelection: ProviderSelectionPolicy = ProviderSelectionPolicy(),
+    val sensitivity: SensitivityConstraintPolicy = SensitivityConstraintPolicy(),
+    val allowedActions: AllowedActionPolicy = AllowedActionPolicy()
+)
+
+data class ModelOperation(
+    val provider: LlmProvider,
+    val baseUrl: String,
+    val dataClassification: DataClassification
 )
 
 data class ToolInvocation(

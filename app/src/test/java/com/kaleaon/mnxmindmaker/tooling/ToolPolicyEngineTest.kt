@@ -3,9 +3,20 @@ package com.kaleaon.mnxmindmaker.tooling
 import com.kaleaon.mnxmindmaker.model.MindGraph
 import com.kaleaon.mnxmindmaker.model.MindNode
 import com.kaleaon.mnxmindmaker.model.NodeType
+import com.kaleaon.mnxmindmaker.model.DataClassification
+import com.kaleaon.mnxmindmaker.model.LlmProvider
+import com.kaleaon.mnxmindmaker.util.tooling.AllowedActionPolicy
+import com.kaleaon.mnxmindmaker.util.tooling.DataEgressPolicy
+import com.kaleaon.mnxmindmaker.util.tooling.DeclarativeRuntimePolicies
 import com.kaleaon.mnxmindmaker.util.tooling.PolicyDecisionType
 import com.kaleaon.mnxmindmaker.util.tooling.DeploymentManifestPolicy
+import com.kaleaon.mnxmindmaker.util.tooling.ModelOperation
 import com.kaleaon.mnxmindmaker.util.tooling.PersonaPolicy
+import com.kaleaon.mnxmindmaker.util.tooling.PolicyDefaultDecision
+import com.kaleaon.mnxmindmaker.util.tooling.ProviderSelectionPolicy
+import com.kaleaon.mnxmindmaker.util.tooling.SensitivityConstraintPolicy
+import com.kaleaon.mnxmindmaker.util.tooling.SensitivityLevel
+import com.kaleaon.mnxmindmaker.util.tooling.ToolPermissionPolicy
 import com.kaleaon.mnxmindmaker.util.tooling.ToolInvocation
 import com.kaleaon.mnxmindmaker.util.tooling.ToolOperationClass
 import com.kaleaon.mnxmindmaker.util.tooling.ToolPolicyContext
@@ -155,6 +166,69 @@ class ToolPolicyEngineTest {
         )
 
         assertEquals(PolicyDecisionType.REQUIRE_USER_APPROVAL, decision.type)
+    }
+
+    @Test
+    fun `declarative sensitivity policy denies tool calls over allowed threshold`() {
+        val decision = engine.evaluate(
+            invocation = ToolInvocation(
+                id = "1",
+                toolName = "set_node_attribute",
+                argumentsJson = JSONObject()
+                    .put("node_id", "n1")
+                    .put("sensitivity", "restricted")
+            ),
+            graph = MindGraph(),
+            context = ToolPolicyContext(
+                declarativePolicies = DeclarativeRuntimePolicies(
+                    toolPermissions = ToolPermissionPolicy(defaultDecision = PolicyDefaultDecision.ALLOW),
+                    sensitivity = SensitivityConstraintPolicy(maxSensitivity = SensitivityLevel.HIGH)
+                )
+            )
+        )
+
+        assertEquals(PolicyDecisionType.DENY, decision.type)
+        assertTrue(decision.reason.contains("exceeds", ignoreCase = true))
+    }
+
+    @Test
+    fun `declarative provider and egress policy blocks remote model operation`() {
+        val decision = engine.evaluateModelOperation(
+            operation = ModelOperation(
+                provider = LlmProvider.OPENAI,
+                baseUrl = "https://api.openai.com/v1",
+                dataClassification = DataClassification.SENSITIVE
+            ),
+            context = ToolPolicyContext(
+                declarativePolicies = DeclarativeRuntimePolicies(
+                    providerSelection = ProviderSelectionPolicy(requireLocalRuntime = true),
+                    dataEgress = DataEgressPolicy(
+                        allowRemoteEgress = false,
+                        maxDataClassification = DataClassification.PUBLIC
+                    )
+                )
+            )
+        )
+
+        assertEquals(PolicyDecisionType.DENY, decision.type)
+        assertTrue(decision.reason.contains("Remote provider", ignoreCase = true))
+    }
+
+    @Test
+    fun `declarative allowed action denylist blocks tool action`() {
+        val decision = engine.evaluate(
+            invocation = ToolInvocation(id = "1", toolName = "delete_all"),
+            graph = MindGraph(),
+            context = ToolPolicyContext(
+                declarativePolicies = DeclarativeRuntimePolicies(
+                    toolPermissions = ToolPermissionPolicy(defaultDecision = PolicyDefaultDecision.ALLOW),
+                    allowedActions = AllowedActionPolicy(denyActions = setOf("delete"))
+                )
+            )
+        )
+
+        assertEquals(PolicyDecisionType.DENY, decision.type)
+        assertEquals("delete", decision.explicitActionType)
     }
 
 }
