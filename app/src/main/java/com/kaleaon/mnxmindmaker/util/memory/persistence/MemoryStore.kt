@@ -22,7 +22,17 @@ interface MemoryStore {
     fun deleteRecord(category: MemoryCategory, id: String): Boolean
 
     fun clearAll()
+
+    fun runIntegrityScan(): MemoryStoreIntegrityReport
+
+    fun restoreLastKnownGoodSnapshot(): Boolean
 }
+
+data class MemoryStoreIntegrityReport(
+    val isHealthy: Boolean,
+    val issues: List<String>,
+    val checkedAtEpochMs: Long = System.currentTimeMillis()
+)
 
 fun interface MemoryStoreMigration {
     /**
