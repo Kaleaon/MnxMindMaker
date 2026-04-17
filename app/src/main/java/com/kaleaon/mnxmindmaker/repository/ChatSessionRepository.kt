@@ -3,11 +3,17 @@ package com.kaleaon.mnxmindmaker.repository
 import android.content.Context
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 import java.io.File
 import java.util.UUID
 
@@ -158,10 +164,7 @@ class ChatSessionRepository(
     }
 
     private fun migratePayload(payload: JsonObject, version: Int): JsonObject {
-        return when {
-            version >= ChatPersistenceSchema.CURRENT_VERSION -> payload
-            else -> payload
-        }
+        return migratePayloadForVersion(payload = payload, version = version)
     }
 
     private fun recoverFromCorruptionLocked(): PersistedChatStore {
@@ -182,5 +185,57 @@ class ChatSessionRepository(
     companion object {
         private const val DEFAULT_FILE_NAME = "chat_sessions.json"
         private const val SCHEMA_VERSION_FIELD = "schemaVersion"
+
+        internal fun migratePayloadForVersion(payload: JsonObject, version: Int): JsonObject {
+            if (version >= ChatPersistenceSchema.CURRENT_VERSION) return payload
+
+            var migrated = payload
+            var currentVersion = version
+            while (currentVersion < ChatPersistenceSchema.CURRENT_VERSION) {
+                migrated = when (currentVersion) {
+                    1 -> migrateV1ToV2(migrated)
+                    else -> migrated
+                }
+                currentVersion += 1
+            }
+            return migrated
+        }
+
+        private fun migrateV1ToV2(payload: JsonObject): JsonObject {
+            val sessions = payload["sessions"]?.jsonArray ?: JsonArray(emptyList())
+            val upgradedSessions = buildJsonArray {
+                sessions.forEach { element ->
+                    val session = element.jsonObject
+                    val upgradedMessages = buildJsonArray {
+                        session["messages"]?.jsonArray?.forEach { messageElement ->
+                            val message = messageElement.jsonObject
+                            add(
+                                buildJsonObject {
+                                    message.forEach { (key, value) -> put(key, value) }
+                                    if (message["actorLabel"]?.jsonPrimitive?.contentOrNull.isNullOrBlank()) {
+                                        put("actorLabel", "assistant")
+                                    }
+                                }
+                            )
+                        }
+                    }
+                    add(
+                        buildJsonObject {
+                            session.forEach { (key, value) -> put(key, value) }
+                            if (session["conversationMode"]?.jsonPrimitive?.contentOrNull.isNullOrBlank()) {
+                                put("conversationMode", "multi_actor")
+                            }
+                            put("messages", upgradedMessages)
+                        }
+                    )
+                }
+            }
+
+            return buildJsonObject {
+                payload.forEach { (key, value) -> put(key, value) }
+                put(SCHEMA_VERSION_FIELD, ChatPersistenceSchema.CURRENT_VERSION)
+                put("sessions", upgradedSessions)
+            }
+        }
     }
 }
