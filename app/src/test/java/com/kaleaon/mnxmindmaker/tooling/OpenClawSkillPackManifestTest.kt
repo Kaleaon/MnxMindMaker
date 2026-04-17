@@ -1,6 +1,7 @@
 package com.kaleaon.mnxmindmaker.tooling
 
 import com.kaleaon.mnxmindmaker.util.tooling.SkillManifestValidator
+import com.kaleaon.mnxmindmaker.util.tooling.ToolRegistry
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -12,15 +13,13 @@ class OpenClawSkillPackManifestTest {
 
     @Test
     fun `openclaw extension pack validates and exposes read only tool aliases`() {
-        val manifestFile = File("app/src/main/assets/skills/openclaw_assistant_extension_pack.json")
+        val manifestFile = File("src/main/assets/skills/openclaw_assistant_extension_pack.json")
+            .takeIf { it.exists() }
+            ?: File("app/src/main/assets/skills/openclaw_assistant_extension_pack.json")
         val root = JSONObject(manifestFile.readText())
 
         val validator = SkillManifestValidator(
-            approvedHandlerIds = setOf(
-                "graph.read.get_summary",
-                "graph.read.list_nodes",
-                "memory.read.search"
-            )
+            approvedHandlerIds = ToolRegistry.approvedHandlerIds()
         )
 
         val (manifest, issues) = validator.validate("skills/openclaw_assistant_extension_pack.json", root)

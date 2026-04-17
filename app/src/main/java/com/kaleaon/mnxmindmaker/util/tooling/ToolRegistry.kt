@@ -11,6 +11,7 @@ import com.kaleaon.mnxmindmaker.util.memory.MemoryManager
 import com.kaleaon.mnxmindmaker.util.moderation.ModerationAction
 import com.kaleaon.mnxmindmaker.util.moderation.ModerationPipeline
 import com.kaleaon.mnxmindmaker.util.moderation.ModerationRequest
+import com.kaleaon.mnxmindmaker.util.moderation.ModerationResult
 import com.kaleaon.mnxmindmaker.util.moderation.ModerationStage
 import com.kaleaon.mnxmindmaker.util.moderation.SensitiveEntityModerationPolicy
 import org.json.JSONArray
@@ -20,19 +21,10 @@ class ToolRegistry(
     private val getGraph: () -> MindGraph,
     private val setGraph: (MindGraph) -> Unit,
     private val memoryManager: MemoryManager? = null,
-    private val moderationPipeline: ModerationPipeline = ModerationPipeline(listOf(SensitiveEntityModerationPolicy()))
+    private val moderationPipeline: ModerationPipeline = ModerationPipeline(listOf(SensitiveEntityModerationPolicy())),
     context: Context? = null
 ) {
 
-    companion object {
-        private const val MUTATION_APPROVAL_TOKEN = "APPROVED"
-    }
-
-    private val specs = listOf(
-        ToolSpec(
-            name = "get_graph_summary",
-            description = "Return graph-level summary with node/edge counts and name.",
-            operationClass = ToolOperationClass.READ_ONLY
     private val approvedHandlers: Map<String, (ToolInvocation) -> ToolResult> = mapOf(
         "graph.read.get_summary" to ::getGraphSummary,
         "graph.read.list_nodes" to ::listNodes,
@@ -44,7 +36,14 @@ class ToolRegistry(
         "memory.write.upsert" to ::memoryUpsert,
         "memory.write.edit" to ::memoryEdit,
         "memory.write.delete" to ::memoryDelete,
-        "memory.read.status" to ::memoryStatus
+        "memory.read.status" to ::memoryStatus,
+        "graph.read.graph_refactor_diagnostics" to ::graphRefactorDiagnostics,
+        "graph.write.graph_refactor_apply" to ::graphRefactorApply,
+        "graph.read.taxonomy_normalization_diagnostics" to ::taxonomyNormalizationDiagnostics,
+        "graph.write.taxonomy_normalization_apply" to ::taxonomyNormalizationApply,
+        "memory.read.stale_memory_diagnostics" to ::staleMemoryDiagnostics,
+        "graph.read.link_repair_diagnostics" to ::linkRepairDiagnostics,
+        "graph.write.link_repair_apply" to ::linkRepairApply
     )
 
     private val builtInToolDefs = listOf(
@@ -168,80 +167,6 @@ class ToolRegistry(
             ),
             handlerId = "memory.write.delete"
         ),
-        ToolSpec(
-            name = "memory_status",
-            description = "Return current memory mode and counters. Safety: read-only operation.",
-            operationClass = ToolOperationClass.READ_ONLY,
-            inputSchema = JSONObject().put("type", "object").put("additionalProperties", false)
-        ),
-        ToolSpec(
-            name = "graph_refactor_diagnostics",
-            description = "Read-only diagnostics for deterministic graph refactoring opportunities: duplicate edges, self loops, duplicate labels, and orphan nodes.",
-            operationClass = ToolOperationClass.READ_ONLY,
-            inputSchema = JSONObject().put("type", "object").put("additionalProperties", false)
-        ),
-        ToolSpec(
-            name = "graph_refactor_apply",
-            description = "Deterministically refactor graph by removing self-loops, removing duplicate edges, and sorting nodes. Requires explicit approval_token=APPROVED.",
-            operationClass = ToolOperationClass.MUTATING,
-            requiresConfirmation = true,
-            inputSchema = JSONObject().put("type", "object").put("additionalProperties", false).put(
-                "properties",
-                JSONObject()
-                    .put("approval_token", JSONObject().put("type", "string"))
-                    .put("remove_self_loops", JSONObject().put("type", "boolean"))
-                    .put("remove_duplicate_edges", JSONObject().put("type", "boolean"))
-                    .put("sort_nodes", JSONObject().put("type", "boolean"))
-            )
-        ),
-        ToolSpec(
-            name = "taxonomy_normalization_diagnostics",
-            description = "Read-only diagnostics for taxonomy normalization drift (taxonomy_key/canonical_type mismatches).",
-            operationClass = ToolOperationClass.READ_ONLY,
-            inputSchema = JSONObject().put("type", "object").put("additionalProperties", false)
-        ),
-        ToolSpec(
-            name = "taxonomy_normalization_apply",
-            description = "Deterministically normalize taxonomy attributes (taxonomy_key and canonical_type). Requires explicit approval_token=APPROVED.",
-            operationClass = ToolOperationClass.MUTATING,
-            requiresConfirmation = true,
-            inputSchema = JSONObject().put("type", "object").put("additionalProperties", false).put(
-                "properties",
-                JSONObject()
-                    .put("approval_token", JSONObject().put("type", "string"))
-                    .put("node_ids", JSONObject().put("type", "array").put("items", JSONObject().put("type", "string")))
-            )
-        ),
-        ToolSpec(
-            name = "stale_memory_diagnostics",
-            description = "Read-only stale-memory detection for memory nodes using timestamp age threshold.",
-            operationClass = ToolOperationClass.READ_ONLY,
-            inputSchema = JSONObject().put("type", "object").put("additionalProperties", false).put(
-                "properties",
-                JSONObject()
-                    .put("max_age_ms", JSONObject().put("type", "integer"))
-                    .put("include_missing_timestamp", JSONObject().put("type", "boolean"))
-            )
-        ),
-        ToolSpec(
-            name = "link_repair_diagnostics",
-            description = "Read-only diagnostics for missing-node edges, duplicate links, and missing parent links.",
-            operationClass = ToolOperationClass.READ_ONLY,
-            inputSchema = JSONObject().put("type", "object").put("additionalProperties", false)
-        ),
-        ToolSpec(
-            name = "link_repair_apply",
-            description = "Deterministically repair links by removing broken/duplicate edges and adding missing parent links. Requires explicit approval_token=APPROVED.",
-            operationClass = ToolOperationClass.MUTATING,
-            requiresConfirmation = true,
-            inputSchema = JSONObject().put("type", "object").put("additionalProperties", false).put(
-                "properties",
-                JSONObject()
-                    .put("approval_token", JSONObject().put("type", "string"))
-                    .put("remove_invalid_edges", JSONObject().put("type", "boolean"))
-                    .put("remove_duplicate_edges", JSONObject().put("type", "boolean"))
-                    .put("add_missing_parent_links", JSONObject().put("type", "boolean"))
-            )
         BuiltInToolDef(
             spec = ToolSpec(
                 name = "memory_status",
@@ -250,6 +175,96 @@ class ToolRegistry(
                 inputSchema = JSONObject().put("type", "object").put("additionalProperties", false)
             ),
             handlerId = "memory.read.status"
+        ),
+        BuiltInToolDef(
+            spec = ToolSpec(
+                name = "graph_refactor_diagnostics",
+                description = "Read-only diagnostics for deterministic graph refactoring opportunities: duplicate edges, self loops, duplicate labels, and orphan nodes.",
+                operationClass = ToolOperationClass.READ_ONLY,
+                inputSchema = JSONObject().put("type", "object").put("additionalProperties", false)
+            ),
+            handlerId = "graph.read.graph_refactor_diagnostics"
+        ),
+        BuiltInToolDef(
+            spec = ToolSpec(
+                name = "graph_refactor_apply",
+                description = "Deterministically refactor graph by removing self-loops, removing duplicate edges, and sorting nodes. Requires explicit approval_token=APPROVED.",
+                operationClass = ToolOperationClass.MUTATING,
+                requiresConfirmation = true,
+                inputSchema = JSONObject().put("type", "object").put("additionalProperties", false).put(
+                    "properties",
+                    JSONObject()
+                        .put("approval_token", JSONObject().put("type", "string"))
+                        .put("remove_self_loops", JSONObject().put("type", "boolean"))
+                        .put("remove_duplicate_edges", JSONObject().put("type", "boolean"))
+                        .put("sort_nodes", JSONObject().put("type", "boolean"))
+                )
+            ),
+            handlerId = "graph.write.graph_refactor_apply"
+        ),
+        BuiltInToolDef(
+            spec = ToolSpec(
+                name = "taxonomy_normalization_diagnostics",
+                description = "Read-only diagnostics for taxonomy normalization drift (taxonomy_key/canonical_type mismatches).",
+                operationClass = ToolOperationClass.READ_ONLY,
+                inputSchema = JSONObject().put("type", "object").put("additionalProperties", false)
+            ),
+            handlerId = "graph.read.taxonomy_normalization_diagnostics"
+        ),
+        BuiltInToolDef(
+            spec = ToolSpec(
+                name = "taxonomy_normalization_apply",
+                description = "Deterministically normalize taxonomy attributes (taxonomy_key and canonical_type). Requires explicit approval_token=APPROVED.",
+                operationClass = ToolOperationClass.MUTATING,
+                requiresConfirmation = true,
+                inputSchema = JSONObject().put("type", "object").put("additionalProperties", false).put(
+                    "properties",
+                    JSONObject()
+                        .put("approval_token", JSONObject().put("type", "string"))
+                        .put("node_ids", JSONObject().put("type", "array").put("items", JSONObject().put("type", "string")))
+                )
+            ),
+            handlerId = "graph.write.taxonomy_normalization_apply"
+        ),
+        BuiltInToolDef(
+            spec = ToolSpec(
+                name = "stale_memory_diagnostics",
+                description = "Read-only stale-memory detection for memory nodes using timestamp age threshold.",
+                operationClass = ToolOperationClass.READ_ONLY,
+                inputSchema = JSONObject().put("type", "object").put("additionalProperties", false).put(
+                    "properties",
+                    JSONObject()
+                        .put("max_age_ms", JSONObject().put("type", "integer"))
+                        .put("include_missing_timestamp", JSONObject().put("type", "boolean"))
+                )
+            ),
+            handlerId = "memory.read.stale_memory_diagnostics"
+        ),
+        BuiltInToolDef(
+            spec = ToolSpec(
+                name = "link_repair_diagnostics",
+                description = "Read-only diagnostics for missing-node edges, duplicate links, and missing parent links.",
+                operationClass = ToolOperationClass.READ_ONLY,
+                inputSchema = JSONObject().put("type", "object").put("additionalProperties", false)
+            ),
+            handlerId = "graph.read.link_repair_diagnostics"
+        ),
+        BuiltInToolDef(
+            spec = ToolSpec(
+                name = "link_repair_apply",
+                description = "Deterministically repair links by removing broken/duplicate edges and adding missing parent links. Requires explicit approval_token=APPROVED.",
+                operationClass = ToolOperationClass.MUTATING,
+                requiresConfirmation = true,
+                inputSchema = JSONObject().put("type", "object").put("additionalProperties", false).put(
+                    "properties",
+                    JSONObject()
+                        .put("approval_token", JSONObject().put("type", "string"))
+                        .put("remove_invalid_edges", JSONObject().put("type", "boolean"))
+                        .put("remove_duplicate_edges", JSONObject().put("type", "boolean"))
+                        .put("add_missing_parent_links", JSONObject().put("type", "boolean"))
+                )
+            ),
+            handlerId = "graph.write.link_repair_apply"
         )
     )
 
@@ -262,26 +277,6 @@ class ToolRegistry(
     fun findSpec(name: String): ToolSpec? = specs.firstOrNull { it.name == name }
 
     fun invoke(invocation: ToolInvocation): ToolResult {
-        return when (invocation.name) {
-            "get_graph_summary" -> getGraphSummary(invocation)
-            "list_nodes" -> listNodes(invocation)
-            "get_node" -> getNode(invocation)
-            "add_node" -> addNode(invocation)
-            "link_nodes" -> linkNodes(invocation)
-            "set_node_attribute" -> setNodeAttribute(invocation)
-            "memory_search" -> memorySearch(invocation)
-            "memory_upsert" -> memoryUpsert(invocation)
-            "memory_edit" -> memoryEdit(invocation)
-            "memory_delete" -> memoryDelete(invocation)
-            "memory_status" -> memoryStatus(invocation)
-            "graph_refactor_diagnostics" -> graphRefactorDiagnostics(invocation)
-            "graph_refactor_apply" -> graphRefactorApply(invocation)
-            "taxonomy_normalization_diagnostics" -> taxonomyNormalizationDiagnostics(invocation)
-            "taxonomy_normalization_apply" -> taxonomyNormalizationApply(invocation)
-            "stale_memory_diagnostics" -> staleMemoryDiagnostics(invocation)
-            "link_repair_diagnostics" -> linkRepairDiagnostics(invocation)
-            "link_repair_apply" -> linkRepairApply(invocation)
-            else -> ToolResult(invocation.id, invocation.name, false, "Unknown tool: ${invocation.name}")
         val handler = handlersByToolName[invocation.name]
             ?: return ToolResult(invocation.id, invocation.name, false, "Unknown tool: ${invocation.name}")
         return handler(invocation)
@@ -330,7 +325,7 @@ class ToolRegistry(
 
     private fun graphRefactorDiagnostics(invocation: ToolInvocation): ToolResult {
         val graph = getGraph()
-        val edgeKeyCounts = graph.edges.groupingBy { "${it.fromNodeId}->${it.toNodeId}" }.eachCount()
+        val edgeKeyCounts = graph.edges.groupingBy { EdgePair(it.fromNodeId, it.toNodeId) }.eachCount()
         val duplicates = edgeKeyCounts.filterValues { it > 1 }
         val nodeIds = graph.nodes.map { it.id }.toSet()
         val connectedIds = graph.edges.flatMap { listOf(it.fromNodeId, it.toNodeId) }.toSet()
@@ -351,8 +346,8 @@ class ToolRegistry(
             .put("self_loop_count", graph.edges.count { it.fromNodeId == it.toNodeId })
             .put("duplicate_edge_pair_count", duplicates.size)
             .put("duplicate_edge_pairs", JSONArray().apply {
-                duplicates.toSortedMap().forEach { (key, count) ->
-                    put(JSONObject().put("pair", key).put("count", count))
+                duplicates.toSortedMap(compareBy<EdgePair> { it.fromNodeId }.thenBy { it.toNodeId }).forEach { (pair, count) ->
+                    put(JSONObject().put("pair", pair.serialized()).put("count", count))
                 }
             })
             .put("duplicate_label_group_count", labelGroups.size)
@@ -380,7 +375,7 @@ class ToolRegistry(
         }
         if (removeDuplicates) {
             nextEdges = nextEdges
-                .groupBy { "${it.fromNodeId}->${it.toNodeId}" }
+                .groupBy { EdgePair(it.fromNodeId, it.toNodeId) }
                 .toSortedMap()
                 .values
                 .map { group -> group.minByOrNull { it.id } ?: group.first() }
@@ -499,7 +494,7 @@ class ToolRegistry(
         val nodeIds = graph.nodes.map { it.id }.toSet()
         val invalidEdges = graph.edges.filter { it.fromNodeId !in nodeIds || it.toNodeId !in nodeIds }
         val duplicateEdges = graph.edges
-            .groupBy { "${it.fromNodeId}->${it.toNodeId}" }
+            .groupBy { EdgePair(it.fromNodeId, it.toNodeId) }
             .filterValues { it.size > 1 }
         val missingParentLinks = graph.nodes
             .asSequence()
@@ -524,8 +519,8 @@ class ToolRegistry(
             })
             .put("duplicate_edge_pair_count", duplicateEdges.size)
             .put("duplicate_edge_pairs", JSONArray().apply {
-                duplicateEdges.toSortedMap().forEach { (pair, edges) ->
-                    put(JSONObject().put("pair", pair).put("count", edges.size))
+                duplicateEdges.toSortedMap(compareBy<EdgePair> { it.fromNodeId }.thenBy { it.toNodeId }).forEach { (pair, edges) ->
+                    put(JSONObject().put("pair", pair.serialized()).put("count", edges.size))
                 }
             })
             .put("missing_parent_link_count", missingParentLinks.size)
@@ -548,20 +543,24 @@ class ToolRegistry(
         }
         if (removeDuplicates) {
             nextEdges = nextEdges
-                .groupBy { "${it.fromNodeId}->${it.toNodeId}" }
+                .groupBy { EdgePair(it.fromNodeId, it.toNodeId) }
                 .toSortedMap()
                 .values
                 .map { group -> group.minByOrNull { it.id } ?: group.first() }
         }
         if (addMissingParent) {
-            val existingPairs = nextEdges.map { "${it.fromNodeId}->${it.toNodeId}" }.toMutableSet()
+            val existingPairs = nextEdges.map { EdgePair(it.fromNodeId, it.toNodeId) }.toMutableSet()
             graph.nodes
                 .filter { !it.parentId.isNullOrBlank() && it.parentId in nodeIds }
                 .sortedBy { it.id }
                 .forEach { node ->
-                    val key = "${node.parentId}->${node.id}"
+                    val key = EdgePair(node.parentId!!, node.id)
                     if (key !in existingPairs) {
-                        nextEdges = nextEdges + MindEdge(fromNodeId = node.parentId!!, toNodeId = node.id)
+                        nextEdges = nextEdges + MindEdge(
+                            id = "auto-parent:${node.parentId}:${node.id}",
+                            fromNodeId = node.parentId!!,
+                            toNodeId = node.id
+                        )
                         existingPairs += key
                     }
                 }
@@ -595,30 +594,18 @@ class ToolRegistry(
         return ToolResult(invocation.id, invocation.name, true, payload.toString(), payload)
     }
 
-    private fun moderateMemoryWrite(invocation: ToolInvocation, value: String): ToolResult? {
-        val moderation = moderationPipeline.moderate(
-            ModerationRequest(
-                text = value,
-                stage = ModerationStage.MEMORY_WRITE,
-                policyId = "memory_write"
-            )
+    private fun moderationDeniedResult(invocation: ToolInvocation, moderation: ModerationResult): ToolResult =
+        ToolResult(
+            invocation.id,
+            invocation.name,
+            false,
+            "memory_write_denied_by_moderation",
+            JSONObject()
+                .put("error", "moderation_denied")
+                .put("policy_id", moderation.policyId)
+                .put("reason", moderation.reason ?: "Denied by moderation policy")
+                .put("detected_entity_types", JSONArray(moderation.detectedEntityTypes.toList()))
         )
-        return if (moderation.action == ModerationAction.DENY) {
-            ToolResult(
-                invocation.id,
-                invocation.name,
-                false,
-                "memory_write_denied_by_moderation",
-                JSONObject()
-                    .put("error", "moderation_denied")
-                    .put("policy_id", moderation.policyId)
-                    .put("reason", moderation.reason ?: "Denied by moderation policy")
-                    .put("detected_entity_types", JSONArray(moderation.detectedEntityTypes.toList()))
-            )
-        } else {
-            null
-        }
-    }
 
     private fun memoryUpsert(invocation: ToolInvocation): ToolResult =
         withMemoryManager(invocation) { manager ->
@@ -634,11 +621,13 @@ class ToolRegistry(
             if (policyViolation != null) return@withMemoryManager policyViolation
 
             val value = args.optString("value")
-            val moderationDenied = moderateMemoryWrite(invocation, value)
-            if (moderationDenied != null) return@withMemoryManager moderationDenied
-            val moderatedValue = moderationPipeline.moderate(
+            val moderationResult = moderationPipeline.moderate(
                 ModerationRequest(text = value, stage = ModerationStage.MEMORY_WRITE, policyId = "memory_write")
-            ).text
+            )
+            if (moderationResult.action == ModerationAction.DENY) {
+                return@withMemoryManager moderationDeniedResult(invocation, moderationResult)
+            }
+            val moderatedValue = moderationResult.text
 
             when (category) {
                 "profile" -> manager.upsertProfileMemory(
@@ -688,11 +677,13 @@ class ToolRegistry(
             if (policyViolation != null) return@withMemoryManager policyViolation
 
             val requestedValue = args.optString("value").ifBlank { existing.description }
-            val moderationDenied = moderateMemoryWrite(invocation, requestedValue)
-            if (moderationDenied != null) return@withMemoryManager moderationDenied
-            val moderatedValue = moderationPipeline.moderate(
+            val moderationResult = moderationPipeline.moderate(
                 ModerationRequest(text = requestedValue, stage = ModerationStage.MEMORY_WRITE, policyId = "memory_write")
-            ).text
+            )
+            if (moderationResult.action == ModerationAction.DENY) {
+                return@withMemoryManager moderationDeniedResult(invocation, moderationResult)
+            }
+            val moderatedValue = moderationResult.text
 
             val edited = manager.editMemory(memoryId) { node ->
                 node.copy(
@@ -932,6 +923,8 @@ class ToolRegistry(
                     .put("message", "This mutating tool requires explicit approval_token=APPROVED")
             )
         }
+    }
+
     data class BuiltInToolDef(val spec: ToolSpec, val handlerId: String)
 
     data class MergedRegistry(
@@ -940,6 +933,7 @@ class ToolRegistry(
     )
 
     companion object {
+        private const val MUTATION_APPROVAL_TOKEN = "APPROVED"
         private const val TAG = "ToolRegistry"
 
         fun approvedHandlerIds(): Set<String> = setOf(
@@ -953,7 +947,18 @@ class ToolRegistry(
             "memory.write.upsert",
             "memory.write.edit",
             "memory.write.delete",
-            "memory.read.status"
+            "memory.read.status",
+            "graph.read.graph_refactor_diagnostics",
+            "graph.write.graph_refactor_apply",
+            "graph.read.taxonomy_normalization_diagnostics",
+            "graph.write.taxonomy_normalization_apply",
+            "memory.read.stale_memory_diagnostics",
+            "graph.read.link_repair_diagnostics",
+            "graph.write.link_repair_apply"
         )
+    }
+
+    private data class EdgePair(val fromNodeId: String, val toNodeId: String) {
+        fun serialized(): String = "$fromNodeId->$toNodeId"
     }
 }
