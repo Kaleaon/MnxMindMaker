@@ -15,6 +15,7 @@ class ProviderConformanceTest {
     @Test
     fun `all built-in providers pass conformance suite`() {
         val providers = listOf(
+            LiteRtNativeProvider(),
             LlmEdgeProvider(),
             LocalProvider(),
             ClaudeProvider(),

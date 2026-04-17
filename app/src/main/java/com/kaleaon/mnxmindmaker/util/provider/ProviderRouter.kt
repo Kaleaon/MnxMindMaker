@@ -40,6 +40,7 @@ data class ProviderFailoverEvent(
 
 class ProviderRouter(
     providers: List<AssistantProvider> = listOf(
+        LiteRtNativeProvider(),
         LlmEdgeProvider(),
         LocalProvider(),
         ClaudeProvider(),

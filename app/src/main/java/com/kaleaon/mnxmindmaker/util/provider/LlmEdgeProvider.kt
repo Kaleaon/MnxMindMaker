@@ -2,6 +2,7 @@ package com.kaleaon.mnxmindmaker.util.provider
 
 import com.kaleaon.mnxmindmaker.model.LlmProvider
 import com.kaleaon.mnxmindmaker.model.LlmSettings
+import com.kaleaon.mnxmindmaker.model.LocalRuntimeControls
 import com.kaleaon.mnxmindmaker.model.LocalRuntimeEngine
 import com.kaleaon.mnxmindmaker.util.LlmApiException
 import com.kaleaon.mnxmindmaker.util.tooling.AssistantTurn
@@ -39,6 +40,7 @@ class LlmEdgeProvider(
                         put("local_model_path", request.settings.localModelPath)
                     }
                     put("runtime", request.settings.runtimeControls.engine.runtimeTag())
+                    put("runtime_hints", request.settings.runtimeControls.toRuntimeHints())
                 })
             }
 
@@ -110,6 +112,13 @@ class LlmEdgeProvider(
         LocalRuntimeEngine.LLMEDGE,
         LocalRuntimeEngine.LITERT_LM -> "models"
     }
+
+    private fun LocalRuntimeControls.toRuntimeHints(): JSONObject = JSONObject()
+        .put("compute_backend", computeBackend.name.lowercase())
+        .put("context_window_tokens", contextWindowTokens)
+        .put("quantization_profile", quantizationProfile)
+        .put("max_ram_mb", maxRamMb)
+        .put("max_vram_mb", maxVramMb)
 
     companion object {
         private fun defaultClient(): OkHttpClient = OkHttpClient.Builder()
