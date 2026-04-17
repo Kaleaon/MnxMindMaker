@@ -22,7 +22,33 @@ interface MemoryStore {
     fun deleteRecord(category: MemoryCategory, id: String): Boolean
 
     fun clearAll()
+
+    fun runIntegrityScan(): MemoryStoreIntegrityReport
+
+    fun restoreLastKnownGoodSnapshot(): Boolean
 }
+
+data class MemoryStoreIntegrityReport(
+    val isHealthy: Boolean,
+    val issues: List<String>,
+    val checkedAtEpochMs: Long = System.currentTimeMillis()
+    fun syncFromRemote(): Boolean = false
+
+    fun syncToRemote(): Boolean = false
+}
+
+interface RemoteMemorySyncLayer {
+    fun pullSnapshot(): RemoteMemorySnapshot?
+
+    fun pushSnapshot(snapshot: RemoteMemorySnapshot)
+}
+
+data class RemoteMemorySnapshot(
+    val graphStore: GraphMemoryStore,
+    val semanticStore: SemanticMemoryStore,
+    val episodicStore: EpisodicTimelineStore,
+    val metadataIndex: MetadataIndexStore
+)
 
 fun interface MemoryStoreMigration {
     /**

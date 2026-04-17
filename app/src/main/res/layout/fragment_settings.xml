@@ -464,6 +464,20 @@
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
+                android:text="@string/local_runtime_engine_label"
+                android:textColor="@color/colorOnSurface"
+                android:layout_marginBottom="4dp" />
+
+            <Spinner
+                android:id="@+id/spinner_local_runtime_engine"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="16dp"
+                android:background="@color/colorSurface" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
                 android:text="@string/context_window_label"
                 android:textColor="@color/colorOnSurface"
                 android:layout_marginBottom="4dp" />
@@ -684,6 +698,15 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="@string/preflight_result_idle"
+            android:textColor="@color/colorOnSurface"
+            android:textSize="12sp"
+            android:layout_marginBottom="8dp" />
+
+        <TextView
+            android:id="@+id/tv_skill_pack_diagnostics"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/skill_pack_diagnostics_idle"
             android:textColor="@color/colorOnSurface"
             android:textSize="12sp"
             android:layout_marginBottom="8dp" />

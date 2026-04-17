@@ -14,28 +14,85 @@ import com.kaleaon.mnxmindmaker.model.MindGraph
 import com.kaleaon.mnxmindmaker.model.MindNode
 import com.kaleaon.mnxmindmaker.model.NodeType
 import com.kaleaon.mnxmindmaker.model.PrivacyMode
+import com.kaleaon.mnxmindmaker.model.DataClassification
+import com.kaleaon.mnxmindmaker.model.LlmFallbackOrder
+import com.kaleaon.mnxmindmaker.model.defaultModel
+import com.kaleaon.mnxmindmaker.persona.runtime.PersonaDeploymentManifest
+import com.kaleaon.mnxmindmaker.persona.runtime.PersonaRuntimeErrorCode
+import com.kaleaon.mnxmindmaker.persona.runtime.PersonaRuntimeManager
+import com.kaleaon.mnxmindmaker.persona.runtime.PersonaRuntimePhase
+import com.kaleaon.mnxmindmaker.repository.ChatSessionRepository
 import com.kaleaon.mnxmindmaker.repository.LlmSettingsRepository
 import com.kaleaon.mnxmindmaker.repository.MnxRepository
+import com.kaleaon.mnxmindmaker.repository.PersistedChatMessage
+import com.kaleaon.mnxmindmaker.repository.PersistedChatSession
+import com.kaleaon.mnxmindmaker.repository.PersistedChatStore
 import com.kaleaon.mnxmindmaker.util.ContinuityAuditResult
 import com.kaleaon.mnxmindmaker.util.DimensionMapper
 import com.kaleaon.mnxmindmaker.util.tooling.ToolApprovalRequest
+import com.kaleaon.mnxmindmaker.util.observability.InMemoryTraceStore
+import com.kaleaon.mnxmindmaker.util.observability.PromptPipelineEngine
+import com.kaleaon.mnxmindmaker.util.observability.PromptPipelineRequest
+import com.kaleaon.mnxmindmaker.util.observability.RequestTrace
+import com.kaleaon.mnxmindmaker.util.observability.TraceEventType
+import com.kaleaon.mnxmindmaker.util.provider.ProviderRouter
 import com.kaleaon.mnxmindmaker.util.LlmApiClient
+import com.kaleaon.mnxmindmaker.util.provider.ModelCapabilityRegistry
 import com.kaleaon.mnxmindmaker.util.LlmApiException
+import com.kaleaon.mnxmindmaker.util.provider.runtime.LocalRuntimeCoordinator
+import com.kaleaon.mnxmindmaker.util.provider.runtime.LocalRuntimeState
+import com.kaleaon.mnxmindmaker.util.provider.runtime.RuntimeDiagnostic
+import com.kaleaon.mnxmindmaker.util.tooling.ToolOrchestrator
+import com.kaleaon.mnxmindmaker.util.tooling.ToolPolicyEngine
+import com.kaleaon.mnxmindmaker.util.tooling.ToolRegistry
 import com.kaleaon.mnxmindmaker.util.run_continuity_audit
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.File
 import java.io.InputStream
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 
 class MindMapViewModel(application: Application) : AndroidViewModel(application) {
 
     private val mnxRepository = MnxRepository(application)
     private val llmRepository = LlmSettingsRepository(application)
     private val continuityManager = ContinuityManager(application)
+    private val llmClient = LlmApiClient(capabilityRegistry = ModelCapabilityRegistry.create(application))
     private val llmClient = LlmApiClient()
+    private val localRuntimeCoordinator = LocalRuntimeCoordinator(scope = viewModelScope)
+    private val chatSessionRepository = ChatSessionRepository(application)
+    private val traceStore = InMemoryTraceStore()
+    private val promptPipelineEngine = PromptPipelineEngine(traceStore = traceStore)
+    private val chatCatchUpBuilder = ChatCatchUpBuilder()
+    private val pendingApprovalResolvers = ConcurrentHashMap<String, CompletableDeferred<Boolean>>()
+    private val personaRuntimeManager = PersonaRuntimeManager(
+        providerRouter = ProviderRouter(),
+        toolOrchestratorFactory = { settingsChain, routingPolicy, tracer ->
+            val toolRegistry = ToolRegistry(
+                getGraph = { _graph.value ?: newDefaultGraph() },
+                setGraph = { updated -> _graph.postValue(updated) }
+            )
+            ToolOrchestrator(
+                providerRouter = ProviderRouter(),
+                settingsChain = settingsChain,
+                registry = toolRegistry,
+                policy = ToolPolicyEngine(toolRegistry.specs().associateBy { it.name }),
+                requestApproval = { request -> awaitToolApprovalDecision(request) },
+                tracer = tracer
+            )
+        },
+        settingsProvider = { llmRepository.getInvocationChain().filter { isUsable(it) } },
+        privacyModeProvider = { llmRepository.loadPrivacyMode() },
+        manifestProvider = { personaId -> resolvePersonaManifest(personaId) }
+    )
 
     private val _graph = MutableLiveData(newDefaultGraph())
     val graph: LiveData<MindGraph> get() = _graph
@@ -51,6 +108,16 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
 
     private val _llmStatusBadge = MutableLiveData("REMOTE")
     val llmStatusBadge: LiveData<String> get() = _llmStatusBadge
+    private val _localRuntimeState = MutableStateFlow<LocalRuntimeState>(
+        LocalRuntimeState.Unreachable(
+            RuntimeDiagnostic(
+                summary = "Local runtime not ready",
+                detail = "No local runtime startup has run.",
+                suggestion = "Open Settings and run local runtime preflight."
+            )
+        )
+    )
+    val localRuntimeState: StateFlow<LocalRuntimeState> get() = _localRuntimeState.asStateFlow()
 
     private val _snapshotTimeline = MutableLiveData<List<ContinuityManager.SnapshotRecord>>(emptyList())
     val snapshotTimeline: LiveData<List<ContinuityManager.SnapshotRecord>> get() = _snapshotTimeline
@@ -66,6 +133,10 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
 
     private val _chatMessages = MutableLiveData<List<ChatMessage>>(emptyList())
     val chatMessages: LiveData<List<ChatMessage>> get() = _chatMessages
+    private val _chatSessions = MutableLiveData<List<ChatSessionSummary>>(emptyList())
+    val chatSessions: LiveData<List<ChatSessionSummary>> get() = _chatSessions
+    private val _activeChatSessionId = MutableLiveData<String>()
+    val activeChatSessionId: LiveData<String> get() = _activeChatSessionId
 
     private val _isPremiumUser = MutableLiveData(true)
     val isPremiumUser: LiveData<Boolean> get() = _isPremiumUser
@@ -74,6 +145,7 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
     val compareCandidateMessageId: LiveData<String?> get() = _compareCandidateMessageId
 
     private val interactionPolicy = MindMapInteractionPolicy()
+    private val mentionParser = ChatMentionParser()
 
     private val _pendingToolApprovalRequest = MutableLiveData<ToolApprovalRequest?>()
     val pendingToolApprovalRequest: LiveData<ToolApprovalRequest?> get() = _pendingToolApprovalRequest
@@ -89,6 +161,13 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
     init {
         refreshAudit()
         refreshSnapshotTimeline()
+        syncLocalRuntimeMonitoring()
+        viewModelScope.launch {
+            localRuntimeCoordinator.state.collect { state ->
+                _localRuntimeState.value = state
+            }
+        }
+        loadPersistedChatSessions()
     }
 
     fun addNode(label: String, type: NodeType, description: String = "") {
@@ -258,12 +337,49 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun askLlmForMindDesign(prompt: String, choice: ComposerProviderChoice = ComposerProviderChoice.AUTO) {
+        val activeSessionId = _activeChatSessionId.value ?: run {
+            loadPersistedChatSessions()
+            _activeChatSessionId.value
+        } ?: return
+
+        val mentionCandidates = buildMentionCandidates(_graph.value?.nodes.orEmpty())
+        val parseResult = mentionParser.parse(prompt, mentionCandidates)
+        val cleanedPrompt = parseResult.cleanedMessageContent.ifBlank { prompt.trim() }
+        val dispatchPrompt = buildDispatchPrompt(cleanedPrompt, parseResult.addressedIdentities)
+
         viewModelScope.launch {
             _isLoading.value = true
             try {
-                val result = withContext(Dispatchers.IO) { runSingleChat(prompt, choice) }
+                val activationResult = withContext(Dispatchers.IO) {
+                    resolveAndActivateMentionedPersonas(activeSessionId, prompt)
+                }
+                if (activationResult.systemMessages.isNotEmpty()) {
+                    val seededMessages = _chatMessages.value.orEmpty() + activationResult.systemMessages
+                    _chatMessages.value = seededMessages
+                    persistChatMessages(activeSessionId, seededMessages)
+                }
+                val result = withContext(Dispatchers.IO) { runSingleChat(dispatchPrompt, choice) }
                 if (result != null) {
-                    _chatMessages.value = _chatMessages.value.orEmpty() + result
+                    val userMessageId = UUID.randomUUID().toString()
+                    val userMessage = ChatMessage(
+                        id = userMessageId,
+                        role = ChatRole.USER,
+                        actorId = "user",
+                        actorLabel = "You",
+                        content = prompt,
+                        providerChoice = choice,
+                        addressedActorIds = listOf(result.actorId),
+                        replyToMessageId = null,
+                        prompt = prompt
+                    )
+                    val assistantMessage = result.copy(
+                        addressedActorIds = listOf("user"),
+                        replyToMessageId = userMessageId,
+                        response = result.content
+                    )
+                    val nextMessages = _chatMessages.value.orEmpty() + userMessage + assistantMessage
+                    _chatMessages.value = nextMessages
+                    persistChatMessages(activeSessionId, nextMessages)
                 }
             } catch (e: LlmApiException) {
                 _llmStatusBadge.value = "REMOTE ERROR"
@@ -300,34 +416,37 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun retryWithAnotherProvider(messageId: String) {
+        val activeSessionId = _activeChatSessionId.value ?: return
         val existing = _chatMessages.value.orEmpty().firstOrNull { it.id == messageId } ?: return
         viewModelScope.launch {
             _isLoading.value = true
             try {
-                val nextProvider = withContext(Dispatchers.IO) { pickAlternativeProvider(existing.provenance.provider) }
+                val nextProvider = withContext(Dispatchers.IO) { pickAlternativeProvider(existing.provenance?.provider ?: LlmProvider.OPENAI) }
                 if (nextProvider == null) {
                     _error.value = "No alternate enabled provider available for retry."
                     return@launch
                 }
                 val result = withContext(Dispatchers.IO) {
-                    runSingleChat(existing.prompt, providerToChoice(nextProvider), forcedProvider = nextProvider)
+                    runSingleChat(existing.content, providerToChoice(nextProvider), forcedProvider = nextProvider)
                 } ?: return@launch
 
-                _chatMessages.value = _chatMessages.value.orEmpty().map { msg ->
+                val updatedMessages = _chatMessages.value.orEmpty().map { msg ->
                     if (msg.id != messageId) {
                         msg
                     } else {
                         msg.copy(
                             compareCandidate = CompareCandidate(
-                                provider = result.provenance.provider,
-                                model = result.provenance.model,
-                                response = result.response,
-                                latencyMs = result.provenance.latencyMs,
-                                totalTokens = result.provenance.totalTokens
+                                provider = result.provenance?.provider ?: LlmProvider.OPENAI,
+                                model = result.provenance?.model.orEmpty(),
+                                response = result.content,
+                                latencyMs = result.provenance?.latencyMs,
+                                totalTokens = result.provenance?.totalTokens
                             )
                         )
                     }
                 }
+                _chatMessages.value = updatedMessages
+                persistChatMessages(activeSessionId, updatedMessages)
 
                 if (_isPremiumUser.value == true) {
                     _compareCandidateMessageId.value = messageId
@@ -351,6 +470,7 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
 
     fun resolveToolApproval(requestId: String, approved: Boolean) {
         val resolution = interactionPolicy.resolveToolApproval(requestId, approved) ?: return
+        pendingApprovalResolvers.remove(requestId)?.complete(approved)
         _pendingToolApprovalRequest.value = interactionPolicy.peekPendingToolApprovalRequest()
         _lastToolApprovalResolution.value = resolution
     }
@@ -359,54 +479,176 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
         _lastToolApprovalResolution.value = null
     }
 
+    fun createNewChatSession(displayName: String? = null, providerChoice: ComposerProviderChoice = ComposerProviderChoice.AUTO) {
+        val state = chatSessionRepository.createSession(displayName, providerChoice.label)
+        applyChatState(state)
+    }
+
+    fun switchChatSession(sessionId: String) {
+        val state = chatSessionRepository.setActiveSession(sessionId)
+        applyChatState(state)
+    }
+
+    private fun loadPersistedChatSessions() {
+        val state = chatSessionRepository.ensureDefaultSession()
+        applyChatState(state)
+    }
+
+    private fun applyChatState(state: PersistedChatStore) {
+        val orderedSessions = state.sessions.sortedBy { it.createdTimestamp }
+        val activeId = state.activeSessionId.ifBlank { orderedSessions.firstOrNull()?.sessionId.orEmpty() }
+        val activeSession = orderedSessions.firstOrNull { it.sessionId == activeId } ?: orderedSessions.firstOrNull()
+
+        _chatSessions.value = orderedSessions.map { it.toSummary() }
+        _activeChatSessionId.value = activeSession?.sessionId.orEmpty()
+        _chatMessages.value = activeSession?.messages?.map { persisted -> persisted.toUiMessage() }.orEmpty()
+    }
+
+    private fun persistChatMessages(sessionId: String, messages: List<ChatMessage>) {
+        val persistedMessages = messages.map { it.toPersistedMessage() }
+        val state = chatSessionRepository.replaceMessages(sessionId, persistedMessages)
+        applyChatState(state)
+    }
+
     private fun runSingleChat(
         prompt: String,
         choice: ComposerProviderChoice,
         forcedProvider: LlmProvider? = null
     ): ChatMessage? {
-        val chain = when {
+        syncLocalRuntimeMonitoring()
+        val rawChain = when {
             forcedProvider != null -> listOfNotNull(loadUsableSettings(forcedProvider))
             choice == ComposerProviderChoice.AUTO -> llmRepository.getInvocationChain()
             else -> listOfNotNull(loadUsableSettings(choice.toProvider()))
         }
+        val chain = rawChain.filter { isProviderReady(it, choice) }
 
         if (chain.isEmpty()) {
-            _error.postValue("No usable LLM configured. Add a provider in Settings.")
+            val localState = localRuntimeState.value
+            val reason = if (choice == ComposerProviderChoice.LOCAL || forcedProvider == LlmProvider.LOCAL_ON_DEVICE) {
+                "Local runtime is not ready. ${localState.diagnostic.toUserMessage()}"
+            } else {
+                "No usable LLM configured. Add a provider in Settings."
+            }
+            _error.postValue(reason)
             return null
         }
 
         var lastError: String? = null
+        val failoverEvents = mutableListOf<FailoverEvent>()
         for (settings in chain) {
             val systemPrompt = buildSystemPrompt(settings)
             val start = System.currentTimeMillis()
+        val primarySettings = chain.first()
+        val systemPrompt = buildSystemPrompt(primarySettings)
+        val transcript = buildChatTranscript(prompt)
+        val pipelineRequest = PromptPipelineRequest(
+            prompt = prompt,
+            transcript = transcript,
+            task = "mindmap_assist"
+        )
+        val catchUp = chatCatchUpBuilder.build(
+            history = _chatMessages.value.orEmpty(),
+            targetMindId = _selectedNode.value?.id,
+            currentUserUtterance = prompt,
+            tokenBudget = catchUpTokenBudget(primarySettings)
+        )
+        val systemPrompt = buildSystemPrompt(primarySettings, catchUp)
+        val pipelineRequest = PromptPipelineRequest(prompt = prompt, task = "mindmap_assist")
+        val graphNodes = _graph.value?.nodes.orEmpty()
+
+        try {
+            val pipelineResult = promptPipelineEngine.execute(
+                request = pipelineRequest,
+                settings = primarySettings,
+                memoryNodes = graphNodes,
+                baseSystemPrompt = systemPrompt
+            ) { tracer, _ ->
+                val toolRegistry = ToolRegistry(
+                    getGraph = { _graph.value ?: newDefaultGraph() },
+                    setGraph = { updated -> _graph.postValue(updated) }
+                )
+                ToolOrchestrator(
+                    providerRouter = ProviderRouter(),
+                    settingsChain = chain,
+                    registry = toolRegistry,
+                    policy = ToolPolicyEngine(toolRegistry.specs().associateBy { it.name }),
+                    requestApproval = { request -> awaitToolApprovalDecision(request) },
+                    tracer = tracer
+                )
+            }
+
+            val trace = pipelineResult.trace
+            val provider = resolveProviderFromTrace(trace, primarySettings.provider)
+            _llmStatusBadge.postValue(
+                if (provider.runtime == LlmRuntime.LOCAL_ON_DEVICE) "LOCAL FALLBACK" else "REMOTE"
+            )
+
+            return ChatMessage(
+                id = UUID.randomUUID().toString(),
+                prompt = prompt,
+                response = pipelineResult.responseText,
+                createdTimestamp = System.currentTimeMillis(),
+                role = ChatRole.MIND,
+                actorId = primarySettings.provider.name,
+                actorLabel = primarySettings.provider.displayName,
+                content = pipelineResult.responseText,
+                providerChoice = choice,
+                replyToMessageId = null,
+                isAiGenerated = true,
+                provenance = MessageProvenance(
+                    provider = provider,
+                    model = primarySettings.model,
+                    toolCalls = extractToolCallMetadata(trace),
+                    latencyMs = trace.durationMs,
+                    totalTokens = null
+                )
+            )
+        } catch (orchestratedError: Exception) {
+            val traceAwareMessage = "Orchestrated Ask-AI failed (${orchestratedError.message ?: "unknown error"}). Falling back to text-only response."
+            lastError = traceAwareMessage
             try {
-                val turn = llmClient.completeAssistantTurn(
-                    settings = settings,
+                val start = System.currentTimeMillis()
+                val fallbackTurn = llmClient.completeAssistantTurn(
+                    settings = primarySettings,
                     systemPrompt = systemPrompt,
-                    transcript = listOf(JSONObject().put("role", "user").put("content", prompt)),
+                    transcript = transcript,
                     tools = emptyList()
                 )
                 val latency = System.currentTimeMillis() - start
                 _llmStatusBadge.postValue(
-                    if (settings.provider.runtime == LlmRuntime.LOCAL_ON_DEVICE) "LOCAL FALLBACK" else "REMOTE"
+                    if (primarySettings.provider.runtime == LlmRuntime.LOCAL_ON_DEVICE) "LOCAL FALLBACK" else "REMOTE"
                 )
                 return ChatMessage(
                     id = UUID.randomUUID().toString(),
                     prompt = prompt,
-                    response = turn.text,
+                    role = ChatRole.MIND,
+                    actorId = primarySettings.provider.name,
+                    actorLabel = primarySettings.provider.displayName,
+                    content = "[Fallback mode] $traceAwareMessage\n\n${fallbackTurn.text}",
+                    createdTimestamp = System.currentTimeMillis(),
                     providerChoice = choice,
+                    response = fallbackTurn.text,
+                    isAiGenerated = true,
                     provenance = MessageProvenance(
-                        provider = settings.provider,
-                        model = turn.raw?.optString("model").takeUnless { it.isNullOrBlank() } ?: settings.model,
-                        toolCalls = turn.toolInvocations.map { it.toolName },
+                        provider = primarySettings.provider,
+                        model = fallbackTurn.raw?.optString("model").takeUnless { it.isNullOrBlank() } ?: primarySettings.model,
+                        toolCalls = listOf("orchestrator_error: ${orchestratedError::class.java.simpleName}"),
+                        failoverEvents = failoverEvents.toList(),
                         latencyMs = latency,
-                        promptTokens = extractPromptTokens(turn.raw),
-                        completionTokens = extractCompletionTokens(turn.raw),
-                        totalTokens = extractTotalTokens(turn.raw)
+                        promptTokens = extractPromptTokens(fallbackTurn.raw),
+                        completionTokens = extractCompletionTokens(fallbackTurn.raw),
+                        totalTokens = extractTotalTokens(fallbackTurn.raw)
                     )
                 )
             } catch (e: LlmApiException) {
+                failoverEvents += FailoverEvent(
+                    reasonCode = reasonCodeFor(e),
+                    message = e.message.orEmpty().ifBlank { "Provider request failed" }
+                )
                 lastError = "${settings.provider.displayName}: ${e.message}"
+            } catch (fallbackError: Exception) {
+                lastError = "$traceAwareMessage Fallback failed: ${fallbackError.message}"
             }
         }
 
@@ -415,21 +657,152 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
         return null
     }
 
-    private fun buildSystemPrompt(settings: LlmSettings): String {
+    private fun buildChatTranscript(currentPrompt: String): List<JSONObject> {
+        val transcript = mutableListOf<JSONObject>()
+        _chatMessages.value.orEmpty().forEach { message ->
+            transcript += JSONObject()
+                .put("role", "user")
+                .put("content", message.prompt)
+            transcript += JSONObject()
+                .put("role", "assistant")
+                .put("content", message.response)
+        }
+        transcript += JSONObject()
+            .put("role", "user")
+            .put("content", currentPrompt)
+        return transcript
+    private fun buildMentionCandidates(nodes: List<MindNode>): List<ChatMentionParser.IdentityCandidate> {
+        return nodes.map { node ->
+            ChatMentionParser.IdentityCandidate(
+                id = node.id,
+                label = node.label,
+                aliases = extractAliases(node)
+            )
+        }
+    }
+
+    private fun extractAliases(node: MindNode): Set<String> {
+        val aliasKeys = listOf("aliases", "alias", "mention_aliases")
+        return aliasKeys
+            .mapNotNull { key -> node.attributes[key] }
+            .flatMap { raw -> raw.split(',', ';', '|') }
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .toSet()
+    }
+
+    private fun buildDispatchPrompt(
+        cleanedPrompt: String,
+        addressedIdentities: List<ChatMentionParser.AddressedIdentity>
+    ): String {
+        if (addressedIdentities.isEmpty()) return cleanedPrompt
+
+        val addressedLine = addressedIdentities.joinToString(", ") { identity ->
+            "${identity.label} [${identity.id}]"
+        }
+        return "Addressed minds: $addressedLine\n$cleanedPrompt"
+    }
+
+    private fun reasonCodeFor(error: LlmApiException): String {
+        val message = error.message.orEmpty().lowercase()
+        return when {
+            message.contains("api key") -> "AUTH_INVALID"
+            message.contains("timeout") -> "UPSTREAM_TIMEOUT"
+            message.contains("429") || message.contains("rate limit") -> "RATE_LIMITED"
+            message.contains("503") || message.contains("unavailable") -> "UPSTREAM_UNAVAILABLE"
+            message.contains("must use") || message.contains("misconfigured") || message.contains("cannot use") -> "CONFIG_INVALID"
+            message.contains("no adapter") -> "ADAPTER_UNAVAILABLE"
+            else -> "PROVIDER_ERROR"
+        }
+    }
+
+    private suspend fun awaitToolApprovalDecision(request: ToolApprovalRequest): Boolean {
+        val deferred = CompletableDeferred<Boolean>()
+        pendingApprovalResolvers[request.id] = deferred
+        requestToolApproval(request)
+        return try {
+            deferred.await()
+        } finally {
+            pendingApprovalResolvers.remove(request.id)
+        }
+    }
+
+    private fun resolveProviderFromTrace(trace: RequestTrace, fallback: LlmProvider): LlmProvider {
+        val providerName = trace.events
+            .asReversed()
+            .firstOrNull { it.type == TraceEventType.PROVIDER_RESPONSE }
+            ?.payload
+            ?.get("provider")
+            ?: return fallback
+        return runCatching { LlmProvider.valueOf(providerName) }.getOrDefault(fallback)
+    }
+
+    private fun extractToolCallMetadata(trace: RequestTrace): List<String> {
+        return trace.events
+            .filter { it.type == TraceEventType.TOOL_CALL }
+            .map { event ->
+                val name = event.payload["tool_name"].orEmpty().ifBlank { "unknown_tool" }
+                val latencyMs = event.payload["latency_ms"].orEmpty().ifBlank { "?" }
+                val success = event.payload["success"].orEmpty()
+                "$name (${latencyMs}ms, success=$success)"
+            }
+    }
+
+    private fun buildSystemPrompt(settings: LlmSettings, catchUp: ChatCatchUp): String {
         val caps = settings.capabilities
         return buildString {
             appendLine("You are an AI mind design assistant helping the user build an AI mind graph in .mnx format.")
             appendLine("The mind graph represents identity, memories, knowledge, emotions, personality, beliefs, values, and relationships.")
             appendLine("Provide concise, structured suggestions for mind nodes and connections.")
             appendLine("Format suggestions as: NodeType: label - description")
+            val catchUpSection = catchUp.asSystemPromptSection()
+            if (catchUpSection.isNotBlank()) {
+                appendLine(catchUpSection)
+                appendLine("If unresolved references exist, ask a concise clarification question before making assumptions.")
+            }
             if (!caps.supportsToolPlanning) appendLine("Avoid multi-step tool plans.")
             appendLine("Stay within approximately ${caps.contextWindowTokens / 8} output tokens.")
         }
     }
 
+    private fun catchUpTokenBudget(settings: LlmSettings): Int {
+        val contextWindow = settings.capabilities.contextWindowTokens
+        return (contextWindow / 5).coerceIn(160, 1200)
+    }
+
     private fun loadUsableSettings(provider: LlmProvider): LlmSettings? {
         val settings = llmRepository.loadSettings(provider)
         return settings.takeIf { it.enabled && isUsable(it) }
+    }
+
+    private fun syncLocalRuntimeMonitoring() {
+        val localSettings = llmRepository.loadSettings(LlmProvider.LOCAL_ON_DEVICE)
+        if (localSettings.enabled && isUsable(localSettings)) {
+            localRuntimeCoordinator.beginMonitoring(localSettings, llmRepository.loadPrivacyMode())
+        } else {
+            localRuntimeCoordinator.stopMonitoring(
+                RuntimeDiagnostic(
+                    summary = "Local runtime unavailable",
+                    detail = "Local On-Device provider is disabled or invalid.",
+                    suggestion = "Enable Local On-Device provider and set model path."
+                )
+            )
+        }
+    }
+
+    private fun isProviderReady(settings: LlmSettings, choice: ComposerProviderChoice): Boolean {
+        if (settings.provider.runtime != LlmRuntime.LOCAL_ON_DEVICE) return true
+        return when (val state = localRuntimeState.value) {
+            is LocalRuntimeState.Healthy -> true
+            is LocalRuntimeState.Initializing,
+            is LocalRuntimeState.Degraded,
+            is LocalRuntimeState.Unreachable -> {
+                if (choice == ComposerProviderChoice.LOCAL) {
+                    _error.postValue("Local runtime blocked request. ${state.diagnostic.toUserMessage()}")
+                }
+                false
+            }
+        }
     }
 
     private fun loadAllUsableSettings(): List<LlmSettings> {
@@ -492,9 +865,211 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
             ?: raw.optJSONObject("usageMetadata")?.optInt("totalTokenCount")?.takeIf { it >= 0 }
     }
 
+    private fun PersistedChatSession.toSummary(): ChatSessionSummary {
+        return ChatSessionSummary(
+            sessionId = sessionId,
+            displayName = displayName,
+            createdTimestamp = createdTimestamp,
+            updatedTimestamp = updatedTimestamp,
+            providerLabel = providerLabel,
+            modelLabel = modelLabel,
+            messageCount = messages.size
+        )
+    }
+
+    private fun PersistedChatMessage.toUiMessage(): ChatMessage {
+        val provider = enumValues<LlmProvider>().firstOrNull { it.name == this.provider } ?: LlmProvider.OPENAI
+        val choice = enumValues<ComposerProviderChoice>().firstOrNull { it.name == this.providerChoice }
+            ?: providerToChoice(provider)
+        val compareProviderValue = compareProvider?.let { candidate ->
+            enumValues<LlmProvider>().firstOrNull { it.name == candidate } ?: LlmProvider.OPENAI
+        }
+        val resolvedRole = enumValues<ChatRole>().firstOrNull { it.name == role } ?: ChatRole.MIND
+        val resolvedContent = content.ifBlank {
+            when (resolvedRole) {
+                ChatRole.USER -> prompt
+                else -> response
+            }
+        }
+        return ChatMessage(
+            id = id,
+            role = resolvedRole,
+            actorId = actorId,
+            actorLabel = actorLabel,
+            content = resolvedContent,
+            createdTimestamp = createdTimestamp,
+            isAiGenerated = isAiGenerated,
+            providerChoice = choice,
+            provenance = MessageProvenance(
+                provider = provider,
+                model = model.ifBlank { provider.defaultModel() },
+                toolCalls = toolCalls,
+                latencyMs = latencyMs,
+                promptTokens = promptTokens,
+                completionTokens = completionTokens,
+                totalTokens = totalTokens
+            ),
+            addressedActorIds = addressedActorIds,
+            replyToMessageId = replyToMessageId,
+            prompt = prompt,
+            response = response,
+            compareCandidate = if (compareProviderValue != null && !compareResponse.isNullOrBlank()) {
+                CompareCandidate(
+                    provider = compareProviderValue,
+                    model = compareModel.orEmpty(),
+                    response = compareResponse,
+                    latencyMs = compareLatencyMs,
+                    totalTokens = compareTotalTokens
+                )
+            } else {
+                null
+            }
+        )
+    }
+
+    private fun ChatMessage.toPersistedMessage(): PersistedChatMessage {
+        return PersistedChatMessage(
+            id = id,
+            role = role.name,
+            actorId = actorId,
+            actorLabel = actorLabel,
+            isAiGenerated = isAiGenerated,
+            content = content,
+            addressedActorIds = addressedActorIds,
+            replyToMessageId = replyToMessageId,
+            prompt = prompt.orEmpty(),
+            response = response.orEmpty(),
+            createdTimestamp = createdTimestamp,
+            providerChoice = providerChoice.name,
+            provider = provenance?.provider?.name ?: LlmProvider.OPENAI.name,
+            model = provenance?.model.orEmpty(),
+            toolCalls = provenance?.toolCalls ?: emptyList(),
+            latencyMs = provenance?.latencyMs,
+            promptTokens = provenance?.promptTokens,
+            completionTokens = provenance?.completionTokens,
+            totalTokens = provenance?.totalTokens,
+            compareProvider = compareCandidate?.provider?.name,
+            compareModel = compareCandidate?.model,
+            compareResponse = compareCandidate?.response,
+            compareLatencyMs = compareCandidate?.latencyMs,
+            compareTotalTokens = compareCandidate?.totalTokens
+        )
+    }
+
     private fun refreshAudit() {
         val current = _graph.value ?: return
         _auditResult.value = run_continuity_audit(current, acceptedFindingIds)
+    }
+
+    private fun resolveAndActivateMentionedPersonas(
+        sessionId: String,
+        prompt: String
+    ): PersonaActivationBatch {
+        val addressedPersonaIds = PersonaMentionResolver.resolvePersonaIds(prompt)
+        if (addressedPersonaIds.isEmpty()) {
+            return PersonaActivationBatch()
+        }
+
+        val state = chatSessionRepository.loadState()
+        val activeSession = state.sessions.firstOrNull { it.sessionId == sessionId }
+        val participants = activeSession?.activeParticipants.orEmpty().toMutableSet()
+        val systemMessages = mutableListOf<ChatMessage>()
+
+        addressedPersonaIds.forEach { personaId ->
+            if (participants.contains(personaId)) {
+                return@forEach
+            }
+            val status = personaRuntimeManager.activatePersona(personaId)
+            if (status.phase == PersonaRuntimePhase.ACTIVE) {
+                participants += personaId
+            } else {
+                systemMessages += buildPersonaActivationFailureMessage(personaId, status)
+            }
+        }
+
+        if (participants != activeSession?.activeParticipants.orEmpty().toSet()) {
+            chatSessionRepository.updateActiveParticipants(sessionId, participants)
+        }
+
+        return PersonaActivationBatch(
+            activeParticipants = participants,
+            systemMessages = systemMessages
+        )
+    }
+
+    private fun resolvePersonaManifest(personaId: String): PersonaDeploymentManifest? {
+        val node = _graph.value?.nodes.orEmpty().firstOrNull { candidate ->
+            val alias = candidate.attributes["persona_id"]
+                ?: candidate.attributes["personaId"]
+                ?: candidate.attributes["participant_id"]
+            alias.equals(personaId, ignoreCase = true) ||
+                PersonaMentionResolver.canonicalId(candidate.label) == PersonaMentionResolver.canonicalId(personaId)
+        } ?: return null
+
+        return PersonaDeploymentManifest(
+            personaId = personaId,
+            allowedProviders = parseAllowedProviders(node.attributes["persona_allowed_providers"]),
+            maxOutboundClassification = parseEnum(
+                raw = node.attributes["persona_max_outbound_classification"],
+                values = enumValues()
+            ) ?: DataClassification.SENSITIVE,
+            enforcedPrivacyMode = parseEnum(
+                raw = node.attributes["persona_privacy_mode"],
+                values = enumValues()
+            ),
+            fallbackOrder = parseEnum(
+                raw = node.attributes["persona_fallback_order"],
+                values = enumValues()
+            ),
+            allowTools = node.attributes["persona_allow_tools"]?.toBooleanStrictOrNull() ?: true
+        )
+    }
+
+    private fun parseAllowedProviders(raw: String?): Set<LlmProvider> {
+        if (raw.isNullOrBlank()) return emptySet()
+        return raw.split(",")
+            .asSequence()
+            .map { token -> token.trim() }
+            .mapNotNull { token ->
+                enumValues<LlmProvider>().firstOrNull { provider ->
+                    provider.name.equals(token, ignoreCase = true)
+                }
+            }
+            .toSet()
+    }
+
+    private fun <T : Enum<T>> parseEnum(raw: String?, values: Array<T>): T? {
+        if (raw.isNullOrBlank()) return null
+        return values.firstOrNull { value -> value.name.equals(raw.trim(), ignoreCase = true) }
+    }
+
+    private fun buildPersonaActivationFailureMessage(
+        personaId: String,
+        status: com.kaleaon.mnxmindmaker.persona.runtime.PersonaRuntimeStatus
+    ): ChatMessage {
+        val error = status.lastError
+        val errorCode = error?.code ?: PersonaRuntimeErrorCode.INTERNAL_ERROR
+        val payload = buildMap<String, Any> {
+            put("event", "persona_activation_failed")
+            put("persona_id", personaId)
+            put("phase", status.phase.name)
+            put("error_code", errorCode.name)
+            put("reason", error?.message ?: "Activation failed")
+            if (!error?.details.isNullOrEmpty()) {
+                put("details", error?.details.orEmpty())
+            }
+        }
+        return ChatMessage(
+            id = UUID.randomUUID().toString(),
+            prompt = "[system]",
+            response = JSONObject(payload).toString(2),
+            createdTimestamp = System.currentTimeMillis(),
+            providerChoice = ComposerProviderChoice.AUTO,
+            provenance = MessageProvenance(
+                provider = LlmProvider.LOCAL_ON_DEVICE,
+                model = "system"
+            )
+        )
     }
 
     fun clearError() {
@@ -515,6 +1090,28 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
             dimensions = DimensionMapper.defaultDimensions(NodeType.IDENTITY)
         )
         return MindGraph(name = "New Mind", nodes = mutableListOf(identity), edges = mutableListOf())
+    }
+}
+
+private data class PersonaActivationBatch(
+    val activeParticipants: Set<String> = emptySet(),
+    val systemMessages: List<ChatMessage> = emptyList()
+)
+
+internal object PersonaMentionResolver {
+    private val mentionRegex = Regex("""@([A-Za-z0-9_.-]+)""")
+
+    fun resolvePersonaIds(prompt: String): Set<String> {
+        return mentionRegex.findAll(prompt)
+            .map { match -> canonicalId(match.groupValues[1]) }
+            .filter { it.isNotBlank() }
+            .toSet()
+    }
+
+    fun canonicalId(raw: String): String {
+        return raw.trim()
+            .lowercase()
+            .replace(Regex("""[^a-z0-9_.-]"""), "")
     }
 }
 

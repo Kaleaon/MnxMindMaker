@@ -35,6 +35,12 @@ class ToolOrchestrator(
 
         val transcript = mutableListOf<JSONObject>()
         transcript += JSONObject().put("role", "user").put("content", promptModeration.text)
+        val transcript = listOf(JSONObject().put("role", "user").put("content", userPrompt))
+        return run(systemPrompt = systemPrompt, transcript = transcript)
+    }
+
+    suspend fun run(systemPrompt: String, transcript: List<JSONObject>): String {
+        val conversation = transcript.toMutableList()
 
         val textParts = mutableListOf<String>()
         repeat(maxToolRounds) {
@@ -42,7 +48,7 @@ class ToolOrchestrator(
             val turn = providerRouter.chat(
                 settingsChain = settingsChain,
                 systemPrompt = systemPrompt,
-                transcript = transcript,
+                transcript = conversation,
                 tools = registry.specs(),
                 policy = routingPolicy
             )
@@ -82,7 +88,7 @@ class ToolOrchestrator(
                 )
             }
 
-            transcript += JSONObject()
+            conversation += JSONObject()
                 .put("role", "tool")
                 .put("content", toolResults)
         }

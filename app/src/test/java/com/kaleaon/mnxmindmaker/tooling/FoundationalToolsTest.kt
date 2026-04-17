@@ -3,6 +3,7 @@ package com.kaleaon.mnxmindmaker.tooling
 import com.kaleaon.mnxmindmaker.model.MindGraph
 import com.kaleaon.mnxmindmaker.util.memory.MemoryManager
 import com.kaleaon.mnxmindmaker.util.tooling.FoundationalTools
+import com.kaleaon.mnxmindmaker.util.tooling.OutboundOperationQueue
 import com.kaleaon.mnxmindmaker.util.tooling.PolicyDecisionType
 import com.kaleaon.mnxmindmaker.util.tooling.ToolInvocation
 import com.kaleaon.mnxmindmaker.util.tooling.ToolPolicyEngine
@@ -198,6 +199,22 @@ class FoundationalToolsTest {
                     .put("category", "profile")
                     .put("value", "Reach me at jane.doe@example.com")
                     .put("sensitivity", "low")
+    @Test
+    fun `web fetch queues outbound operation when offline`() {
+        val root = createTempDir(prefix = "tooling-test")
+        val queue = OutboundOperationQueue()
+        val tools = FoundationalTools(
+            appRoot = root,
+            scopedDirectories = listOf(root),
+            outboundOperationQueue = queue,
+            isNetworkAvailable = { false }
+        )
+
+        val result = tools.handlers().getValue("web_fetch_search").execute(
+            ToolInvocation(
+                "1",
+                "web_fetch_search",
+                JSONObject().put("mode", "fetch").put("url", "https://example.com")
             ),
             MindGraph()
         )
@@ -231,6 +248,22 @@ class FoundationalToolsTest {
 
         assertEquals("moderation_denied", denied.contentJson.getString("error"))
         assertEquals(null, memoryManager.getMemory("bad-memory"))
+        assertTrue(result.contentJson.getBoolean("queued"))
+        assertEquals(1, queue.pending("web_fetch_search").size)
+    }
+
+    @Test
+    fun `outbound operation queue reconciles successfully`() {
+        val queue = OutboundOperationQueue()
+        queue.enqueue("web_fetch_search", JSONObject().put("mode", "fetch").put("url", "https://example.com"))
+
+        val reconciled = queue.reconcile("web_fetch_search") { queued ->
+            JSONObject().put("id", queued.id).put("status", "done")
+        }
+
+        assertEquals(1, reconciled.size)
+        assertEquals(0, queue.pending("web_fetch_search").size)
+        assertEquals("done", reconciled.first().result?.optString("status"))
     }
 
 }

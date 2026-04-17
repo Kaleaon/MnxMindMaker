@@ -79,6 +79,89 @@ class MemoryRetrievalServiceTest {
         assertEquals(now.toString(), memoryB.attributes["last_revalidated"])
     }
 
+    @Test
+    fun `retrieve blends graph traversal and vector similarity`() {
+        val context = MemoryRetrievalService.RetrievalContext(
+            prompt = "incident response rollback",
+            task = "recovery",
+            queryVector = mapOf("risk" to 1.0f, "stability" to 0.8f)
+        )
+
+        val anchor = memory(
+            id = "anchor",
+            relevance = "0.9",
+            confidence = "0.8",
+            importance = "0.8",
+            dimensions = mapOf("risk" to 0.95f, "stability" to 0.8f)
+        )
+        val connected = memory(
+            id = "connected",
+            relevance = "0.6",
+            confidence = "0.7",
+            importance = "0.75",
+            parentId = "anchor",
+            dimensions = mapOf("risk" to 0.9f, "stability" to 0.78f)
+        )
+        val distant = memory(
+            id = "distant",
+            relevance = "0.61",
+            confidence = "0.7",
+            importance = "0.75",
+            dimensions = mapOf("risk" to -0.8f, "stability" to -0.8f)
+        )
+
+        val retrieved = MemoryRetrievalService.retrieve(
+            memories = listOf(distant, connected, anchor),
+            context = context,
+            limit = 3
+        )
+
+        assertEquals(listOf("anchor", "connected", "distant"), retrieved.map { it.id })
+    }
+
+    @Test
+    fun `policy profile for recovery favors recency and deployment favors importance`() {
+        val recent = memory(
+            id = "recent",
+            relevance = "0.6",
+            confidence = "0.6",
+            importance = "0.4",
+            timestamp = (1_000_000L - (1 * 86_400_000L)).toString()
+        )
+        val oldImportant = memory(
+            id = "old-important",
+            relevance = "0.6",
+            confidence = "0.6",
+            importance = "0.95",
+            timestamp = (1_000_000L - (120 * 86_400_000L)).toString()
+        )
+        val pool = listOf(recent, oldImportant)
+
+        val recoveryRetrieved = MemoryRetrievalService.retrieve(
+            memories = pool,
+            context = MemoryRetrievalService.RetrievalContext(
+                prompt = "rollback",
+                task = "incident",
+                policyProfile = MemoryRetrievalService.RetrievalPolicyProfile.RECOVERY,
+                nowEpochMs = 1_000_000L
+            ),
+            limit = 2
+        )
+        val deploymentRetrieved = MemoryRetrievalService.retrieve(
+            memories = pool,
+            context = MemoryRetrievalService.RetrievalContext(
+                prompt = "release checklist",
+                task = "deploy",
+                policyProfile = MemoryRetrievalService.RetrievalPolicyProfile.DEPLOYMENT,
+                nowEpochMs = 1_000_000L
+            ),
+            limit = 2
+        )
+
+        assertEquals("recent", recoveryRetrieved.first().id)
+        assertEquals("old-important", deploymentRetrieved.first().id)
+    }
+
     private fun memory(
         id: String,
         room: String? = null,
@@ -86,13 +169,18 @@ class MemoryRetrievalServiceTest {
         wing: String? = null,
         relevance: String = "0.75",
         confidence: String = "0.75",
-        sensitivity: String = "low"
+        sensitivity: String = "low",
+        importance: String = "0.5",
+        parentId: String? = null,
+        dimensions: Map<String, Float> = emptyMap(),
+        timestamp: String = System.currentTimeMillis().toString()
     ): MindNode {
         val attributes = mutableMapOf(
             "current_relevance" to relevance,
             "confidence" to confidence,
             "sensitivity" to sensitivity,
-            "timestamp" to System.currentTimeMillis().toString()
+            "importance" to importance,
+            "timestamp" to timestamp
         )
         room?.let { attributes["room"] = it }
         hall?.let { attributes["hall"] = it }
@@ -103,7 +191,9 @@ class MemoryRetrievalServiceTest {
             label = id,
             type = NodeType.MEMORY,
             description = "memory-$id",
-            attributes = attributes
+            attributes = attributes,
+            parentId = parentId,
+            dimensions = dimensions
         )
     }
 }

@@ -9,10 +9,12 @@ import com.kaleaon.mnxmindmaker.util.moderation.ModerationRequest
 import com.kaleaon.mnxmindmaker.util.moderation.ModerationStage
 import com.kaleaon.mnxmindmaker.util.moderation.SensitiveEntityModerationPolicy
 import com.kaleaon.mnxmindmaker.util.tooling.ToolOrchestrator
+import org.json.JSONObject
 import java.util.UUID
 
 data class PromptPipelineRequest(
     val prompt: String,
+    val transcript: List<JSONObject> = emptyList(),
     val task: String = "assist",
     val retrievalLimit: Int = 8,
     val wakeUpContextEnabled: Boolean = false,
@@ -126,6 +128,10 @@ class PromptPipelineEngine(
 
             val orchestrator = orchestratorFactory(tracer, settings)
             val response = orchestrator.run(systemPrompt, moderatedPrompt)
+            val transcript = request.transcript.ifEmpty {
+                listOf(JSONObject().put("role", "user").put("content", request.prompt))
+            }
+            val response = orchestrator.run(systemPrompt = systemPrompt, transcript = transcript)
 
             val trace = tracer.finish()
             traceStore.append(trace)
