@@ -29,6 +29,7 @@ data class PersistedChatMessage(
     val id: String,
     val prompt: String,
     val response: String,
+    val turns: List<PersistedChatTurn> = emptyList(),
     val actorLabel: String = "assistant",
     val role: String = "MIND",
     val actorLabel: String? = null,
@@ -55,6 +56,13 @@ data class PersistedChatMessage(
     val compareResponse: String? = null,
     val compareLatencyMs: Long? = null,
     val compareTotalTokens: Int? = null,
+    val createdTimestamp: Long = System.currentTimeMillis()
+)
+
+@Serializable
+data class PersistedChatTurn(
+    val actor: String,
+    val content: String,
     val createdTimestamp: Long = System.currentTimeMillis()
 )
 

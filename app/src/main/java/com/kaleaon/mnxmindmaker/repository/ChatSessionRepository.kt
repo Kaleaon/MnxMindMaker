@@ -5,6 +5,7 @@ import kotlinx.serialization.SerializationException
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
@@ -13,6 +14,9 @@ import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
+import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.put
 import java.io.File
 import java.util.UUID
@@ -142,6 +146,17 @@ class ChatSessionRepository(
         if (state.sessions.isNotEmpty() && state.activeSessionId.isNotBlank()) return@synchronized state
 
         val now = System.currentTimeMillis()
+        if (state.sessions.isNotEmpty()) {
+            val seededExisting = state.copy(
+                schemaVersion = ChatPersistenceSchema.CURRENT_VERSION,
+                createdTimestamp = state.createdTimestamp.takeIf { it > 0 } ?: now,
+                updatedTimestamp = now,
+                activeSessionId = state.sessions.first().sessionId
+            )
+            saveStateLocked(seededExisting)
+            return@synchronized seededExisting
+        }
+
         val default = PersistedChatSession(
             sessionId = UUID.randomUUID().toString(),
             displayName = "Thread 1",
@@ -173,10 +188,14 @@ class ChatSessionRepository(
             val version = payload[SCHEMA_VERSION_FIELD]?.jsonPrimitive?.intOrNull ?: 1
             val migratedPayload = migratePayload(payload, version)
             val decoded = json.decodeFromString<PersistedChatStore>(migratedPayload.toString())
-            decoded.copy(
+            val normalized = decoded.copy(
                 schemaVersion = ChatPersistenceSchema.CURRENT_VERSION,
                 activeSessionId = decoded.activeSessionId.ifBlank { decoded.sessions.firstOrNull()?.sessionId.orEmpty() }
             )
+            if (normalized != decoded || version != ChatPersistenceSchema.CURRENT_VERSION || migratedPayload != payload) {
+                saveStateLocked(normalized)
+            }
+            normalized
         } catch (_: SerializationException) {
             recoverFromCorruptionLocked()
         } catch (_: IllegalArgumentException) {
@@ -185,6 +204,154 @@ class ChatSessionRepository(
     }
 
     private fun migratePayload(payload: JsonObject, version: Int): JsonObject {
+        var migrated = payload
+        var workingVersion = version
+
+        if (workingVersion < 2) {
+            migrated = migrateV1ToV2(migrated)
+            workingVersion = 2
+        }
+
+        migrated = migratedWithSafeTurns(migrated)
+
+        return if (workingVersion == ChatPersistenceSchema.CURRENT_VERSION) migrated else {
+            buildJsonObject {
+                migrated.forEach { (key, value) -> put(key, value) }
+                put(SCHEMA_VERSION_FIELD, ChatPersistenceSchema.CURRENT_VERSION)
+            }
+        }
+    }
+
+    private fun migrateV1ToV2(payload: JsonObject): JsonObject {
+        val sessions = payload[SESSIONS_FIELD]?.jsonArray ?: JsonArray(emptyList())
+        val migratedSessions = buildJsonArray {
+            sessions.forEach { sessionElement ->
+                val session = sessionElement.jsonObject
+                add(
+                    buildJsonObject {
+                        session.forEach { (key, value) -> put(key, value) }
+                        val messages = session[MESSAGES_FIELD]?.jsonArray ?: JsonArray(emptyList())
+                        putJsonArray(MESSAGES_FIELD) {
+                            messages.forEach { messageElement ->
+                                add(migrateV1MessageToV2(messageElement.jsonObject))
+                            }
+                        }
+                    }
+                )
+            }
+        }
+        return buildJsonObject {
+            payload.forEach { (key, value) -> put(key, value) }
+            put(SCHEMA_VERSION_FIELD, 2)
+            put(SESSIONS_FIELD, migratedSessions)
+        }
+    }
+
+    private fun migrateV1MessageToV2(message: JsonObject): JsonObject {
+        val prompt = message[PROMPT_FIELD]?.jsonPrimitive?.contentOrNull.orEmpty()
+        val response = message[RESPONSE_FIELD]?.jsonPrimitive?.contentOrNull.orEmpty()
+        val created = message[CREATED_TIMESTAMP_FIELD]?.jsonPrimitive?.longOrNull ?: System.currentTimeMillis()
+        val assistantActor = message[PROVIDER_FIELD]
+            ?.jsonPrimitive
+            ?.contentOrNull
+            ?.takeIf { it.isNotBlank() }
+            ?.uppercase()
+            ?: ASSISTANT_ACTOR
+
+        return buildJsonObject {
+            message.forEach { (key, value) -> put(key, value) }
+            putJsonArray(TURNS_FIELD) {
+                if (prompt.isNotBlank()) {
+                    add(
+                        buildJsonObject {
+                            put(ACTOR_FIELD, USER_ACTOR)
+                            put(CONTENT_FIELD, prompt)
+                            put(CREATED_TIMESTAMP_FIELD, created)
+                        }
+                    )
+                }
+                if (response.isNotBlank()) {
+                    add(
+                        buildJsonObject {
+                            put(ACTOR_FIELD, assistantActor)
+                            put(CONTENT_FIELD, response)
+                            put(CREATED_TIMESTAMP_FIELD, created)
+                        }
+                    )
+                }
+            }
+        }
+    }
+
+    private fun migratedWithSafeTurns(payload: JsonObject): JsonObject {
+        val sessions = payload[SESSIONS_FIELD]?.jsonArray ?: return payload
+        val repairedSessions = buildJsonArray {
+            sessions.forEach { sessionElement ->
+                val session = sessionElement.jsonObject
+                val messages = session[MESSAGES_FIELD]?.jsonArray ?: JsonArray(emptyList())
+                add(
+                    buildJsonObject {
+                        session.forEach { (key, value) -> put(key, value) }
+                        putJsonArray(MESSAGES_FIELD) {
+                            messages.forEach { messageElement ->
+                                add(repairMessageTurns(messageElement.jsonObject))
+                            }
+                        }
+                    }
+                )
+            }
+        }
+        return buildJsonObject {
+            payload.forEach { (key, value) -> put(key, value) }
+            put(SESSIONS_FIELD, repairedSessions)
+            put(SCHEMA_VERSION_FIELD, ChatPersistenceSchema.CURRENT_VERSION)
+        }
+    }
+
+    private fun repairMessageTurns(message: JsonObject): JsonObject {
+        val prompt = message[PROMPT_FIELD]?.jsonPrimitive?.contentOrNull.orEmpty()
+        val response = message[RESPONSE_FIELD]?.jsonPrimitive?.contentOrNull.orEmpty()
+        val created = message[CREATED_TIMESTAMP_FIELD]?.jsonPrimitive?.longOrNull ?: System.currentTimeMillis()
+        val assistantActor = message[PROVIDER_FIELD]
+            ?.jsonPrimitive
+            ?.contentOrNull
+            ?.takeIf { it.isNotBlank() }
+            ?.uppercase()
+            ?: ASSISTANT_ACTOR
+        val existingTurns = message[TURNS_FIELD]?.jsonArray
+
+        val hasUsableTurns = existingTurns != null && existingTurns.any { turnElement ->
+            val turn = turnElement.jsonObject
+            val actor = turn[ACTOR_FIELD]?.jsonPrimitive?.contentOrNull
+            val content = turn[CONTENT_FIELD]?.jsonPrimitive?.contentOrNull
+            !actor.isNullOrBlank() && !content.isNullOrBlank()
+        }
+
+        if (hasUsableTurns) return message
+
+        return buildJsonObject {
+            message.forEach { (key, value) -> put(key, value) }
+            putJsonArray(TURNS_FIELD) {
+                if (prompt.isNotBlank()) {
+                    add(
+                        buildJsonObject {
+                            put(ACTOR_FIELD, USER_ACTOR)
+                            put(CONTENT_FIELD, prompt)
+                            put(CREATED_TIMESTAMP_FIELD, created)
+                        }
+                    )
+                }
+                if (response.isNotBlank()) {
+                    add(
+                        buildJsonObject {
+                            put(ACTOR_FIELD, assistantActor)
+                            put(CONTENT_FIELD, response)
+                            put(CREATED_TIMESTAMP_FIELD, created)
+                        }
+                    )
+                }
+            }
+        }
         return migratePayloadForVersion(payload = payload, version = version)
     }
 
@@ -206,6 +373,17 @@ class ChatSessionRepository(
     companion object {
         private const val DEFAULT_FILE_NAME = "chat_sessions.json"
         private const val SCHEMA_VERSION_FIELD = "schemaVersion"
+        private const val SESSIONS_FIELD = "sessions"
+        private const val MESSAGES_FIELD = "messages"
+        private const val TURNS_FIELD = "turns"
+        private const val PROMPT_FIELD = "prompt"
+        private const val RESPONSE_FIELD = "response"
+        private const val PROVIDER_FIELD = "provider"
+        private const val CREATED_TIMESTAMP_FIELD = "createdTimestamp"
+        private const val ACTOR_FIELD = "actor"
+        private const val CONTENT_FIELD = "content"
+        private const val USER_ACTOR = "USER"
+        private const val ASSISTANT_ACTOR = "ASSISTANT"
 
         internal fun migratePayloadForVersion(payload: JsonObject, version: Int): JsonObject {
             if (version >= ChatPersistenceSchema.CURRENT_VERSION) return payload
