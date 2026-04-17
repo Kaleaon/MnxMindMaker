@@ -55,7 +55,7 @@ class SkillManifestValidatorTest {
     }
 
     @Test
-    fun `rejects playbook with blank or missing steps`() {
+    fun `rejects playbook with blank steps`() {
         val json = JSONObject(
             """
             {
@@ -87,5 +87,39 @@ class SkillManifestValidatorTest {
         assertEquals(null, manifest)
         assertFalse(issues.isEmpty())
         assertTrue(issues.any { it.message.contains("playbook.steps") })
+    }
+
+    @Test
+    fun `accepts playbook when steps are omitted`() {
+        val json = JSONObject(
+            """
+            {
+              "pack_id": "playbook-pack",
+              "version": "1.0.0",
+              "enabled": true,
+              "tools": [
+                {
+                  "name": "graph_overview",
+                  "description": "Get graph summary",
+                  "handler_id": "graph.read.get_summary",
+                  "input_schema": {
+                    "type": "object",
+                    "properties": {},
+                    "additionalProperties": false
+                  },
+                  "playbook": {
+                    "summary": "Optional step list"
+                  }
+                }
+              ]
+            }
+            """.trimIndent()
+        )
+
+        val (manifest, issues) = validator.validate("skills/optional-steps.json", json)
+
+        assertTrue(issues.isEmpty())
+        assertNotNull(manifest)
+        assertTrue(manifest!!.tools.first().playbook!!.steps.isEmpty())
     }
 }

@@ -62,8 +62,14 @@ class SkillManifestValidator(
 
             val riskObj = toolObj.optJSONObject("risk")
             val risk = parseRisk(source, "tools[$i].risk", riskObj, issues)
-            val playbookObj = toolObj.optJSONObject("playbook")
-            val playbook = parsePlaybook(source, "tools[$i].playbook", playbookObj, issues)
+            val playbook = when {
+                !toolObj.has("playbook") -> null
+                toolObj.opt("playbook") !is JSONObject -> {
+                    issues += issue(source, "tools[$i].playbook must be an object")
+                    null
+                }
+                else -> parsePlaybook(source, "tools[$i].playbook", toolObj.getJSONObject("playbook"), issues)
+            }
 
             if (name.isNotBlank() && description.isNotBlank() && handlerId.isNotBlank() && inputSchema != null) {
                 tools += ManifestToolSpec(
@@ -131,30 +137,32 @@ class SkillManifestValidator(
         val summary = playbookObj.optString("summary").trim().ifBlank { null }
         val sourceRef = playbookObj.optString("source").trim().ifBlank { null }
 
-        val stepsJson = playbookObj.optJSONArray("steps")
-        if (stepsJson == null) {
-            issues += issue(source, "$path.steps must be an array")
-            return null
-        }
-
         val steps = mutableListOf<String>()
-        for (idx in 0 until stepsJson.length()) {
-            val raw = stepsJson.opt(idx)
-            if (raw !is String) {
-                issues += issue(source, "$path.steps[$idx] must be a string")
-                continue
+        if (playbookObj.has("steps")) {
+            val stepsJson = playbookObj.optJSONArray("steps")
+            if (stepsJson == null) {
+                issues += issue(source, "$path.steps must be an array when present")
+                return null
             }
-            val step = raw.trim()
-            if (step.isBlank()) {
-                issues += issue(source, "$path.steps[$idx] must not be blank")
-                continue
-            }
-            steps += step
-        }
 
-        if (steps.isEmpty()) {
-            issues += issue(source, "$path.steps must include at least one non-empty step")
-            return null
+            for (idx in 0 until stepsJson.length()) {
+                val raw = stepsJson.opt(idx)
+                if (raw !is String) {
+                    issues += issue(source, "$path.steps[$idx] must be a string")
+                    continue
+                }
+                val step = raw.trim()
+                if (step.isBlank()) {
+                    issues += issue(source, "$path.steps[$idx] must not be blank")
+                    continue
+                }
+                steps += step
+            }
+
+            if (steps.isEmpty()) {
+                issues += issue(source, "$path.steps must include at least one non-empty step")
+                return null
+            }
         }
 
         return ManifestPlaybook(
