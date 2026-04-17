@@ -266,9 +266,17 @@ class SettingsFragment : Fragment() {
             hint = getString(R.string.link_expiry_hint)
             inputType = android.text.InputType.TYPE_CLASS_NUMBER
         }
+        val clientIdInput = EditText(context).apply {
+            hint = getString(R.string.link_oauth_client_id_hint)
+        }
+        val clientSecretInput = EditText(context).apply {
+            hint = getString(R.string.link_oauth_client_secret_hint)
+        }
         layout.addView(accessInput)
         layout.addView(refreshInput)
         layout.addView(expiresInput)
+        layout.addView(clientIdInput)
+        layout.addView(clientSecretInput)
 
         AlertDialog.Builder(context)
             .setTitle(getString(R.string.link_provider_title, provider.displayName))
@@ -277,9 +285,18 @@ class SettingsFragment : Fragment() {
                 val access = accessInput.text.toString().trim()
                 val refresh = refreshInput.text.toString().trim()
                 val expires = expiresInput.text.toString().trim().toLongOrNull()
+                val clientId = clientIdInput.text.toString().trim()
+                val clientSecret = clientSecretInput.text.toString().trim()
                 if (access.isBlank()) {
                     Snackbar.make(binding.root, getString(R.string.link_access_required), Snackbar.LENGTH_SHORT).show()
+                } else if (clientId.isNotBlank() xor clientSecret.isNotBlank()) {
+                    Snackbar.make(binding.root, getString(R.string.link_oauth_client_pair_required), Snackbar.LENGTH_LONG).show()
+                } else if (refresh.isNotBlank() && clientId.isBlank() && clientSecret.isBlank() && !externalAccountRepository.hasOAuthClientConfig(provider)) {
+                    Snackbar.make(binding.root, getString(R.string.link_oauth_client_required_for_refresh, provider.displayName), Snackbar.LENGTH_LONG).show()
                 } else {
+                    if (clientId.isNotBlank() && clientSecret.isNotBlank()) {
+                        externalAccountRepository.saveOAuthClientConfig(provider, clientId, clientSecret)
+                    }
                     externalAccountRepository.linkAccount(provider, access, refresh, expires)
                     updateLinkedAccountsStatus()
                     Snackbar.make(binding.root, getString(R.string.link_success, provider.displayName), Snackbar.LENGTH_SHORT).show()
@@ -294,8 +311,11 @@ class SettingsFragment : Fragment() {
         updateLinkedAccountsStatus()
         val message = when (status) {
             RefreshStatus.SUCCESS -> getString(R.string.link_refresh_success, provider.displayName)
+            RefreshStatus.MISSING_CLIENT_CONFIG -> getString(R.string.link_refresh_missing_client_config, provider.displayName)
+            RefreshStatus.MISSING_REFRESH_TOKEN -> getString(R.string.link_refresh_missing_refresh_token, provider.displayName)
             RefreshStatus.PROVIDER_REJECTED -> getString(R.string.link_refresh_provider_rejected, provider.displayName)
-            else -> getString(R.string.link_refresh_failed, provider.displayName)
+            RefreshStatus.NETWORK_ERROR -> getString(R.string.link_refresh_network_error, provider.displayName)
+            RefreshStatus.INVALID_RESPONSE -> getString(R.string.link_refresh_invalid_response, provider.displayName)
         }
         Snackbar.make(binding.root, message, Snackbar.LENGTH_SHORT).show()
     }
@@ -318,6 +338,11 @@ class SettingsFragment : Fragment() {
     }
 
     private fun updateLinkedAccountsStatus() {
+        val claudeRefreshEnabled = externalAccountRepository.canRefreshLinkedAccount(ExternalProvider.CLAUDE)
+        val chatGptRefreshEnabled = externalAccountRepository.canRefreshLinkedAccount(ExternalProvider.CHATGPT)
+        binding.btnRefreshClaude.isEnabled = claudeRefreshEnabled
+        binding.btnRefreshChatgpt.isEnabled = chatGptRefreshEnabled
+
         val lines = externalAccountRepository.allLinkStates().map { link ->
             if (!link.linked) {
                 getString(R.string.link_status_not_linked, link.provider.displayName)
@@ -342,7 +367,18 @@ class SettingsFragment : Fragment() {
                 )
             }
         }
+        val refreshHints = listOf(
+            if (!claudeRefreshEnabled) getString(R.string.link_refresh_disabled_reason, ExternalProvider.CLAUDE.displayName) else null,
+            if (!chatGptRefreshEnabled) getString(R.string.link_refresh_disabled_reason, ExternalProvider.CHATGPT.displayName) else null
+        ).filterNotNull()
         binding.tvLinkedAccountsStatus.text = lines.joinToString(separator = "\n")
+            .plus(
+                if (refreshHints.isNotEmpty()) {
+                    "\n" + refreshHints.joinToString(separator = "\n")
+                } else {
+                    ""
+                }
+            )
     }
 
     // -- Ktheme theme picker --------------------------------------------------

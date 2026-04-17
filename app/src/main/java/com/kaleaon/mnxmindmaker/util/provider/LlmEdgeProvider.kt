@@ -21,6 +21,7 @@ class LlmEdgeProvider(
 ) : AssistantProvider {
 
     override val id: String = "llmedge"
+    override val capabilities: ProviderCapabilities = ProviderCapabilities(reportsTokenUsage = true)
 
     override fun supports(settings: LlmSettings): Boolean = settings.provider == LlmProvider.LOCAL_ON_DEVICE
 

@@ -4,10 +4,12 @@ import com.kaleaon.mnxmindmaker.model.LlmSettings
 import com.kaleaon.mnxmindmaker.model.MindNode
 import com.kaleaon.mnxmindmaker.util.MemoryRetrievalService
 import com.kaleaon.mnxmindmaker.util.tooling.ToolOrchestrator
+import org.json.JSONObject
 import java.util.UUID
 
 data class PromptPipelineRequest(
     val prompt: String,
+    val transcript: List<JSONObject> = emptyList(),
     val task: String = "assist",
     val retrievalLimit: Int = 8,
     val wakeUpContextEnabled: Boolean = false,
@@ -100,7 +102,10 @@ class PromptPipelineEngine(
             tracer.recordPromptPipeline("assembled_system_prompt", systemPrompt)
 
             val orchestrator = orchestratorFactory(tracer, settings)
-            val response = orchestrator.run(systemPrompt, request.prompt)
+            val transcript = request.transcript.ifEmpty {
+                listOf(JSONObject().put("role", "user").put("content", request.prompt))
+            }
+            val response = orchestrator.run(systemPrompt = systemPrompt, transcript = transcript)
 
             val trace = tracer.finish()
             traceStore.append(trace)

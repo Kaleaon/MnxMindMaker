@@ -116,6 +116,27 @@ class ChatSessionRepository(
         updated
     }
 
+    fun updateActiveParticipants(sessionId: String, participantIds: Set<String>): PersistedChatStore = synchronized(lock) {
+        val state = loadStateLocked()
+        val now = System.currentTimeMillis()
+        val normalized = participantIds
+            .asSequence()
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .distinct()
+            .sorted()
+            .toList()
+        val updatedSessions = state.sessions.map { session ->
+            if (session.sessionId != sessionId) session else session.copy(
+                updatedTimestamp = now,
+                activeParticipants = normalized
+            )
+        }
+        val updated = state.copy(updatedTimestamp = now, sessions = updatedSessions)
+        saveStateLocked(updated)
+        updated
+    }
+
     fun ensureDefaultSession(): PersistedChatStore = synchronized(lock) {
         val state = loadStateLocked()
         if (state.sessions.isNotEmpty() && state.activeSessionId.isNotBlank()) return@synchronized state

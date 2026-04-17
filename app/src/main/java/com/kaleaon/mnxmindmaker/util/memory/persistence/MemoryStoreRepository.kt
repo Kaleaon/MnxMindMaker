@@ -1,6 +1,7 @@
 package com.kaleaon.mnxmindmaker.util.memory.persistence
 
 import android.content.Context
+import com.kaleaon.mnxmindmaker.security.EncryptedArtifactStore
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -15,6 +16,8 @@ class MemoryStoreRepository(
     private val baseFileName: String = DEFAULT_FILE_STEM,
     private val remoteSyncLayer: RemoteMemorySyncLayer? = null
 ) : MemoryStore {
+
+    private val encryptedStore = EncryptedArtifactStore(context)
 
     private val json = Json {
         ignoreUnknownKeys = true
@@ -308,6 +311,7 @@ class MemoryStoreRepository(
         }
 
         return try {
+            val raw = String(encryptedStore.readDecryptedBytes(storageFile, "memory_index"))
             val raw = file.readText()
             val payload = json.parseToJsonElement(raw).jsonObject
             val payloadVersion = payload[SCHEMA_VERSION_FIELD]?.jsonPrimitive?.intOrNull ?: 1
@@ -322,6 +326,9 @@ class MemoryStoreRepository(
         }
     }
 
+    private fun saveStateLocked(state: PersistedMemoryStore) {
+        storageFile.parentFile?.mkdirs()
+        encryptedStore.writeEncryptedBytes(storageFile, json.encodeToString(state).toByteArray(), "memory_index")
     private fun defaultGraphStore(now: Long = System.currentTimeMillis()): GraphMemoryStore {
         return GraphMemoryStore(
             schemaVersion = SCHEMA_VERSION,

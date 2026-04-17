@@ -11,6 +11,7 @@ import com.kaleaon.mnxmindmaker.util.provider.RoutingPolicy
 import com.kaleaon.mnxmindmaker.util.tooling.ToolOrchestrator
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
+import org.json.JSONObject
 
 /**
  * Coordinates persona activation + invocation while enforcing governance and deployment constraints.
@@ -27,6 +28,15 @@ class PersonaRuntimeManager(
     private val activePersonas = ConcurrentHashMap<String, ActivePersona>()
 
     fun activatePersona(personaId: String): PersonaRuntimeStatus {
+        activePersonas[personaId]?.let { existing ->
+            return PersonaRuntimeStatus(
+                personaId = personaId,
+                phase = PersonaRuntimePhase.ACTIVE,
+                activeProviders = existing.governedChain.map { it.provider },
+                governance = existing.governanceDecision,
+                updatedAtEpochMs = nowMs()
+            )
+        }
         updateStatus(personaId, PersonaRuntimePhase.ACTIVATING)
 
         val manifest = manifestProvider(personaId)
@@ -91,6 +101,11 @@ class PersonaRuntimeManager(
     }
 
     suspend fun invokePersona(personaId: String, userInput: String): PersonaInvocationResult {
+        val transcript = listOf(JSONObject().put("role", "user").put("content", userInput))
+        return invokePersona(personaId = personaId, transcript = transcript)
+    }
+
+    suspend fun invokePersona(personaId: String, transcript: List<JSONObject>): PersonaInvocationResult {
         val active = activePersonas[personaId]
             ?: throw PersonaRuntimeException(
                 PersonaRuntimeError(
@@ -111,7 +126,7 @@ class PersonaRuntimeManager(
             val orchestrator = toolOrchestratorFactory(active.governedChain, routingPolicy, invocationTracer)
             val output = orchestrator.run(
                 systemPrompt = buildSystemPrompt(active.manifest),
-                userPrompt = userInput
+                transcript = transcript
             )
             val status = PersonaRuntimeStatus(
                 personaId = personaId,
