@@ -27,6 +27,7 @@ enum class ChatRole {
     MIND,
     SYSTEM
 }
+
 data class FailoverEvent(
     val reasonCode: String,
     val message: String
@@ -34,17 +35,12 @@ data class FailoverEvent(
 
 data class ChatMessage(
     val id: String,
-    val role: ChatRole,
-    val actorId: String,
-    val actorLabel: String,
-    val content: String,
-    val createdTimestamp: Long,
     val role: ChatRole = ChatRole.MIND,
-    val actorLabel: String? = null,
+    val actorId: String = "mind",
+    val actorLabel: String = "Mind",
+    val content: String = "",
+    val createdTimestamp: Long = System.currentTimeMillis(),
     val isAiGenerated: Boolean = true,
-    val providerChoice: ComposerProviderChoice,
-    val provenance: MessageProvenance,
-    val compareCandidate: CompareCandidate? = null
     val providerChoice: ComposerProviderChoice = ComposerProviderChoice.AUTO,
     val provenance: MessageProvenance? = null,
     val addressedActorIds: List<String>? = null,
@@ -54,12 +50,6 @@ data class ChatMessage(
     val prompt: String? = null,
     val response: String? = null
 )
-
-enum class ChatRole {
-    USER,
-    MIND,
-    SYSTEM
-}
 
 data class ChatSessionSummary(
     val sessionId: String,
