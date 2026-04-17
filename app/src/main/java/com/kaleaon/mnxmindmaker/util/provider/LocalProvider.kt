@@ -2,6 +2,7 @@ package com.kaleaon.mnxmindmaker.util.provider
 
 import com.kaleaon.mnxmindmaker.model.LlmProvider
 import com.kaleaon.mnxmindmaker.model.LlmSettings
+import com.kaleaon.mnxmindmaker.model.LocalRuntimeControls
 import com.kaleaon.mnxmindmaker.util.LlmApiException
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -30,7 +31,16 @@ class LocalProvider(
             systemPrompt = request.systemPrompt,
             transcript = request.transcript,
             tools = request.tools
-        )
+        ).apply {
+            if (request.settings.provider == LlmProvider.LOCAL_ON_DEVICE) {
+                put("extra_body", JSONObject().apply {
+                    if (request.settings.localModelPath.isNotBlank()) {
+                        put("local_model_path", request.settings.localModelPath)
+                    }
+                    put("runtime_hints", request.settings.runtimeControls.toRuntimeHints())
+                })
+            }
+        }
 
         val httpRequest = Request.Builder()
             .url("${request.settings.baseUrl}/chat/completions")
@@ -70,4 +80,11 @@ class LocalProvider(
             .writeTimeout(20, TimeUnit.SECONDS)
             .build()
     }
+
+    private fun LocalRuntimeControls.toRuntimeHints(): JSONObject = JSONObject()
+        .put("compute_backend", computeBackend.name.lowercase())
+        .put("context_window_tokens", contextWindowTokens)
+        .put("quantization_profile", quantizationProfile)
+        .put("max_ram_mb", maxRamMb)
+        .put("max_vram_mb", maxVramMb)
 }

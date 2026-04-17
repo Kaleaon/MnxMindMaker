@@ -37,7 +37,7 @@ class ExternalAccountRepository(context: Context) {
         }
         if (expiresAt != null) prefs.edit().putLong(expiryKey(provider), expiresAt).apply()
 
-        val metadata = detector.detect(provider)
+        val metadata = detector.detect(provider, accessToken)
         persistCapabilities(provider, metadata)
         authRepository.setIdentityMode(IdentityMode.EXTERNAL_LINKED)
         return getLinkState(provider)
@@ -99,7 +99,7 @@ class ExternalAccountRepository(context: Context) {
             prefs.edit().putLong(expiryKey(provider), expiryFromNow(System.currentTimeMillis(), seconds)).apply()
         }
 
-        val metadata = detector.detect(provider)
+        val metadata = detector.detect(provider, payload.accessToken)
         persistCapabilities(provider, metadata)
         return RefreshStatus.SUCCESS
     }

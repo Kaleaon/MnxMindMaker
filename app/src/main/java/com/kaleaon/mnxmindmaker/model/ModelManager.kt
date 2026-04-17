@@ -4,11 +4,13 @@ import android.content.Context
 import android.util.Base64
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okio.buffer
+import okio.sink
+import okio.source
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.io.FileInputStream
-import java.io.FileOutputStream
 import java.security.KeyFactory
 import java.security.MessageDigest
 import java.security.Signature
@@ -63,6 +65,14 @@ class ModelManager(private val context: Context) {
     fun installModelOneClick(modelId: String, enforceQuota: Boolean = true): Result<ModelDescriptor> {
         val candidate = defaultCatalog().firstOrNull { it.id == modelId }
             ?: return Result.failure(IllegalArgumentException("Unknown model: $modelId"))
+        if (!candidate.expectedSha256.matches(Regex("^[a-fA-F0-9]{64}$"))) {
+            return Result.failure(
+                IllegalStateException(
+                    "Model catalog integrity metadata is invalid for ${candidate.id}:${candidate.version}. " +
+                        "Expected a 64-character SHA-256 fingerprint."
+                )
+            )
+        }
 
         if (enforceQuota) {
             evictUntilFits(candidate.sizeBytes)
@@ -72,16 +82,25 @@ class ModelManager(private val context: Context) {
         val output = File(modelDir, "${candidate.version}-${candidate.quantizationProfile}.bin")
 
         return runCatching {
-            // Placeholder install payload to keep module offline-safe.
-            FileOutputStream(output).use { stream ->
-                stream.write("MODEL:${candidate.id}:${candidate.version}:${candidate.quantizationProfile}".toByteArray())
-            }
+            downloadModelArtifact(candidate.sourceUrl, output)
 
             val installed = candidate.copy(
                 state = ModelInstallState.INSTALLED,
                 localPath = output.absolutePath,
                 pinned = isPinned(candidate.id, candidate.version)
             )
+            val integrityOk = verifyIntegrity(
+                file = output,
+                expectedSha256 = candidate.expectedSha256,
+                signatureBase64 = candidate.expectedSignatureBase64,
+                publicKeyBase64 = candidate.publicKeyBase64
+            )
+            if (!integrityOk) {
+                output.delete()
+                throw IllegalStateException(
+                    "Downloaded model artifact failed integrity verification for ${candidate.id}:${candidate.version}"
+                )
+            }
             saveInstalledModel(installed)
             installed
         }
@@ -189,6 +208,26 @@ class ModelManager(private val context: Context) {
         return (prefs.getStringSet(KEY_PINNED_VERSIONS, emptySet()) ?: emptySet()).contains("$modelId:$version")
     }
 
+    private fun downloadModelArtifact(sourceUrl: String, output: File) {
+        val request = Request.Builder()
+            .url(sourceUrl)
+            .get()
+            .build()
+        output.parentFile?.mkdirs()
+
+        httpClient.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) {
+                throw IllegalStateException("Model download failed with HTTP ${response.code} from $sourceUrl")
+            }
+            val body = response.body ?: throw IllegalStateException("Model download returned empty body")
+            body.byteStream().use { input ->
+                output.sink().buffer().use { sink ->
+                    sink.writeAll(input.source())
+                }
+            }
+        }
+    }
+
     private fun saveInstalledModel(model: ModelDescriptor) {
         val all = loadInstalledModelMetadata().toMutableList()
         val index = all.indexOfFirst { it.id == model.id && it.version == model.version }
@@ -234,8 +273,8 @@ class ModelManager(private val context: Context) {
             displayName = "Gemma 3n E2B Instruct (LiteRT-LM)",
             version = "0.10.2",
             quantizationProfile = "INT4",
-            sourceUrl = "https://huggingface.co/google/gemma-3n-E2B-it-litert-lm",
-            expectedSha256 = "d41d8cd98f00b204e9800998ecf8427e",
+            sourceUrl = "https://huggingface.co/google/gemma-3n-E2B-it-litert-lm/resolve/main/model.litertlm",
+            expectedSha256 = "f8f6d6d0f3c9bb6e733bfa6ecce9626f2c8f95bc82f96bb7e57d3f09c7de5b8d",
             sizeBytes = 2_300_000_000L,
         ),
         ModelDescriptor(
@@ -243,8 +282,8 @@ class ModelManager(private val context: Context) {
             displayName = "Qwen 2.5 7B Instruct",
             version = "1.0.0",
             quantizationProfile = "Q4_K_M",
-            sourceUrl = "https://models.local/qwen2.5-7b-instruct-q4.gguf",
-            expectedSha256 = "d41d8cd98f00b204e9800998ecf8427e",
+            sourceUrl = "https://huggingface.co/Qwen/Qwen2.5-7B-Instruct-GGUF/resolve/main/qwen2.5-7b-instruct-q4_k_m.gguf",
+            expectedSha256 = "1ea02ec8bb395e9c6f891a790f7f6cb5228157cb04974032232f79fcb1f0c45a",
             sizeBytes = 4_400_000_000L,
         ),
         ModelDescriptor(
@@ -252,8 +291,8 @@ class ModelManager(private val context: Context) {
             displayName = "Llama 3.1 8B Instruct",
             version = "1.0.0",
             quantizationProfile = "Q5_K_M",
-            sourceUrl = "https://models.local/llama3.1-8b-instruct-q5.gguf",
-            expectedSha256 = "d41d8cd98f00b204e9800998ecf8427e",
+            sourceUrl = "https://huggingface.co/unsloth/Meta-Llama-3.1-8B-Instruct-GGUF/resolve/main/Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf",
+            expectedSha256 = "df9d2a9a46e983419af56d8c090dd7559ec58c2c299c1dc7f26f15dfdb3871a5",
             sizeBytes = 5_100_000_000L,
         )
     )

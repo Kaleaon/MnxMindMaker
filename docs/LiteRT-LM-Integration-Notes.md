@@ -8,8 +8,19 @@ Repository reference: <https://github.com/google-ai-edge/LiteRT-LM>.
 
 ## Runtime model
 
-MnxMindMaker currently routes chat through an OpenAI-compatible local endpoint and tags local-runtime
-requests with `extra_body.runtime = "litert-lm"` when LiteRT-LM is selected in Settings.
+MnxMindMaker supports two LiteRT-LM integration paths:
+
+1. **Bridge mode (default):** routes chat through an OpenAI-compatible local endpoint and tags
+   local-runtime requests with `extra_body.runtime = "litert-lm"`.
+2. **Native in-process mode (optional):** enabled when Base URL is set to
+   `inprocess://litert-lm` and an optional runtime bridge class is available.
+
+For both paths, runtime hints are included in request payloads:
+- `extra_body.runtime_hints.compute_backend` (`cpu`/`gpu`/`npu`/`auto`)
+- `extra_body.runtime_hints.context_window_tokens`
+- `extra_body.runtime_hints.quantization_profile`
+- `extra_body.runtime_hints.max_ram_mb`
+- `extra_body.runtime_hints.max_vram_mb`
 
 This enables bridge runtimes to adapt request handling while keeping existing provider routing,
 privacy policy checks, and deploy flows intact.
@@ -18,7 +29,10 @@ privacy policy checks, and deploy flows intact.
 
 1. In **Settings → LLM Provider**, choose **Local On-Device Runtime**.
 2. Set **Local Runtime Engine** = `LiteRT-LM`.
-3. Set **Base URL** to your LiteRT-LM bridge endpoint.
+3. Choose runtime path:
+   - **Bridge mode:** set **Base URL** to your LiteRT-LM bridge endpoint.
+   - **Native mode:** set **Base URL** to `inprocess://litert-lm` and include a compatible
+     optional native bridge module.
 4. Set **Model** and **Local Model Path** (typically a `.litertlm` package or bridge-resolved alias).
 5. Run **preflight diagnostics** and confirm the `models` probe succeeds.
 
