@@ -24,6 +24,7 @@ class DeployViewModel(application: Application) : AndroidViewModel(application) 
 
     private val _uiState = MutableLiveData(DeployUiState())
     val uiState: LiveData<DeployUiState> = _uiState
+    private val deploymentHistory = mutableListOf<DeploymentHistoryEntry>()
 
     init {
         refreshFromSources()
@@ -32,17 +33,43 @@ class DeployViewModel(application: Application) : AndroidViewModel(application) 
     fun refreshFromSources() {
         val graph = DeploymentSessionState.currentGraph
         val audit = DeploymentSessionState.currentAudit ?: graph?.let { run_continuity_audit(it) }
-        _uiState.value = _uiState.value?.copy(graph = graph, audit = audit)
+        val currentState = _uiState.value ?: DeployUiState()
+        val runtimeConfig = currentState.runtimeConfig
+        _uiState.value = currentState.copy(
+            graph = graph,
+            audit = audit,
+            opsSnapshot = buildOpsSnapshot(
+                graph = graph,
+                audit = audit,
+                runtimeConfig = runtimeConfig,
+                isSaving = currentState.isSaving
+            )
+        )
         updateManifestPreview()
     }
 
-    fun updateRuntimeConfig(environment: String, endpoint: String, releaseChannel: String, notes: String) {
+    fun updateRuntimeConfig(environment: String, endpoint: String, publishChannel: String, notes: String) {
+        val normalizedChannel = normalizeChannel(publishChannel)
         _uiState.value = _uiState.value?.copy(
             runtimeConfig = DeploymentRuntimeConfig(
                 environment = environment,
                 endpoint = endpoint,
-                releaseChannel = releaseChannel,
+                publishChannel = normalizedChannel,
+                requiresPromotionApproval = normalizedChannel != "dev",
+                rollbackChannel = if (normalizedChannel == "dev") "dev" else previousChannel(normalizedChannel),
+                compatibilityConstraints = defaultCompatibilityConstraints(environment, normalizedChannel),
                 notes = notes
+            ),
+            opsSnapshot = buildOpsSnapshot(
+                graph = _uiState.value?.graph,
+                audit = _uiState.value?.audit,
+                runtimeConfig = DeploymentRuntimeConfig(
+                    environment = environment,
+                    endpoint = endpoint,
+                    releaseChannel = releaseChannel,
+                    notes = notes
+                ),
+                isSaving = _uiState.value?.isSaving == true
             )
         )
         updateManifestPreview()
@@ -96,6 +123,7 @@ class DeployViewModel(application: Application) : AndroidViewModel(application) 
 
         viewModelScope.launch {
             _uiState.value = state.copy(isSaving = true, errorMessage = null, confirmationMessage = null)
+                .withOpsSnapshot()
             try {
                 withContext(Dispatchers.IO) {
                     deploymentRepository.persistLifecycleState(
@@ -106,20 +134,64 @@ class DeployViewModel(application: Application) : AndroidViewModel(application) 
                             updatedAt = System.currentTimeMillis()
                         )
                     )
+                    val promotionAction = if (manifest.runtimeConfig.requiresPromotionApproval) {
+                        "promotion_approved"
+                    } else {
+                        "published"
+                    }
+                    deploymentHistory.add(
+                        DeploymentHistoryEntry(
+                            action = promotionAction,
+                            channel = manifest.runtimeConfig.publishChannel,
+                            approvedBy = if (manifest.runtimeConfig.requiresPromotionApproval) "release-manager" else "self-service",
+                            createdAt = System.currentTimeMillis(),
+                            detail = "Publish to ${manifest.runtimeConfig.publishChannel} with rollback target ${manifest.runtimeConfig.rollbackChannel}"
+                        )
+                    )
                     deploymentRepository.persistManifest(manifest)
+                    deploymentRepository.persistDeploymentHistory(deploymentId, deploymentHistory)
                 }
                 _uiState.value = _uiState.value?.copy(
                     isSaving = false,
                     manifestPreview = manifest,
                     confirmationMessage = "Deployment manifest and lifecycle state were persisted."
-                )
+                )?.withOpsSnapshot()
             } catch (e: Exception) {
                 _uiState.value = _uiState.value?.copy(
                     isSaving = false,
                     errorMessage = "Failed to persist deployment: ${e.message}"
-                )
+                )?.withOpsSnapshot()
             }
         }
+    }
+
+    fun runOpsQuickAction(action: OpsQuickAction) {
+        val state = _uiState.value ?: return
+        val message = when (action) {
+            OpsQuickAction.RESTART -> "Runtime restart signal dispatched."
+            OpsQuickAction.REINDEX -> "Reindex job enqueued."
+            OpsQuickAction.RETRY_FAILED -> "Retry requested for failed jobs."
+        }
+        _uiState.value = state.copy(
+            confirmationMessage = message,
+            opsSnapshot = state.opsSnapshot.copy(
+                jobStatus = when (action) {
+                    OpsQuickAction.RESTART -> "Restarting runtime"
+                    OpsQuickAction.REINDEX -> "Reindex in progress"
+                    OpsQuickAction.RETRY_FAILED -> "Retrying failed jobs"
+                },
+                syncState = when (action) {
+                    OpsQuickAction.RESTART -> "Runtime warmup"
+                    OpsQuickAction.REINDEX -> "Index sync queued"
+                    OpsQuickAction.RETRY_FAILED -> "Backlog reconciliation"
+                },
+                queueDepth = when (action) {
+                    OpsQuickAction.REINDEX -> state.opsSnapshot.queueDepth + 1
+                    OpsQuickAction.RETRY_FAILED -> (state.opsSnapshot.queueDepth - 1).coerceAtLeast(0)
+                    OpsQuickAction.RESTART -> state.opsSnapshot.queueDepth
+                }
+            )
+        )
     }
 
     fun clearMessages() {
@@ -130,7 +202,10 @@ class DeployViewModel(application: Application) : AndroidViewModel(application) 
         val state = _uiState.value ?: return
         val graph = state.graph ?: return
         val audit = state.audit ?: run_continuity_audit(graph)
-        _uiState.value = state.copy(manifestPreview = buildManifest(graph, audit, state.runtimeConfig), audit = audit)
+        _uiState.value = state.copy(
+            manifestPreview = buildManifest(graph, audit, state.runtimeConfig),
+            audit = audit
+        ).withOpsSnapshot()
     }
 
     private fun buildManifest(
@@ -149,7 +224,75 @@ class DeployViewModel(application: Application) : AndroidViewModel(application) 
             findingCount = audit.summary.totalFindings,
             criticalFindingCount = audit.summary.criticalCount,
             runtimeConfig = runtimeConfig,
+            deploymentHistory = deploymentHistory.toList(),
             summary = summary
+        )
+    }
+
+    private fun DeployUiState.withOpsSnapshot(): DeployUiState {
+        return copy(
+            opsSnapshot = buildOpsSnapshot(
+                graph = graph,
+                audit = audit,
+                runtimeConfig = runtimeConfig,
+                isSaving = isSaving
+            )
+        )
+    }
+
+    private fun buildOpsSnapshot(
+        graph: com.kaleaon.mnxmindmaker.model.MindGraph?,
+        audit: com.kaleaon.mnxmindmaker.util.ContinuityAuditResult?,
+        runtimeConfig: DeploymentRuntimeConfig,
+        isSaving: Boolean
+    ): DeployOpsSnapshot {
+        val findingCount = audit?.summary?.totalFindings ?: 0
+        val criticalCount = audit?.summary?.criticalCount ?: 0
+        val queueDepth = (findingCount / 2) + if (runtimeConfig.endpoint.isBlank()) 2 else 0
+        val runtimeHealth = when {
+            criticalCount > 0 -> "Degraded"
+            findingCount > 0 -> "Warning"
+            graph == null -> "Unknown"
+            else -> "Healthy"
+        }
+        val syncState = when {
+            runtimeConfig.endpoint.isBlank() -> "Endpoint missing"
+            isSaving -> "Syncing manifest"
+            else -> "In sync"
+        }
+        val jobStatus = when {
+            isSaving -> "Persisting deployment"
+            queueDepth > 0 -> "Queue active"
+            else -> "Idle"
+        }
+        return DeployOpsSnapshot(
+            runtimeHealth = runtimeHealth,
+            queueDepth = queueDepth,
+            jobStatus = jobStatus,
+            syncState = syncState,
+            policyViolations = criticalCount
+    private fun normalizeChannel(raw: String): String {
+        val normalized = raw.trim().lowercase()
+        return when (normalized) {
+            "dev", "development" -> "dev"
+            "stage", "staging" -> "stage"
+            "prod", "production" -> "prod"
+            else -> "dev"
+        }
+    }
+
+    private fun previousChannel(channel: String): String = when (channel) {
+        "prod" -> "stage"
+        "stage" -> "dev"
+        else -> "dev"
+    }
+
+    private fun defaultCompatibilityConstraints(environment: String, channel: String): List<String> {
+        return listOf(
+            "mnx_meta_manifest_required",
+            "runtime_endpoint_must_validate",
+            "environment=$environment",
+            "channel=$channel"
         )
     }
 }

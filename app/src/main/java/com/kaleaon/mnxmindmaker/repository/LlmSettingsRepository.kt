@@ -12,6 +12,7 @@ import com.kaleaon.mnxmindmaker.model.LlmRuntime
 import com.kaleaon.mnxmindmaker.model.LlmSettings
 import com.kaleaon.mnxmindmaker.model.LocalModelProfile
 import com.kaleaon.mnxmindmaker.model.LocalRuntimeControls
+import com.kaleaon.mnxmindmaker.model.LocalRuntimeEngine
 import com.kaleaon.mnxmindmaker.model.PrivacyMode
 import com.kaleaon.mnxmindmaker.model.RetrievalModePreference
 import com.kaleaon.mnxmindmaker.model.defaultModel
@@ -50,6 +51,7 @@ class LlmSettingsRepository(private val context: Context) {
             .putString("${name}_localProfile", settings.localProfile.name)
             .putString("${name}_fallbackOrder", settings.fallbackOrder.name)
             .putString("${name}_computeBackend", settings.runtimeControls.computeBackend.name)
+            .putString("${name}_runtimeEngine", settings.runtimeControls.engine.name)
             .putInt("${name}_contextWindow", settings.runtimeControls.contextWindowTokens)
             .putString("${name}_quantProfile", settings.runtimeControls.quantizationProfile)
             .putInt("${name}_maxRamMb", settings.runtimeControls.maxRamMb)
@@ -80,8 +82,12 @@ class LlmSettingsRepository(private val context: Context) {
         val computeBackend = prefs.getString("${name}_computeBackend", ComputeBackend.AUTO.name)
             ?.let { runCatching { ComputeBackend.valueOf(it) }.getOrNull() }
             ?: ComputeBackend.AUTO
+        val runtimeEngine = prefs.getString("${name}_runtimeEngine", LocalRuntimeEngine.LLMEDGE.name)
+            ?.let { runCatching { LocalRuntimeEngine.valueOf(it) }.getOrNull() }
+            ?: LocalRuntimeEngine.LLMEDGE
         val runtimeControls = LocalRuntimeControls(
             computeBackend = computeBackend,
+            engine = runtimeEngine,
             contextWindowTokens = prefs.getInt("${name}_contextWindow", localProfile.contextWindowTokens),
             quantizationProfile = prefs.getString("${name}_quantProfile", "Q4_K_M") ?: "Q4_K_M",
             maxRamMb = prefs.getInt("${name}_maxRamMb", 4096),

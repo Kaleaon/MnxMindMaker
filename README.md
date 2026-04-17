@@ -12,6 +12,7 @@ A standalone Android APK for designing AI minds and exporting them to the
 | **Mind Map Canvas** | Interactive node editor — add, move, and connect nodes representing every domain of an AI mind (identity, memory, knowledge, affect, personality, beliefs, values, relationships) |
 | **N-Dimensional Nodes** | Every node carries a named dimension vector beyond the visible (x, y) canvas position. Values get 7 axes (`ethical_weight`, `social_impact`, `personal_relevance`, `priority`, `universality`, `actionability`, `intrinsic_worth`); beliefs get 7 axes (`confidence`, `evidence_strength`, `emotional_loading`, `social_consensus`, `revisability`, `centrality`, `acquired_recency`), etc. All dimensions are persisted in the `.mnx` `DIMENSIONAL_REFS` section |
 | **MNX Import / Export** | Read and write `.mnx` binary files — fully compatible with [TronProtocol](https://github.com/Kaleaon/TronProtocol)'s codec (magic, CRC32 per section, SHA-256 footer) |
+| **Interchange Import / Export** | Adds provider-neutral exports via `.mnxj` (strict JSON) and `.mnxb` (ZIP bundle with `manifest.json` + `payload/graph.json` + optional `blobs/` files), including explicit schema versioning and compatibility hooks |
 | **Data Import** | Paste or load plain text or JSON; the mapper heuristically assigns node types and populates default dimensions automatically |
 | **LLM API Settings** | Configure API keys, model names, and base URLs for **Anthropic** (Claude), **OpenAI** (GPT), **Google Gemini**, and **vLLM Gemma 4** (self-hosted OpenAI-compatible endpoint) |
 | **Continuity Metadata** | Supports kernel/memory/drift metadata fields (for example `protection_level`, `kernel_section`, `memory_class`, `raw_record`, `interpretation`, `drift_type`, and related schema attributes) |
@@ -46,6 +47,24 @@ The deploy wizard is intentionally conservative and policy-aware:
 
 When compatibility mode is triggered, wizard warnings are non-blocking unless a policy explicitly requires manifest-enforced fields.
 
+## Interchange format (`.mnxj` / `.mnxb`)
+
+For provider-neutral portability beyond `.mnx`, the app now supports a stable interchange format:
+
+- **`.mnxj`**: canonical JSON envelope with:
+  - `schema.family = "mnx.interchange"`
+  - `schema.version = { major, minor }`
+  - `compatibility.min_reader_version`
+  - `compatibility.forward_compat_extensions`
+- **`.mnxb`**: ZIP bundle containing:
+  - `manifest.json`
+  - `payload/graph.json` (same strict JSON format as `.mnxj`)
+  - optional `blobs/*` binary payloads
+
+Validation is strict by default (required fields, finite coordinates, node-id uniqueness,
+and edge referential integrity). Forward/backward compatibility hooks are carried under
+`compatibility` to allow additive evolution without provider lock-in.
+
 ## Legacy `.mnx` compatibility (no manifest)
 
 Legacy `.mnx` files that predate deployment manifests remain loadable and deployable.
@@ -59,31 +78,36 @@ Detailed rules are documented in [`docs/MNX-META-Deployment-Manifest-Spec.md`](d
 
 ---
 
-## llmedge local-runtime setup
+## Local runtime setup (llmedge + LiteRT-LM)
 
 Use the local runtime profile when running fully on-device or via local network endpoints.
 
 ### Prerequisites
 
 - Android device/emulator running the app.
-- Local llmedge runtime reachable from device.
-- Model assets available to llmedge runtime.
+- Local runtime reachable from device (llmedge bridge or LiteRT-LM bridge endpoint).
+- Model assets available to selected runtime.
 
 ### Setup steps
 
-1. In app **Settings**, select **Local Runtime (llmedge)** as provider profile.
-2. Set runtime base URL:
+1. In app **Settings**, select **Local On-Device Runtime** as provider profile.
+2. Select **Local Runtime Engine**:
+   - `llmedge` for existing local OpenAI-compatible runtime bridges.
+   - `LiteRT-LM` for Google AI Edge LiteRT-LM-backed bridges and `.litertlm` model packaging.
+3. Set runtime base URL:
    - Android emulator host machine: `http://10.0.2.2:<port>`
    - Physical device on LAN: `http://<host-ip>:<port>`
-3. Configure model/runtime ID expected by your llmedge instance.
-4. Run **Connection Test** and verify health endpoint success.
-5. Open deploy wizard and choose target profile `local`.
+4. Configure model/runtime ID expected by your runtime instance.
+5. Run **Connection Test** and verify health endpoint success.
+6. Open deploy wizard and choose target profile `local`.
 
 ### Operational guidance
 
 - Prefer quantized/local-compatible models for latency and memory stability.
 - Keep policy settings explicit when enabling tool use in local mode.
-- For local-runtime troubleshooting and policy misconfiguration checks, use the operator checklist in [`docs/llmedge-Integration-Notes.md`](docs/llmedge-Integration-Notes.md).
+- For local-runtime troubleshooting and policy misconfiguration checks, use:
+  - [`docs/llmedge-Integration-Notes.md`](docs/llmedge-Integration-Notes.md)
+  - [`docs/LiteRT-LM-Integration-Notes.md`](docs/LiteRT-LM-Integration-Notes.md)
 
 ---
 
@@ -134,13 +158,14 @@ beyond the defaults via `MindNode(dimensions = mapOf("my_axis" to 0.8f))`.
 
 The APK will appear at `app/build/outputs/apk/release/app-release.apk`.
 
-### llmedge integration assumptions
+### Local-runtime integration assumptions
 
-MnxMindMaker resolves `llmedge` in this order:
+MnxMindMaker resolves optional local runtime libraries in this order:
 
-1. **Preferred:** a local Gradle module at `./llmedge` (included automatically when `llmedge/build.gradle` exists).
-2. **Fallback:** one or more prebuilt binaries in `app/libs` matching `llmedge*.aar` or `llmedge*.jar`.
-3. If neither source exists, the app builds normally without llmedge wiring active.
+1. **LiteRT-LM preferred path:** a local Gradle module at `./litertlm` (included automatically when `litertlm/build.gradle` exists).
+2. **LiteRT-LM fallback binaries:** one or more prebuilt binaries in `app/libs` matching `litert-lm*.aar`, `litert-lm*.jar`, `litertlm*.aar`, or `litertlm*.jar`.
+3. **llmedge path:** a local Gradle module at `./llmedge` or prebuilt binaries in `app/libs` matching `llmedge*.aar` / `llmedge*.jar`.
+4. If no local-runtime library is present, the app still builds and uses provider-network adapters only.
 
 This ordering keeps existing cloud-provider integrations (Anthropic/OpenAI/Gemini/vLLM) unchanged while enabling optional on-device llmedge packaging.
 
@@ -151,6 +176,7 @@ This ordering keeps existing cloud-provider integrations (Anthropic/OpenAI/Gemin
 - [`docs/Persona-Deployment-Architecture.md`](docs/Persona-Deployment-Architecture.md)
 - [`docs/MNX-META-Deployment-Manifest-Spec.md`](docs/MNX-META-Deployment-Manifest-Spec.md)
 - [`docs/llmedge-Integration-Notes.md`](docs/llmedge-Integration-Notes.md)
+- [`docs/LiteRT-LM-Integration-Notes.md`](docs/LiteRT-LM-Integration-Notes.md)
 - [`docs/Release-Notes-Deployment-and-Local-Runtime.md`](docs/Release-Notes-Deployment-and-Local-Runtime.md)
 - [`docs/AI-Mind-Evolution-Framework.md`](docs/AI-Mind-Evolution-Framework.md)
 - [`docs/AI-Mind-Evolution-Prompt-Pack.md`](docs/AI-Mind-Evolution-Prompt-Pack.md)
@@ -169,6 +195,27 @@ The repository-specific expansion plan is documented in:
 
 Keys are **never** hard-coded. Enter them in the **Settings** tab of the app.
 They are stored with `EncryptedSharedPreferences` (AES-256-GCM).
+
+### External account linking (OAuth token handoff model)
+
+The **Account Linking** section in Settings uses a local token-handoff workflow:
+
+- You manually provide a provider access token (and optionally a refresh token).
+- If you plan to use **Refresh token**, you must also provide the provider OAuth
+  `client_id` and `client_secret` in Settings.
+- OAuth client credentials are stored securely on-device with the same encrypted
+  storage path used for other secrets (never committed in source).
+- Refresh actions are enabled only when both prerequisites exist:
+  1. a linked refresh token; and
+  2. local OAuth client credentials for that provider.
+
+Supported refresh providers and token endpoints currently implemented:
+
+- **Claude (Anthropic)**: `https://api.anthropic.com/oauth/token`
+- **ChatGPT (OpenAI)**: `https://api.openai.com/v1/oauth/token`
+
+If either OAuth client credential is missing, refresh is blocked locally and the
+UI explains exactly which credential is required.
 
 ### Self-hosted Gemma 4 via vLLM
 
