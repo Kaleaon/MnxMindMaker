@@ -189,6 +189,27 @@ The repository-specific expansion plan is documented in:
 Keys are **never** hard-coded. Enter them in the **Settings** tab of the app.
 They are stored with `EncryptedSharedPreferences` (AES-256-GCM).
 
+### External account linking (OAuth token handoff model)
+
+The **Account Linking** section in Settings uses a local token-handoff workflow:
+
+- You manually provide a provider access token (and optionally a refresh token).
+- If you plan to use **Refresh token**, you must also provide the provider OAuth
+  `client_id` and `client_secret` in Settings.
+- OAuth client credentials are stored securely on-device with the same encrypted
+  storage path used for other secrets (never committed in source).
+- Refresh actions are enabled only when both prerequisites exist:
+  1. a linked refresh token; and
+  2. local OAuth client credentials for that provider.
+
+Supported refresh providers and token endpoints currently implemented:
+
+- **Claude (Anthropic)**: `https://api.anthropic.com/oauth/token`
+- **ChatGPT (OpenAI)**: `https://api.openai.com/v1/oauth/token`
+
+If either OAuth client credential is missing, refresh is blocked locally and the
+UI explains exactly which credential is required.
+
 ### Self-hosted Gemma 4 via vLLM
 
 MnxMindMaker now supports the Gemma 4 vLLM OpenAI-compatible endpoint described in the

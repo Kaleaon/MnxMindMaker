@@ -57,4 +57,26 @@ class ExternalAccountRepositoryTest {
 
         assertEquals(now + TimeUnit.SECONDS.toMillis(expiresInSeconds), expiresAt)
     }
+
+    @Test
+    fun validateRefreshPrerequisites_returnsMissingClientConfig_whenClientCredentialsAreMissing() {
+        val status = ExternalAccountRepository.validateRefreshPrerequisites(
+            refreshToken = "refresh-token",
+            clientId = "",
+            clientSecret = ""
+        )
+
+        assertEquals(RefreshStatus.MISSING_CLIENT_CONFIG, status)
+    }
+
+    @Test
+    fun validateRefreshPrerequisites_returnsSuccess_whenRefreshTokenAndClientCredentialsExist() {
+        val status = ExternalAccountRepository.validateRefreshPrerequisites(
+            refreshToken = "refresh-token",
+            clientId = "client-id",
+            clientSecret = "client-secret"
+        )
+
+        assertEquals(RefreshStatus.SUCCESS, status)
+    }
 }
