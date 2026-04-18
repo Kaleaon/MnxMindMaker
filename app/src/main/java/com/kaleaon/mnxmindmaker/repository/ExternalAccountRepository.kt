@@ -35,7 +35,14 @@ class ExternalAccountRepository(context: Context) {
         } else {
             vault.remove(refreshKey(provider))
         }
-        if (expiresAt != null) prefs.edit().putLong(expiryKey(provider), expiresAt).apply()
+        prefs.edit().apply {
+            if (expiresAt != null) {
+                putLong(expiryKey(provider), expiresAt)
+            } else {
+                remove(expiryKey(provider))
+            }
+            apply()
+        }
 
         val metadata = detector.detect(provider, accessToken)
         persistCapabilities(provider, metadata)
