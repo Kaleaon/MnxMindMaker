@@ -462,12 +462,6 @@ class MnxRepository(private val context: Context) {
 
     fun rollbackArtifact(token: String): MnxFile? = synchronized(rollbackSnapshots) {
         rollbackSnapshots.remove(token)
-        val outDir = File(context.filesDir, "mnx_exports")
-        outDir.mkdirs()
-        val safeName = graph.name.replace(Regex("[^a-zA-Z0-9_-]"), "_")
-        val outFile = File(outDir, "${safeName}_${System.currentTimeMillis()}.mnx")
-        MnxCodec.encodeToFile(mnxFile, outFile)
-        return mnxFile
     }
 
     /**
@@ -477,8 +471,7 @@ class MnxRepository(private val context: Context) {
     fun importFromMnx(stream: InputStream): MindGraph {
         val raw = stream.readBytes()
         val decoded = encryptedStore.decryptIfEnvelope(raw, "mind_file")
-        val mnxFile = MnxCodec.decode(ByteArrayInputStream(decoded))
-        val report = migrateArtifact(stream, dryRun = false)
+        val report = migrateArtifact(ByteArrayInputStream(decoded), dryRun = false)
         val mnxFile = report.migratedFile
         return if (mnxFile.hasRawSection(GRAPH_PAYLOAD_SECTION_TYPE)) {
             deserializeGraphPayload(mnxFile.rawSections[GRAPH_PAYLOAD_SECTION_TYPE]!!)
@@ -487,43 +480,6 @@ class MnxRepository(private val context: Context) {
         }
     }
 
-    fun readPersonaDeploymentManifest(stream: InputStream): PersonaDeploymentManifest {
-        val report = migrateArtifact(stream, dryRun = false)
-        val mnxFile = report.migratedFile
-        if (!mnxFile.hasSection(MnxFormat.MnxSectionType.META)) {
-            return PersonaDeploymentManifest.defaults()
-        }
-        val meta = MnxCodec.deserializeMeta(mnxFile.sections[MnxFormat.MnxSectionType.META]!!)
-        return manifestFromMeta(meta)
-    }
-
-    fun getMnxExportsDir(): File = File(context.filesDir, "mnx_exports").also { it.mkdirs() }
-
-    fun listExportedFiles(): List<File> =
-        getMnxExportsDir().listFiles { f -> f.extension == "mnx" }
-            ?.sortedByDescending { it.lastModified() } ?: emptyList()
-
-    fun exportBootPacketJson(
-        graph: MindGraph,
-        mode: BootPacketGenerator.Mode = BootPacketGenerator.Mode.FULL
-    ): File {
-        val packetJson = BootPacketGenerator.generate(graph, mode).toJson()
-        val outDir = File(context.filesDir, "boot_packets").also { it.mkdirs() }
-        val safeName = graph.name.replace(Regex("[^a-zA-Z0-9_-]"), "_")
-        return File(outDir, "${safeName}_${mode.name.lowercase()}_${System.currentTimeMillis()}.json")
-            .also { it.writeText(packetJson) }
-    }
-
-    fun exportBootPacketMarkdown(
-        graph: MindGraph,
-        mode: BootPacketGenerator.Mode = BootPacketGenerator.Mode.FULL
-    ): File {
-        val packetMd = BootPacketGenerator.generate(graph, mode).toMarkdown()
-        val outDir = File(context.filesDir, "boot_packets").also { it.mkdirs() }
-        val safeName = graph.name.replace(Regex("[^a-zA-Z0-9_-]"), "_")
-        return File(outDir, "${safeName}_${mode.name.lowercase()}_${System.currentTimeMillis()}.md")
-            .also { it.writeText(packetMd) }
-    }
 
     private fun migrateArtifactInternal(original: MnxFile, dryRun: Boolean): ArtifactMigrationReport {
         val changes = mutableListOf<MigrationChange>()

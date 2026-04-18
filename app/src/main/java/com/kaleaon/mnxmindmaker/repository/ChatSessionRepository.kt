@@ -350,7 +350,6 @@ class ChatSessionRepository(
                 }
             }
         }
-        return migratePayloadForVersion(payload = payload, version = version)
     }
 
     private fun recoverFromCorruptionLocked(): PersistedChatStore {

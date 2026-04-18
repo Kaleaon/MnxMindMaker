@@ -35,7 +35,6 @@ class ToolOrchestrator(
 
         val transcript = mutableListOf<JSONObject>()
         transcript += JSONObject().put("role", "user").put("content", promptModeration.text)
-        val transcript = listOf(JSONObject().put("role", "user").put("content", userPrompt))
         return run(systemPrompt = systemPrompt, transcript = transcript)
     }
 

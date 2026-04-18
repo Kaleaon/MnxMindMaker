@@ -5,8 +5,8 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.viewModelScope
-import com.kaleaon.mnxmindmaker.repository.LlmSettingsRepository
 import com.kaleaon.mnxmindmaker.repository.DeploymentRepository
+import com.kaleaon.mnxmindmaker.repository.LlmSettingsRepository
 import com.kaleaon.mnxmindmaker.util.provider.ValidationSeverity
 import com.kaleaon.mnxmindmaker.util.provider.validate
 import com.kaleaon.mnxmindmaker.util.provider.validateRuntimeEndpoint
@@ -50,25 +50,21 @@ class DeployViewModel(application: Application) : AndroidViewModel(application) 
 
     fun updateRuntimeConfig(environment: String, endpoint: String, publishChannel: String, notes: String) {
         val normalizedChannel = normalizeChannel(publishChannel)
+        val nextRuntimeConfig = DeploymentRuntimeConfig(
+            environment = environment,
+            endpoint = endpoint,
+            publishChannel = normalizedChannel,
+            requiresPromotionApproval = normalizedChannel != "dev",
+            rollbackChannel = if (normalizedChannel == "dev") "dev" else previousChannel(normalizedChannel),
+            compatibilityConstraints = defaultCompatibilityConstraints(environment, normalizedChannel),
+            notes = notes
+        )
         _uiState.value = _uiState.value?.copy(
-            runtimeConfig = DeploymentRuntimeConfig(
-                environment = environment,
-                endpoint = endpoint,
-                publishChannel = normalizedChannel,
-                requiresPromotionApproval = normalizedChannel != "dev",
-                rollbackChannel = if (normalizedChannel == "dev") "dev" else previousChannel(normalizedChannel),
-                compatibilityConstraints = defaultCompatibilityConstraints(environment, normalizedChannel),
-                notes = notes
-            ),
+            runtimeConfig = nextRuntimeConfig,
             opsSnapshot = buildOpsSnapshot(
                 graph = _uiState.value?.graph,
                 audit = _uiState.value?.audit,
-                runtimeConfig = DeploymentRuntimeConfig(
-                    environment = environment,
-                    endpoint = endpoint,
-                    releaseChannel = releaseChannel,
-                    notes = notes
-                ),
+                runtimeConfig = nextRuntimeConfig,
                 isSaving = _uiState.value?.isSaving == true
             )
         )
@@ -271,6 +267,9 @@ class DeployViewModel(application: Application) : AndroidViewModel(application) 
             jobStatus = jobStatus,
             syncState = syncState,
             policyViolations = criticalCount
+        )
+    }
+
     private fun normalizeChannel(raw: String): String {
         val normalized = raw.trim().lowercase()
         return when (normalized) {

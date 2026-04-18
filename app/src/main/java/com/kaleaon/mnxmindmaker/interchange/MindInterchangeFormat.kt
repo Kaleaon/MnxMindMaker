@@ -284,7 +284,7 @@ object MindInterchangeFormat {
                     .put("x", node.x.toDouble())
                     .put("y", node.y.toDouble())
                     .put("parent_id", node.parentId)
-                    .put("attributes", JSONObject(node.attributes))
+                    .put("attributes", JSONObject(node.attributes as Map<String, Any?>))
                     .put("is_expanded", node.isExpanded)
                     .put("dimensions", JSONObject(node.dimensions.mapValues { it.value.toDouble() }))
             })
