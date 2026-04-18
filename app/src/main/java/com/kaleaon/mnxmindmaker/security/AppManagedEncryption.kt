@@ -16,6 +16,7 @@ import javax.crypto.spec.SecretKeySpec
 private const val KEYRING_VAULT_KEY = "app_key_hierarchy.v1"
 private const val ENVELOPE_MAGIC = "MMK-ENC-1"
 private const val BACKUP_MAGIC = "MMK-BACKUP-1"
+private const val BUNDLE_MAGIC = "MMK-BUNDLE-1"
 
 interface KeyHierarchyStore {
     fun putString(key: String, value: String)
@@ -134,6 +135,16 @@ class EncryptedArtifactStore private constructor(
 
     internal constructor(hierarchy: AppManagedKeyHierarchy) : this(SecureRandom(), hierarchy)
 
+    constructor(context: Context) : this(
+        random = SecureRandom(),
+        hierarchy = AppManagedKeyHierarchy(SecureVault(context))
+    )
+
+    internal constructor(hierarchy: AppManagedKeyHierarchy) : this(
+        random = SecureRandom(),
+        hierarchy = hierarchy
+    )
+
     fun writeEncryptedBytes(file: File, plaintext: ByteArray, artifactType: String) {
         file.parentFile?.mkdirs()
         val active = hierarchy.activeKey()
@@ -186,7 +197,7 @@ class EncryptedArtifactStore private constructor(
         }
         val wrappedHierarchy = hierarchy.exportEncryptedSnapshot(passphrase)
         val backup = JSONObject()
-            .put("magic", "MMK-BUNDLE-1")
+            .put("magic", BUNDLE_MAGIC)
             .put("created_at", System.currentTimeMillis())
             .put("recovery", JSONObject(wrappedHierarchy))
             .put("files", manifest)
@@ -206,6 +217,15 @@ class EncryptedArtifactStore private constructor(
         val recovery = recoveryRaw as? JSONObject
             ?: throw IllegalArgumentException("Invalid backup field: recovery must be a JSON object")
 
+            .getOrElse { throw IllegalArgumentException("Invalid backup bundle: payload is not valid JSON.", it) }
+        require(root.optString("magic") == BUNDLE_MAGIC) {
+            "Invalid backup bundle: expected magic '$BUNDLE_MAGIC'."
+        }
+        if (!root.has("recovery")) {
+            throw IllegalArgumentException("Invalid backup bundle: missing 'recovery' object.")
+        }
+        val recovery = root.optJSONObject("recovery")
+            ?: throw IllegalArgumentException("Invalid backup bundle: 'recovery' must be a JSON object.")
         hierarchy.importEncryptedSnapshot(recovery.toString(), passphrase)
     }
 }
