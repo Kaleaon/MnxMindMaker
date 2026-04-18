@@ -53,6 +53,8 @@ data class DeployOpsSnapshot(
     val jobStatus: String = "Idle",
     val syncState: String = "Not started",
     val policyViolations: Int = 0
+)
+
 data class DeploymentHistoryEntry(
     val action: String,
     val channel: String,

@@ -25,10 +25,18 @@
         android:layout_height="0dp"
         android:layout_weight="1">
 
-        <include layout="@layout/layout_deploy_step_graph" />
-        <include layout="@layout/layout_deploy_step_validation" />
-        <include layout="@layout/layout_deploy_step_runtime" />
-        <include layout="@layout/layout_deploy_step_summary" />
+        <include
+            android:id="@+id/include_step_graph"
+            layout="@layout/layout_deploy_step_graph" />
+        <include
+            android:id="@+id/include_step_validation"
+            layout="@layout/layout_deploy_step_validation" />
+        <include
+            android:id="@+id/include_step_runtime"
+            layout="@layout/layout_deploy_step_runtime" />
+        <include
+            android:id="@+id/include_step_summary"
+            layout="@layout/layout_deploy_step_summary" />
     </ViewFlipper>
 
     <LinearLayout

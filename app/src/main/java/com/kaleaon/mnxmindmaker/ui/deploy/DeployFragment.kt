@@ -29,16 +29,16 @@ class DeployFragment : Fragment() {
         binding.btnDeployBack.setOnClickListener { viewModel.goToPreviousStep() }
         binding.btnDeployConfirm.setOnClickListener {
             viewModel.updateRuntimeConfig(
-                environment = binding.etDeployEnvironment.text?.toString().orEmpty().trim(),
-                endpoint = binding.etDeployEndpoint.text?.toString().orEmpty().trim(),
-                publishChannel = binding.etDeployReleaseChannel.text?.toString().orEmpty().trim(),
-                notes = binding.etDeployNotes.text?.toString().orEmpty().trim()
+                environment = binding.includeStepRuntime.etDeployEnvironment.text?.toString().orEmpty().trim(),
+                endpoint = binding.includeStepRuntime.etDeployEndpoint.text?.toString().orEmpty().trim(),
+                publishChannel = binding.includeStepRuntime.etDeployReleaseChannel.text?.toString().orEmpty().trim(),
+                notes = binding.includeStepRuntime.etDeployNotes.text?.toString().orEmpty().trim()
             )
             viewModel.confirmDeployment()
         }
-        binding.btnOpsRestart.setOnClickListener { viewModel.runOpsQuickAction(OpsQuickAction.RESTART) }
-        binding.btnOpsReindex.setOnClickListener { viewModel.runOpsQuickAction(OpsQuickAction.REINDEX) }
-        binding.btnOpsRetry.setOnClickListener { viewModel.runOpsQuickAction(OpsQuickAction.RETRY_FAILED) }
+        binding.includeStepRuntime.btnOpsRestart.setOnClickListener { viewModel.runOpsQuickAction(OpsQuickAction.RESTART) }
+        binding.includeStepRuntime.btnOpsReindex.setOnClickListener { viewModel.runOpsQuickAction(OpsQuickAction.REINDEX) }
+        binding.includeStepRuntime.btnOpsRetry.setOnClickListener { viewModel.runOpsQuickAction(OpsQuickAction.RETRY_FAILED) }
 
         viewModel.uiState.observe(viewLifecycleOwner) { state ->
             renderState(state)
@@ -57,28 +57,28 @@ class DeployFragment : Fragment() {
     private fun renderState(state: DeployUiState) {
         binding.stepFlipper.displayedChild = state.currentStep.ordinal
 
-        binding.tvDeployGraphSummary.text = state.graph?.let {
+        binding.includeStepGraph.tvDeployGraphSummary.text = state.graph?.let {
             "${it.name} (${it.nodes.size} nodes, ${it.edges.size} edges)"
         } ?: "No graph available. Open Mind Map and build/import a graph first."
 
-        binding.tvDeployValidationSummary.text = state.audit?.summary?.let { summary ->
+        binding.includeStepValidation.tvDeployValidationSummary.text = state.audit?.summary?.let { summary ->
             "Findings: ${summary.totalFindings} (critical ${summary.criticalCount}, high ${summary.highCount}, medium ${summary.mediumCount}, low ${summary.lowCount})"
         } ?: "No validator output available yet."
 
-        if (binding.etDeployEnvironment.text.isNullOrBlank()) {
-            binding.etDeployEnvironment.setText(state.runtimeConfig.environment)
-            binding.etDeployEndpoint.setText(state.runtimeConfig.endpoint)
-            binding.etDeployReleaseChannel.setText(state.runtimeConfig.publishChannel)
-            binding.etDeployNotes.setText(state.runtimeConfig.notes)
+        if (binding.includeStepRuntime.etDeployEnvironment.text.isNullOrBlank()) {
+            binding.includeStepRuntime.etDeployEnvironment.setText(state.runtimeConfig.environment)
+            binding.includeStepRuntime.etDeployEndpoint.setText(state.runtimeConfig.endpoint)
+            binding.includeStepRuntime.etDeployReleaseChannel.setText(state.runtimeConfig.publishChannel)
+            binding.includeStepRuntime.etDeployNotes.setText(state.runtimeConfig.notes)
         }
 
-        binding.tvOpsRuntimeHealthValue.text = state.opsSnapshot.runtimeHealth
-        binding.tvOpsQueueDepthValue.text = state.opsSnapshot.queueDepth.toString()
-        binding.tvOpsJobStatusValue.text = state.opsSnapshot.jobStatus
-        binding.tvOpsSyncStateValue.text = state.opsSnapshot.syncState
-        binding.tvOpsPolicyViolationsValue.text = state.opsSnapshot.policyViolations.toString()
+        binding.includeStepRuntime.tvOpsRuntimeHealthValue.text = state.opsSnapshot.runtimeHealth
+        binding.includeStepRuntime.tvOpsQueueDepthValue.text = state.opsSnapshot.queueDepth.toString()
+        binding.includeStepRuntime.tvOpsJobStatusValue.text = state.opsSnapshot.jobStatus
+        binding.includeStepRuntime.tvOpsSyncStateValue.text = state.opsSnapshot.syncState
+        binding.includeStepRuntime.tvOpsPolicyViolationsValue.text = state.opsSnapshot.policyViolations.toString()
 
-        binding.tvDeploySummary.text = state.manifestPreview?.let { manifest ->
+        binding.includeStepSummary.tvDeploySummary.text = state.manifestPreview?.let { manifest ->
                 "Deployment ${manifest.deploymentId.take(8)}\n" +
                 "Graph: ${manifest.graphName}\n" +
                 "Runtime: ${manifest.runtimeConfig.environment} / ${manifest.runtimeConfig.publishChannel}\n" +

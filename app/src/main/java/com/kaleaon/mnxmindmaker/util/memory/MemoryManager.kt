@@ -236,11 +236,6 @@ class MemoryManager(
 
     fun getMemory(memoryId: String): MindNode? =
         semanticIndex.get(memoryId) ?: profileMemories[memoryId] ?: archivedMemories[memoryId]?.payload
-        if (semanticRemoved || profileRemoved) persistAndRefresh()
-        return semanticRemoved || profileRemoved
-    }
-
-    fun getMemory(memoryId: String): MindNode? = semanticIndex.get(memoryId) ?: profileMemories[memoryId]
 
     fun searchMemories(query: String, limit: Int, nowEpochMs: Long = System.currentTimeMillis()): List<MindNode> {
         if (query.isBlank() || limit <= 0) return emptyList()
