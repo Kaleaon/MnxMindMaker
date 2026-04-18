@@ -126,9 +126,13 @@ class AppManagedKeyHierarchy(private val store: KeyHierarchyStore) {
     private fun unb64(value: String): ByteArray = Base64.getDecoder().decode(value)
 }
 
-class EncryptedArtifactStore(context: Context) {
-    private val random = SecureRandom()
-    private val hierarchy = AppManagedKeyHierarchy(SecureVault(context))
+class EncryptedArtifactStore private constructor(
+    private val random: SecureRandom,
+    private val hierarchy: AppManagedKeyHierarchy
+) {
+    constructor(context: Context) : this(SecureRandom(), AppManagedKeyHierarchy(SecureVault(context)))
+
+    internal constructor(hierarchy: AppManagedKeyHierarchy) : this(SecureRandom(), hierarchy)
 
     fun writeEncryptedBytes(file: File, plaintext: ByteArray, artifactType: String) {
         file.parentFile?.mkdirs()
@@ -192,8 +196,16 @@ class EncryptedArtifactStore(context: Context) {
     }
 
     fun recoverHierarchyFromBackup(backupPayload: String, passphrase: String) {
-        val root = JSONObject(backupPayload)
-        val recovery = root.getJSONObject("recovery")
+        val root = runCatching { JSONObject(backupPayload) }
+            .getOrElse { throw IllegalArgumentException("Backup payload must be valid JSON", it) }
+        val magic = root.optString("magic")
+        require(magic == "MMK-BUNDLE-1") { "Invalid backup bundle magic: expected MMK-BUNDLE-1" }
+
+        val recoveryRaw = root.opt("recovery")
+            ?: throw IllegalArgumentException("Missing required backup field: recovery")
+        val recovery = recoveryRaw as? JSONObject
+            ?: throw IllegalArgumentException("Invalid backup field: recovery must be a JSON object")
+
         hierarchy.importEncryptedSnapshot(recovery.toString(), passphrase)
     }
 }
