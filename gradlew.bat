@@ -1,12 +1,15 @@
 @echo off
 setlocal
 
-where gradle >NUL 2>&1
-if %ERRORLEVEL% neq 0 (
-  echo ERROR: 'gradle' was not found in PATH. 1>&2
-  echo Install Gradle 8.2.1+ and ensure it is available on PATH. 1>&2
-  exit /b 1
+set DIRNAME=%~dp0
+set APP_HOME=%DIRNAME%
+set CLASSPATH=%APP_HOME%gradle\wrapper\gradle-wrapper.jar
+
+if exist "%JAVA_HOME%\bin\java.exe" (
+  set JAVACMD=%JAVA_HOME%\bin\java.exe
+) else (
+  set JAVACMD=java.exe
 )
 
-gradle %*
+"%JAVACMD%" -classpath "%CLASSPATH%" org.gradle.wrapper.GradleWrapperMain %*
 exit /b %ERRORLEVEL%

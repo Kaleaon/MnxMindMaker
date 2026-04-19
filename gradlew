@@ -1,11 +1,9 @@
-#!/usr/bin/env sh
+#!/bin/sh
+
 set -eu
 
-if ! command -v gradle >/dev/null 2>&1; then
-  echo "ERROR: 'gradle' was not found in PATH." >&2
-  echo "Install Gradle 8.2.1+ and ensure it is available on PATH." >&2
-  exit 1
-fi
+APP_HOME=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
+CLASSPATH="$APP_HOME/gradle/wrapper/gradle-wrapper.jar"
 
 extract_java_major() {
   version_line="$1"
@@ -46,4 +44,19 @@ maybe_set_compatible_java_home() {
 
 maybe_set_compatible_java_home
 
-exec gradle "$@"
+if [ ! -f "$CLASSPATH" ]; then
+  echo "ERROR: Cannot find Gradle wrapper JAR at $CLASSPATH" >&2
+  exit 1
+fi
+
+if [ -n "${JAVA_HOME:-}" ]; then
+  JAVACMD="$JAVA_HOME/bin/java"
+  if [ ! -x "$JAVACMD" ]; then
+    echo "ERROR: JAVA_HOME is set to an invalid directory: $JAVA_HOME" >&2
+    exit 1
+  fi
+else
+  JAVACMD=java
+fi
+
+exec "$JAVACMD" -classpath "$CLASSPATH" org.gradle.wrapper.GradleWrapperMain "$@"
