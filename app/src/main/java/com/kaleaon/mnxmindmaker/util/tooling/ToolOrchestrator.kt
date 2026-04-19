@@ -1,6 +1,7 @@
 package com.kaleaon.mnxmindmaker.util.tooling
 
 import com.kaleaon.mnxmindmaker.model.LlmSettings
+import com.kaleaon.mnxmindmaker.model.MindGraph
 import com.kaleaon.mnxmindmaker.util.observability.RequestTracer
 import com.kaleaon.mnxmindmaker.util.moderation.ModerationAction
 import com.kaleaon.mnxmindmaker.util.moderation.ModerationPipeline
@@ -19,6 +20,7 @@ class ToolOrchestrator(
     private val policy: ToolPolicyEngine,
     private val requestApproval: suspend (ToolApprovalRequest) -> Boolean,
     private val routingPolicy: RoutingPolicy = RoutingPolicy(),
+    private val policyContext: ToolPolicyContext = ToolPolicyContext(),
     private val maxToolRounds: Int = 6,
     private val tracer: RequestTracer? = null,
     private val moderationPipeline: ModerationPipeline = ModerationPipeline(listOf(SensitiveEntityModerationPolicy())),
@@ -43,9 +45,14 @@ class ToolOrchestrator(
 
         val textParts = mutableListOf<String>()
         repeat(maxToolRounds) {
+            val governedChain = evaluateModelPolicies()
+            if (governedChain.isEmpty()) {
+                return "All model operations were denied by runtime policy."
+            }
+
             val providerStart = nowMs()
             val turn = providerRouter.chat(
-                settingsChain = settingsChain,
+                settingsChain = governedChain,
                 systemPrompt = systemPrompt,
                 transcript = conversation,
                 tools = registry.specs(),
@@ -98,7 +105,7 @@ class ToolOrchestrator(
     }
 
     private suspend fun executeInvocation(invocation: ToolInvocation): ToolResult {
-        val decision = policy.evaluate(invocation)
+        val decision = policy.evaluate(invocation, graph = MindGraph(), context = policyContext)
         return when (decision.type) {
             PolicyDecisionType.ALLOW -> registry.invoke(invocation)
             PolicyDecisionType.REQUIRE_USER_APPROVAL -> {
@@ -137,5 +144,42 @@ class ToolOrchestrator(
                     .put("message", decision.reason)
             )
         }
+    }
+
+    private suspend fun evaluateModelPolicies(): List<LlmSettings> {
+        val allowed = mutableListOf<LlmSettings>()
+        for (settings in settingsChain) {
+            val decision = policy.evaluateModelOperation(
+                ModelOperation(
+                    provider = settings.provider,
+                    baseUrl = settings.baseUrl,
+                    dataClassification = settings.outboundClassification
+                ),
+                context = policyContext
+            )
+            when (decision.type) {
+                PolicyDecisionType.ALLOW -> allowed += settings
+                PolicyDecisionType.REQUIRE_USER_APPROVAL -> {
+                    val approved = requestApproval(
+                        ToolApprovalRequest(
+                            id = "model-${settings.provider.name}",
+                            toolName = "model_inference",
+                            arguments = JSONObject()
+                                .put("provider", settings.provider.name)
+                                .put("base_url", settings.baseUrl)
+                                .put("classification", settings.outboundClassification.name)
+                                .toString(2),
+                            reason = decision.reason,
+                            riskLevel = decision.riskLevel,
+                            requiresConfirmation = decision.requiresConfirmation,
+                            explicitActionType = "model_inference"
+                        )
+                    )
+                    if (approved) allowed += settings
+                }
+                PolicyDecisionType.DENY -> Unit
+            }
+        }
+        return allowed
     }
 }
