@@ -231,4 +231,20 @@ class ToolPolicyEngineTest {
         assertEquals("delete", decision.explicitActionType)
     }
 
+    @Test
+    fun `declarative default allow is authoritative for tool permission outcome`() {
+        val decision = engine.evaluate(
+            invocation = ToolInvocation(id = "1", toolName = "delete_all"),
+            graph = MindGraph(),
+            context = ToolPolicyContext(
+                declarativePolicies = DeclarativeRuntimePolicies(
+                    toolPermissions = ToolPermissionPolicy(defaultDecision = PolicyDefaultDecision.ALLOW)
+                )
+            )
+        )
+
+        assertEquals(PolicyDecisionType.ALLOW, decision.type)
+        assertTrue(decision.reason.contains("declarative", ignoreCase = true))
+    }
+
 }

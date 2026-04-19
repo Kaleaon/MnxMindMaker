@@ -188,7 +188,12 @@ class ToolPolicyEngine(
         if (actionDecision != null) return actionDecision
 
         return when (permissions.defaultDecision) {
-            PolicyDefaultDecision.ALLOW -> null
+            PolicyDefaultDecision.ALLOW -> PolicyDecision(
+                type = PolicyDecisionType.ALLOW,
+                reason = "Default declarative tool permission is allow",
+                riskLevel = spec.riskLevel,
+                explicitActionType = explicitAction
+            )
             PolicyDefaultDecision.DENY -> PolicyDecision(
                 type = PolicyDecisionType.DENY,
                 reason = "Default declarative tool permission is deny",
