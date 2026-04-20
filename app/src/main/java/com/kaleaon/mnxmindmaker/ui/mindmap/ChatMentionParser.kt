@@ -53,6 +53,18 @@ class ChatMentionParser {
     private fun collectMentionTokens(input: String): List<MentionToken> {
         val tokens = mutableListOf<MentionToken>()
 
+        val wrappedAtMentionRegex = Regex("@\\{([^}]+)\\}")
+        wrappedAtMentionRegex.findAll(input).forEach { match ->
+            val token = match.groupValues[1].trim()
+            if (token.isNotEmpty()) {
+                tokens += MentionToken(
+                    token = token,
+                    start = match.range.first,
+                    endExclusive = match.range.last + 1
+                )
+            }
+        }
+
         val atMentionRegex = Regex("(?<![\\p{L}\\p{N}_])@([\\p{L}\\p{N}_-]+)")
         atMentionRegex.findAll(input).forEach { match ->
             val token = match.groupValues[1].trim()

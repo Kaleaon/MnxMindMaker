@@ -25,6 +25,7 @@ object MemoryRetrievalService {
     data class RetrievalContext(
         val prompt: String = "",
         val task: String = "",
+        val characterIdHint: String? = null,
         val roomHint: String? = null,
         val hallHint: String? = null,
         val wingHint: String? = null,
@@ -124,6 +125,7 @@ object MemoryRetrievalService {
                 val graphProximity = graphProximityByNode[node.id] ?: 0f
                 val riskPenalty = confabulationRiskPenalty(node)
                 val stabilityBonus = (1f - abs(confidence - relevance)).coerceIn(0f, 1f) * 0.08f
+                val characterAffinityBonus = characterAffinityBonus(node, context.characterIdHint)
 
                 val score = (
                     relevance * policyWeights.relevance +
@@ -134,11 +136,12 @@ object MemoryRetrievalService {
                         graphProximity * policyWeights.graphProximity +
                         stabilityBonus -
                         riskPenalty * policyWeights.riskPenaltyWeight
-                    ).coerceIn(0f, 1f)
+                    ).coerceIn(0f, 1f) + characterAffinityBonus
+                val boundedScore = score.coerceIn(0f, 1f)
 
                 ScoredMemory(
                     node = node,
-                    score = score,
+                    score = boundedScore,
                     confidence = confidence,
                     recency = recency,
                     importance = importance,
@@ -264,6 +267,14 @@ object MemoryRetrievalService {
             hints.wing != null && hints.wing == nodeWing -> RetrievalTier.WING
             else -> RetrievalTier.GLOBAL_FALLBACK
         }
+    }
+
+    private fun characterAffinityBonus(node: MindNode, characterIdHint: String?): Float {
+        val normalizedHint = normalizeRouteHint(characterIdHint)
+        if (normalizedHint.isNullOrBlank()) return 0f
+        val nodeCharacter = normalizeRouteHint(node.attributes["character_id"])
+        if (nodeCharacter == null) return 0f
+        return if (nodeCharacter == normalizedHint) 0.12f else -0.08f
     }
 
     private fun extractNamedHint(corpus: String, key: String): String? {

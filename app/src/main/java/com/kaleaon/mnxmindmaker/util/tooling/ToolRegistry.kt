@@ -579,11 +579,13 @@ class ToolRegistry(
         val manager = memoryManager ?: return ToolResult(invocation.id, invocation.name, false, "MemoryManager is not configured")
         val query = invocation.arguments.optString("query").trim()
         val limit = invocation.arguments.optInt("limit", 10).coerceIn(1, 50)
+        val characterId = invocation.arguments.optString("character_id").trim().ifBlank { null }
         val payload = JSONObject()
             .put("query", query)
             .put("limit", limit)
+            .put("character_id", characterId)
             .put("results", JSONArray().apply {
-                manager.searchMemories(query, limit).forEach { memory ->
+                manager.searchMemories(query, limit, characterIdHint = characterId).forEach { memory ->
                     put(JSONObject()
                         .put("id", memory.id)
                         .put("label", memory.label)
@@ -634,6 +636,7 @@ class ToolRegistry(
                     key = memoryId,
                     value = moderatedValue,
                     writingStyle = args.optString("writing_style").ifBlank { null },
+                    characterId = args.optString("character_id").ifBlank { null },
                     sensitivity = sensitivity
                 )
                 "semantic" -> manager.upsertSemanticMemory(
@@ -648,6 +651,8 @@ class ToolRegistry(
                             "sensitivity" to sensitivity,
                             "timestamp" to System.currentTimeMillis().toString(),
                             "tags" to args.optString("tags")
+                        ).apply {
+                            args.optString("character_id").ifBlank { null }?.let { put("character_id", it) }
                         )
                     )
                 )
@@ -692,6 +697,7 @@ class ToolRegistry(
                     attributes = node.attributes.toMutableMap().apply {
                         if (args.has("tags")) put("tags", args.optString("tags"))
                         if (args.has("writing_style")) put("writing_style", args.optString("writing_style"))
+                        if (args.has("character_id")) put("character_id", args.optString("character_id"))
                         if (args.has("sensitivity")) put("sensitivity", sensitivity)
                         put("timestamp", System.currentTimeMillis().toString())
                     }

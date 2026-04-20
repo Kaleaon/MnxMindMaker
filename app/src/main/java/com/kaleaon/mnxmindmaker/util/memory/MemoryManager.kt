@@ -182,6 +182,7 @@ class MemoryManager(
         key: String,
         value: String,
         writingStyle: String? = null,
+        characterId: String? = null,
         sensitivity: String = "low",
         timestampMs: Long = System.currentTimeMillis()
     ) {
@@ -203,11 +204,29 @@ class MemoryManager(
                 put(MemoryRouting.KEY_MEMORY_WING, "self")
                 put(MemoryRouting.KEY_MEMORY_HALL, "preferences")
                 put(MemoryRouting.KEY_MEMORY_ROOM, "voice_style")
+                if (!characterId.isNullOrBlank()) put("character_id", characterId)
                 if (!writingStyle.isNullOrBlank()) put("writing_style", writingStyle)
             }
         )
         profileMemories[key] = node
         persistAndRefresh()
+    }
+
+    fun rememberCharacterFact(
+        characterId: String,
+        fact: String,
+        key: String = "character:${characterId}:${fact.hashCode()}",
+        sensitivity: String = "low",
+        timestampMs: Long = System.currentTimeMillis()
+    ) {
+        if (characterId.isBlank() || fact.isBlank()) return
+        upsertProfileMemory(
+            key = key,
+            value = fact,
+            characterId = characterId.trim(),
+            sensitivity = sensitivity,
+            timestampMs = timestampMs
+        )
     }
 
     fun editMemory(memoryId: String, update: (MindNode) -> MindNode): Boolean {
@@ -237,7 +256,12 @@ class MemoryManager(
     fun getMemory(memoryId: String): MindNode? =
         semanticIndex.get(memoryId) ?: profileMemories[memoryId] ?: archivedMemories[memoryId]?.payload
 
-    fun searchMemories(query: String, limit: Int, nowEpochMs: Long = System.currentTimeMillis()): List<MindNode> {
+    fun searchMemories(
+        query: String,
+        limit: Int,
+        characterIdHint: String? = null,
+        nowEpochMs: Long = System.currentTimeMillis()
+    ): List<MindNode> {
         if (query.isBlank() || limit <= 0) return emptyList()
         runScheduledCleanup(nowEpochMs)
         val sessionNodes = sessionTurns.map { it.toMindNode() }
@@ -249,7 +273,12 @@ class MemoryManager(
         val all = sessionNodes + profileNodes + semanticNodes
         return MemoryRetrievalService.retrieveWithSuggestions(
             memories = all,
-            context = MemoryRetrievalService.RetrievalContext(prompt = query, task = "memory_search", nowEpochMs = nowEpochMs),
+            context = MemoryRetrievalService.RetrievalContext(
+                prompt = query,
+                task = "memory_search",
+                characterIdHint = characterIdHint,
+                nowEpochMs = nowEpochMs
+            ),
             limit = limit,
             filters = MemoryRetrievalService.RetrievalFilters(
                 minRelevance = 0f,
@@ -300,12 +329,18 @@ class MemoryManager(
         prompt: String,
         task: String,
         limit: Int,
+        characterIdHint: String? = null,
         nowEpochMs: Long = System.currentTimeMillis()
     ): List<MindNode> {
         runScheduledCleanup(nowEpochMs)
         if (policySettings.mode == MemoryPolicyMode.OFF || limit <= 0) return emptyList()
 
-        val context = MemoryRetrievalService.RetrievalContext(prompt = prompt, task = task, nowEpochMs = nowEpochMs)
+        val context = MemoryRetrievalService.RetrievalContext(
+            prompt = prompt,
+            task = task,
+            characterIdHint = characterIdHint,
+            nowEpochMs = nowEpochMs
+        )
         val sessionMemories = sessionTurns.map { it.toMindNode() }
         val profile = profileMemories.values.toList()
         val semantic = if (policySettings.mode == MemoryPolicyMode.PERSISTENT) {
@@ -436,17 +471,6 @@ class MemoryManager(
         }
 
         return removed
-        }.forEach { expiredId -> sessionTurns.removeAll { it.id == expiredId } }
-
-        purgeExpiredByCategory(MemoryCategory.PROFILE, expiryMap[MemoryCategory.PROFILE]) { maxAgeMs ->
-            profileMemories.values.selectExpiredByTimestamp(nowEpochMs = nowEpochMs, maxAgeMs = maxAgeMs)
-        }.forEach { profileMemories.remove(it) }
-
-        purgeExpiredByCategory(MemoryCategory.SEMANTIC, expiryMap[MemoryCategory.SEMANTIC]) { maxAgeMs ->
-            semanticIndex.memories().selectExpiredByTimestamp(nowEpochMs = nowEpochMs, maxAgeMs = maxAgeMs)
-        }.let { semanticIndex.deleteMany(it) }
-
-        if (sessionTurns.isEmpty() && profileMemories.isEmpty() && semanticIndex.size() == 0) return
     }
 
     private fun purgeExpiredByCategory(
@@ -456,8 +480,6 @@ class MemoryManager(
     ): List<String> {
         if (maxAgeMs == null) return emptyList()
         val selection = selectExpired(maxAgeMs)
-        persistenceStore.deleteExpired(category, selection.expiredIds)
-        expiryPurgeCounters.compute(category) { _, count -> (count ?: 0) + selection.expiredIds.size }
         if (selection.expiredIds.isNotEmpty()) {
             persistenceStore.deleteExpired(category, selection.expiredIds)
             expiryPurgeCounters.compute(category) { _, count -> (count ?: 0) + selection.expiredIds.size }

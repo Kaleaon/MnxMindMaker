@@ -21,6 +21,9 @@ import com.kaleaon.mnxmindmaker.model.MindGraph
  *
  * Text-based formats (.md, .json, .txt, .csv) can also be parsed from a raw
  * string via [parseText] when the text has already been loaded by the caller.
+ *
+ * JSON imports also support provider-export style chat transcripts (OpenAI/Claude/Gemini-like
+ * envelopes) and will cluster imported turns by inferred actor voice/viewpoint.
  */
 object FileImporter {
 
