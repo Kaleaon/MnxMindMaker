@@ -175,10 +175,12 @@ class FoundationalTools(
     private fun executeMemorySearch(invocation: ToolInvocation, graph: MindGraph): ToolExecutionOutcome {
         val query = invocation.argumentsJson.optString("query").trim()
         val limit = invocation.argumentsJson.optInt("limit", 10).coerceIn(1, 50)
-        val results = memoryManager.searchMemories(query, limit)
+        val characterId = invocation.argumentsJson.optString("character_id").trim().ifBlank { null }
+        val results = memoryManager.searchMemories(query, limit, characterIdHint = characterId)
         val payload = JSONObject()
             .put("query", query)
             .put("limit", limit)
+            .put("character_id", characterId)
             .put("results", JSONArray().apply { results.forEach { put(memoryToJson(it)) } })
         return ToolExecutionOutcome(payload, mutatedGraph = false)
     }
@@ -201,6 +203,7 @@ class FoundationalTools(
                 key = memoryId,
                 value = value,
                 writingStyle = args.optString("writing_style").ifBlank { null },
+                characterId = args.optString("character_id").ifBlank { null },
                 sensitivity = sensitivity
             )
             "semantic" -> memoryManager.upsertSemanticMemory(
@@ -215,6 +218,8 @@ class FoundationalTools(
                         "sensitivity" to sensitivity,
                         "timestamp" to System.currentTimeMillis().toString(),
                         "tags" to args.optString("tags")
+                    ).apply {
+                        args.optString("character_id").ifBlank { null }?.let { put("character_id", it) }
                     )
                 )
             )
@@ -258,6 +263,7 @@ class FoundationalTools(
                 attributes = node.attributes.toMutableMap().apply {
                     if (args.has("sensitivity")) put("sensitivity", targetSensitivity)
                     if (args.has("tags")) put("tags", args.optString("tags"))
+                    if (args.has("character_id")) put("character_id", args.optString("character_id"))
                     if (args.has("writing_style")) put("writing_style", args.optString("writing_style"))
                     put("timestamp", System.currentTimeMillis().toString())
                 }

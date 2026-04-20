@@ -4,6 +4,7 @@ import com.kaleaon.mnxmindmaker.model.MindEdge
 import com.kaleaon.mnxmindmaker.model.MindGraph
 import com.kaleaon.mnxmindmaker.model.MindNode
 import com.kaleaon.mnxmindmaker.model.NodeType
+import java.util.Locale
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -17,6 +18,12 @@ import org.json.JSONObject
  *  - JSON array: each element becomes a node under the root identity
  */
 object DataMapper {
+    private data class ImportedUtterance(
+        val actor: String,
+        val role: String,
+        val content: String,
+        val timestamp: Long
+    )
 
     /** All known dimension names across all NodeTypes, for cross-type auto-assignment. */
     private val ALL_DIMENSION_NAMES: Set<String> by lazy {
@@ -83,11 +90,237 @@ object DataMapper {
     fun fromJson(jsonText: String, graphName: String = "Imported Mind"): MindGraph {
         val trimmed = jsonText.trim()
         return if (trimmed.startsWith("[")) {
-            fromJsonArray(JSONArray(trimmed), graphName)
+            val array = JSONArray(trimmed)
+            fromProviderExportIfRecognized(array, graphName) ?: fromJsonArray(array, graphName)
         } else {
-            fromJsonObject(JSONObject(trimmed), graphName)
+            val obj = JSONObject(trimmed)
+            fromProviderExportIfRecognized(obj, graphName) ?: fromJsonObject(obj, graphName)
         }
     }
+
+    private fun fromProviderExportIfRecognized(json: Any, graphName: String): MindGraph? {
+        val utterances = extractUtterances(json)
+        if (utterances.size < 2) return null
+        val hasMultiActor = utterances.map { it.actor }.distinct().size > 1
+        if (!hasMultiActor && !looksLikeProviderExportEnvelope(json)) return null
+        return buildConversationGraph(utterances, graphName)
+    }
+
+    private fun looksLikeProviderExportEnvelope(json: Any): Boolean = when (json) {
+        is JSONObject -> listOf(
+            "messages", "mapping", "conversations", "chat_history", "threads", "items", "choices"
+        ).any { json.has(it) }
+        is JSONArray -> json.length() > 0 && (json.opt(0) is JSONObject)
+        else -> false
+    }
+
+    private fun extractUtterances(root: Any): List<ImportedUtterance> {
+        val out = mutableListOf<ImportedUtterance>()
+        val seen = mutableSetOf<String>()
+
+        fun add(actor: String?, role: String?, content: String?, timestamp: Long?) {
+            val text = content?.trim().orEmpty()
+            if (text.isBlank()) return
+            val normalizedActor = normalizeActor(actor, role)
+            val normalizedRole = role?.trim()?.lowercase(Locale.ROOT).orEmpty().ifBlank { "assistant" }
+            val ts = timestamp ?: System.currentTimeMillis()
+            val dedupe = "$normalizedActor|$normalizedRole|$text|$ts"
+            if (!seen.add(dedupe)) return
+            out += ImportedUtterance(
+                actor = normalizedActor,
+                role = normalizedRole,
+                content = text,
+                timestamp = ts
+            )
+        }
+
+        fun recurse(node: Any?, inheritedActor: String? = null, inheritedRole: String? = null) {
+            when (node) {
+                is JSONObject -> {
+                    val role = node.optString("role").ifBlank {
+                        node.optJSONObject("author")?.optString("role").orEmpty()
+                    }.ifBlank { inheritedRole.orEmpty() }
+                    val actor = node.optString("actor").ifBlank {
+                        node.optString("name")
+                    }.ifBlank {
+                        node.optJSONObject("author")?.optString("name").orEmpty()
+                    }.ifBlank {
+                        node.optString("model")
+                    }.ifBlank {
+                        node.optString("provider")
+                    }.ifBlank { inheritedActor.orEmpty() }
+                    val timestamp = node.optLong("timestamp").takeIf { it > 0 }
+                        ?: node.optLong("created_at").takeIf { it > 0 }
+                        ?: node.optLong("create_time").takeIf { it > 0 }
+
+                    val directContent = node.optString("content").ifBlank {
+                        node.optString("text")
+                    }.ifBlank {
+                        node.optJSONObject("content")?.optString("text").orEmpty()
+                    }.ifBlank {
+                        node.optJSONObject("content")
+                            ?.optJSONArray("parts")
+                            ?.toDelimitedText()
+                            .orEmpty()
+                    }
+                    add(actor, role, directContent, timestamp)
+
+                    val prompt = node.optString("prompt")
+                    val response = node.optString("response")
+                    if (prompt.isNotBlank()) add("user", "user", prompt, timestamp)
+                    if (response.isNotBlank()) add(actor, "assistant", response, timestamp)
+
+                    node.keys().forEach { key ->
+                        recurse(node.opt(key), actor, role)
+                    }
+                }
+                is JSONArray -> {
+                    for (i in 0 until node.length()) {
+                        recurse(node.opt(i), inheritedActor, inheritedRole)
+                    }
+                }
+            }
+        }
+
+        recurse(root)
+        return out.sortedBy { it.timestamp }
+    }
+
+    private fun buildConversationGraph(utterances: List<ImportedUtterance>, graphName: String): MindGraph {
+        val nodes = mutableListOf<MindNode>()
+        val edges = mutableListOf<MindEdge>()
+        val rootNode = MindNode(
+            label = graphName,
+            type = NodeType.IDENTITY,
+            x = 400f,
+            y = 60f,
+            dimensions = DimensionMapper.defaultDimensions(NodeType.IDENTITY),
+            attributes = mutableMapOf(
+                "generated_by_importer" to "provider_export",
+                "imported_turn_count" to utterances.size.toString()
+            )
+        )
+        nodes += rootNode
+
+        val grouped = utterances.groupBy { it.actor }
+        grouped.entries.sortedBy { it.key }.forEachIndexed { actorIndex, (actor, turns) ->
+            val baseX = 120f + (actorIndex % 4) * 220f
+            val baseY = 220f + (actorIndex / 4) * 220f
+            val voiceSummary = inferVoiceSummary(turns)
+            val viewpointSummary = inferViewpointSummary(turns)
+
+            val actorNode = MindNode(
+                label = actor,
+                type = NodeType.PERSONALITY,
+                description = voiceSummary,
+                x = baseX,
+                y = baseY,
+                parentId = rootNode.id,
+                dimensions = DimensionMapper.defaultDimensions(NodeType.PERSONALITY),
+                attributes = mutableMapOf(
+                    "semantic_subtype" to "imported_voice_profile",
+                    "imported_actor" to actor,
+                    "turn_count" to turns.size.toString()
+                )
+            )
+            nodes += actorNode
+            edges += MindEdge(fromNodeId = rootNode.id, toNodeId = actorNode.id, label = "voice")
+
+            val viewpointNode = MindNode(
+                label = "$actor viewpoint",
+                type = NodeType.BELIEF,
+                description = viewpointSummary,
+                x = baseX,
+                y = baseY + 120f,
+                parentId = actorNode.id,
+                dimensions = DimensionMapper.defaultDimensions(NodeType.BELIEF),
+                attributes = mutableMapOf(
+                    "semantic_subtype" to "imported_viewpoint",
+                    "imported_actor" to actor
+                )
+            )
+            nodes += viewpointNode
+            edges += MindEdge(fromNodeId = actorNode.id, toNodeId = viewpointNode.id, label = "viewpoint")
+
+            turns.take(40).forEachIndexed { idx, turn ->
+                val utteranceNode = MindNode(
+                    label = turn.content.take(60) + if (turn.content.length > 60) "…" else "",
+                    type = NodeType.MEMORY,
+                    description = turn.content.take(1200),
+                    x = (baseX - 110f) + (idx % 2) * 220f,
+                    y = baseY + 260f + (idx / 2) * 120f,
+                    parentId = actorNode.id,
+                    dimensions = DimensionMapper.defaultDimensions(NodeType.MEMORY),
+                    attributes = mutableMapOf(
+                        "semantic_subtype" to "imported_turn",
+                        "imported_actor" to actor,
+                        "role" to turn.role,
+                        "timestamp" to turn.timestamp.toString()
+                    )
+                )
+                nodes += utteranceNode
+                edges += MindEdge(fromNodeId = actorNode.id, toNodeId = utteranceNode.id, label = "uttered")
+            }
+        }
+
+        return MindGraph(name = graphName, nodes = nodes, edges = edges)
+    }
+
+    private fun inferVoiceSummary(turns: List<ImportedUtterance>): String {
+        if (turns.isEmpty()) return "No utterances available."
+        val allText = turns.joinToString(" ") { it.content }
+        val totalWords = allText.split(Regex("\\s+")).count { it.isNotBlank() }.coerceAtLeast(1)
+        val avgWordsPerTurn = totalWords.toFloat() / turns.size.toFloat()
+        val questionRatio = turns.count { it.content.contains('?') }.toFloat() / turns.size.toFloat()
+        val exclaimRatio = turns.count { it.content.contains('!') }.toFloat() / turns.size.toFloat()
+        val style = when {
+            avgWordsPerTurn >= 24 -> "verbose"
+            avgWordsPerTurn >= 12 -> "balanced"
+            else -> "concise"
+        }
+        val tone = when {
+            questionRatio > 0.35f -> "inquisitive"
+            exclaimRatio > 0.2f -> "energetic"
+            else -> "measured"
+        }
+        return "Imported voice profile: $style and $tone. Avg words/turn: ${"%.1f".format(avgWordsPerTurn)}."
+    }
+
+    private fun inferViewpointSummary(turns: List<ImportedUtterance>): String {
+        val stopWords = setOf(
+            "the", "and", "for", "with", "that", "this", "from", "you", "your", "are", "was", "were",
+            "have", "has", "had", "not", "but", "can", "will", "would", "should", "about", "into", "their"
+        )
+        val topTerms = turns
+            .flatMap { it.content.lowercase(Locale.ROOT).split(Regex("[^a-z0-9_]+")) }
+            .filter { it.length > 3 && it !in stopWords }
+            .groupingBy { it }
+            .eachCount()
+            .entries
+            .sortedByDescending { it.value }
+            .take(6)
+            .map { it.key }
+        return if (topTerms.isEmpty()) {
+            "Imported viewpoint summary: insufficient signal."
+        } else {
+            "Imported viewpoint themes: ${topTerms.joinToString(", ")}."
+        }
+    }
+
+    private fun normalizeActor(actor: String?, role: String?): String {
+        val candidate = actor?.trim().orEmpty().ifBlank { role?.trim().orEmpty() }
+        if (candidate.isBlank()) return "assistant"
+        return candidate.lowercase(Locale.ROOT)
+            .replace(Regex("[^a-z0-9_\\- ]"), " ")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+            .ifBlank { "assistant" }
+    }
+
+    private fun JSONArray.toDelimitedText(): String =
+        (0 until length())
+            .mapNotNull { idx -> optString(idx).takeIf { it.isNotBlank() } }
+            .joinToString("\n")
 
     private fun fromJsonObject(jsonObj: JSONObject, graphName: String): MindGraph {
         if (jsonObj.has("kernel")) {
