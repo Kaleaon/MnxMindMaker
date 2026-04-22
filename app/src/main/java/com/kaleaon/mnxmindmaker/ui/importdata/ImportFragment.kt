@@ -17,7 +17,7 @@ import com.kaleaon.mnxmindmaker.util.FileImporter
 class ImportFragment : Fragment() {
 
     private var _binding: FragmentImportBinding? = null
-    private val binding get() = _binding!!
+    private val binding get() = requireNotNull(_binding) { "Binding accessed outside of view lifecycle." }
 
     /**
      * The format detected when the user loaded a file via the picker.

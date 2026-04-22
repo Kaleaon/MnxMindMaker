@@ -248,7 +248,9 @@ object MindInterchangeFormat {
             if (!node.has("dimensions") || node.optJSONObject("dimensions") == null) {
                 throw ValidationException("graph.nodes[$i].dimensions must be an object")
             }
-            val dimensions = node.optJSONObject("dimensions")!!
+            val dimensions = requireNotNull(node.optJSONObject("dimensions")) {
+                "graph.nodes[$i].dimensions must be an object"
+            }
             dimensions.keys().forEach { key ->
                 val value = dimensions.optDouble(key, Double.NaN)
                 if (!value.isFinite()) {

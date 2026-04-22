@@ -58,7 +58,7 @@ import java.util.Date
 class SettingsFragment : Fragment() {
 
     private var _binding: FragmentSettingsBinding? = null
-    private val binding get() = _binding!!
+    private val binding get() = requireNotNull(_binding) { "Binding accessed outside of view lifecycle." }
 
     private lateinit var repository: LlmSettingsRepository
     private lateinit var authRepository: AuthRepository

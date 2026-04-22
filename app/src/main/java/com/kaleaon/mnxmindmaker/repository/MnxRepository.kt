@@ -38,6 +38,15 @@ import org.json.JSONObject
 class MnxRepository(private val context: Context) {
 
     private val encryptedStore = EncryptedArtifactStore(context)
+    private fun MnxFile.requireRawSection(sectionType: Short): ByteArray =
+        requireNotNull(rawSections[sectionType]) {
+            "MNX file missing required raw section type=$sectionType"
+        }
+
+    private fun MnxFile.requireSection(sectionType: MnxFormat.MnxSectionType): ByteArray =
+        requireNotNull(sections[sectionType]) {
+            "MNX file missing required section type=$sectionType"
+        }
 
     companion object {
         internal const val GRAPH_PAYLOAD_SECTION_TYPE: Short = (-1).toShort()
@@ -474,7 +483,7 @@ class MnxRepository(private val context: Context) {
         val report = migrateArtifact(ByteArrayInputStream(decoded), dryRun = false)
         val mnxFile = report.migratedFile
         return if (mnxFile.hasRawSection(GRAPH_PAYLOAD_SECTION_TYPE)) {
-            deserializeGraphPayload(mnxFile.rawSections[GRAPH_PAYLOAD_SECTION_TYPE]!!)
+            deserializeGraphPayload(mnxFile.requireRawSection(GRAPH_PAYLOAD_SECTION_TYPE))
         } else {
             reconstructGraphFromSections(mnxFile)
         }
@@ -547,7 +556,7 @@ class MnxRepository(private val context: Context) {
         if (!file.hasSection(MnxFormat.MnxSectionType.META)) {
             return if (file.hasRawSection(GRAPH_PAYLOAD_SECTION_TYPE)) 2 else 1
         }
-        val meta = MnxCodec.deserializeMeta(file.sections[MnxFormat.MnxSectionType.META]!!)
+        val meta = MnxCodec.deserializeMeta(file.requireSection(MnxFormat.MnxSectionType.META))
         val explicit = meta.entries[META_SCHEMA_VERSION_KEY]?.toIntOrNull()
         if (explicit != null) return explicit
         if (meta.entries.containsKey(META_LEGACY_PERSONA_DEPLOYMENT_KEY)) return 2
@@ -572,7 +581,7 @@ class MnxRepository(private val context: Context) {
 
     private fun migratePersonaMetaKey(file: MnxFile): Pair<MnxFile, List<MigrationConflict>> {
         if (!file.hasSection(MnxFormat.MnxSectionType.META)) return file to emptyList()
-        val meta = MnxCodec.deserializeMeta(file.sections[MnxFormat.MnxSectionType.META]!!)
+        val meta = MnxCodec.deserializeMeta(file.requireSection(MnxFormat.MnxSectionType.META))
         val entries = meta.entries.toMutableMap()
         val conflicts = mutableListOf<MigrationConflict>()
         val legacy = entries[META_LEGACY_PERSONA_DEPLOYMENT_KEY]
@@ -595,7 +604,7 @@ class MnxRepository(private val context: Context) {
 
     private fun normalizeGraphPayload(file: MnxFile): Pair<MnxFile, List<MigrationConflict>> {
         if (!file.hasRawSection(GRAPH_PAYLOAD_SECTION_TYPE)) return file to emptyList()
-        val graph = deserializeGraphPayload(file.rawSections[GRAPH_PAYLOAD_SECTION_TYPE]!!)
+        val graph = deserializeGraphPayload(file.requireRawSection(GRAPH_PAYLOAD_SECTION_TYPE))
         val conflicts = mutableListOf<MigrationConflict>()
 
         val idCounts = mutableMapOf<String, Int>()
@@ -653,7 +662,7 @@ class MnxRepository(private val context: Context) {
     private fun setSchemaVersion(file: MnxFile, version: Int): MnxFile {
         val sections = file.sections.toMutableMap()
         val existingEntries = if (file.hasSection(MnxFormat.MnxSectionType.META)) {
-            MnxCodec.deserializeMeta(file.sections[MnxFormat.MnxSectionType.META]!!).entries
+            MnxCodec.deserializeMeta(file.requireSection(MnxFormat.MnxSectionType.META)).entries
         } else {
             emptyMap()
         }
@@ -672,7 +681,7 @@ class MnxRepository(private val context: Context) {
 
         if (mnxFile.hasSection(MnxFormat.MnxSectionType.IDENTITY)) {
             val identity = MnxCodec.deserializeIdentity(
-                mnxFile.sections[MnxFormat.MnxSectionType.IDENTITY]!!
+                mnxFile.requireSection(MnxFormat.MnxSectionType.IDENTITY)
             )
             graphName = identity.name
             val identityNodeId = identity.name + "_id"
@@ -701,7 +710,7 @@ class MnxRepository(private val context: Context) {
 
         if (mnxFile.hasSection(MnxFormat.MnxSectionType.META)) {
             val meta = MnxCodec.deserializeMeta(
-                mnxFile.sections[MnxFormat.MnxSectionType.META]!!
+                mnxFile.requireSection(MnxFormat.MnxSectionType.META)
             )
             if (graphName == "Untitled Mind") {
                 graphName = meta.entries["graph_name"] ?: graphName
@@ -711,7 +720,7 @@ class MnxRepository(private val context: Context) {
         val restoredDims: Map<String, Map<String, Float>> =
             if (mnxFile.hasSection(MnxFormat.MnxSectionType.DIMENSIONAL_REFS)) {
                 val dimRefs = MnxCodec.deserializeDimensionalRefs(
-                    mnxFile.sections[MnxFormat.MnxSectionType.DIMENSIONAL_REFS]!!
+                    mnxFile.requireSection(MnxFormat.MnxSectionType.DIMENSIONAL_REFS)
                 )
                 DimensionMapper.restoreDimensions(dimRefs)
             } else {
@@ -731,7 +740,7 @@ class MnxRepository(private val context: Context) {
         if (!mnxFile.hasSection(MnxFormat.MnxSectionType.META)) {
             return PersonaDeploymentManifest.defaults()
         }
-        val meta = MnxCodec.deserializeMeta(mnxFile.sections[MnxFormat.MnxSectionType.META]!!)
+        val meta = MnxCodec.deserializeMeta(mnxFile.requireSection(MnxFormat.MnxSectionType.META))
         return manifestFromMeta(meta)
     }
 
@@ -810,7 +819,7 @@ class MnxRepository(private val context: Context) {
     fun importWorkspacePack(stream: InputStream): MindWorkspacePack {
         val mnxFile = MnxCodec.decode(stream)
         if (mnxFile.hasRawSection(WORKSPACE_PACK_SECTION_TYPE)) {
-            return deserializeWorkspacePack(mnxFile.rawSections[WORKSPACE_PACK_SECTION_TYPE]!!)
+            return deserializeWorkspacePack(mnxFile.requireRawSection(WORKSPACE_PACK_SECTION_TYPE))
         }
 
         throw IllegalArgumentException(
