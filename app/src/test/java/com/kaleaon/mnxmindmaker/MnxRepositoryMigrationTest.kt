@@ -137,7 +137,7 @@ class MnxRepositoryMigrationTest {
 
         val report = repo.migrateArtifact(ByteArrayInputStream(MnxCodec.encodeToBytes(file)))
         val normalized = MnxRepository.deserializeGraphPayload(
-            report.migratedFile.rawSections[MnxRepository.GRAPH_PAYLOAD_SECTION_TYPE]!!
+a            report.migratedFile.rawSections[MnxRepository.GRAPH_PAYLOAD_SECTION_TYPE]!!
         )
 
         assertEquals(listOf("dup", "dup#2", "dup#3", "unique"), normalized.nodes.map { it.id })

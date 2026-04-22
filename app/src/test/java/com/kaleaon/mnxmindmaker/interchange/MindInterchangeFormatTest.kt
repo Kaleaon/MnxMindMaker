@@ -164,4 +164,41 @@ class MindInterchangeFormatTest {
         assertTrue(ex is MindInterchangeFormat.ValidationException)
         assertTrue(ex!!.message!!.contains("must reference an existing node"))
     }
+
+    @Test
+    fun `bundle import rejects missing manifest`() {
+        val graphJson = MindInterchangeFormat.exportJson(sampleGraph())
+        val bytes = java.io.ByteArrayOutputStream().use { baos ->
+            java.util.zip.ZipOutputStream(baos).use { zip ->
+                zip.putNextEntry(java.util.zip.ZipEntry(MindInterchangeFormat.BUNDLE_GRAPH_PATH))
+                zip.write(graphJson.toByteArray(Charsets.UTF_8))
+                zip.closeEntry()
+            }
+            baos.toByteArray()
+        }
+
+        val error = runCatching { MindInterchangeFormat.importBundle(bytes) }.exceptionOrNull()
+        assertTrue(error is MindInterchangeFormat.ValidationException)
+        assertTrue(error!!.message!!.contains("Bundle missing manifest.json"))
+    }
+
+    @Test
+    fun `bundle import rejects missing graph payload`() {
+        val bytes = java.io.ByteArrayOutputStream().use { baos ->
+            java.util.zip.ZipOutputStream(baos).use { zip ->
+                zip.putNextEntry(java.util.zip.ZipEntry(MindInterchangeFormat.BUNDLE_MANIFEST_PATH))
+                zip.write(
+                    """
+                    {"schema_family":"mnx.interchange","schema_version":{"major":1,"minor":0},"entries":[]}
+                    """.trimIndent().toByteArray(Charsets.UTF_8)
+                )
+                zip.closeEntry()
+            }
+            baos.toByteArray()
+        }
+
+        val error = runCatching { MindInterchangeFormat.importBundle(bytes) }.exceptionOrNull()
+        assertTrue(error is MindInterchangeFormat.ValidationException)
+        assertTrue(error!!.message!!.contains("Bundle missing payload/graph.json"))
+    }
 }

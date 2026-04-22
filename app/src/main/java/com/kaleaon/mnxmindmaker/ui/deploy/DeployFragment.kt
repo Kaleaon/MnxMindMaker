@@ -12,7 +12,7 @@ import com.kaleaon.mnxmindmaker.databinding.FragmentDeployBinding
 class DeployFragment : Fragment() {
 
     private var _binding: FragmentDeployBinding? = null
-    private val binding get() = _binding!!
+    private val binding get() = requireNotNull(_binding) { "Binding accessed outside of view lifecycle." }
 
     private val viewModel: DeployViewModel by viewModels()
 

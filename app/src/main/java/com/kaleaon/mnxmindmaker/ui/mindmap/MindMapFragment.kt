@@ -39,7 +39,7 @@ class MindMapFragment : Fragment() {
     private val mentionPattern = Regex("@([A-Za-z0-9_\\-]+)")
 
     private var _binding: FragmentMindMapBinding? = null
-    private val binding get() = _binding!!
+    private val binding get() = requireNotNull(_binding) { "Binding accessed outside of view lifecycle." }
 
     private val viewModel: MindMapViewModel by viewModels()
 
