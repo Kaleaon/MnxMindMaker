@@ -598,33 +598,42 @@ class MnxRepository(private val context: Context) {
         val graph = deserializeGraphPayload(file.rawSections[GRAPH_PAYLOAD_SECTION_TYPE]!!)
         val conflicts = mutableListOf<MigrationConflict>()
 
+        // Pass 1: assign deterministic unique IDs to duplicate nodes while preserving input order.
         val idCounts = mutableMapOf<String, Int>()
-        val remap = mutableMapOf<String, String>()
+        val idRemap = mutableMapOf<String, MutableList<String>>()
         val normalizedNodes = graph.nodes.map { node ->
-            val count = idCounts.getOrDefault(node.id, 0)
-            if (count == 0) {
-                idCounts[node.id] = 1
-                node
-            } else {
-                val newId = "${node.id}#${count + 1}"
-                idCounts[node.id] = count + 1
-                remap[node.id] = newId
+            val nextIndex = idCounts.getOrDefault(node.id, 0) + 1
+            idCounts[node.id] = nextIndex
+            val normalizedId = if (nextIndex == 1) node.id else "${node.id}#${nextIndex}"
+            idRemap.getOrPut(node.id) { mutableListOf() }.add(normalizedId)
+            if (nextIndex > 1) {
                 conflicts += MigrationConflict(
                     code = "duplicate_node_id",
-                    message = "Node id '${node.id}' duplicated; remapped one instance to '$newId'",
+                    message = "Node id '${node.id}' duplicated; remapped one instance to '$normalizedId'",
                     severity = MigrationConflict.Severity.WARNING
                 )
-                node.copy(id = newId)
             }
+            if (normalizedId == node.id) node else node.copy(id = normalizedId)
         }.map { node ->
-            val parent = node.parentId?.let { remap[it] ?: it }
-            if (parent != node.parentId) node.copy(parentId = parent) else node
+            // Pass 2 policy: duplicate-source references are resolved to the first occurrence
+            // of that source ID (stable canonical representative) to avoid ambiguous rewiring.
+            val parent = node.parentId?.let { reference ->
+                idRemap[reference]?.firstOrNull() ?: reference
+            }
+            if (parent != node.parentId) {
+                conflicts += MigrationConflict(
+                    code = "duplicate_reference_resolved",
+                    message = "Parent reference '${node.parentId}' on node '${node.id}' resolved to canonical id '$parent'",
+                    severity = MigrationConflict.Severity.INFO
+                )
+                node.copy(parentId = parent)
+            } else node
         }
 
         val validNodeIds = normalizedNodes.map { it.id }.toSet()
         val normalizedEdges = graph.edges.mapNotNull { edge ->
-            val from = remap[edge.fromNodeId] ?: edge.fromNodeId
-            val to = remap[edge.toNodeId] ?: edge.toNodeId
+            val from = idRemap[edge.fromNodeId]?.firstOrNull() ?: edge.fromNodeId
+            val to = idRemap[edge.toNodeId]?.firstOrNull() ?: edge.toNodeId
             if (from !in validNodeIds || to !in validNodeIds) {
                 conflicts += MigrationConflict(
                     code = "dangling_edge",
@@ -633,6 +642,11 @@ class MnxRepository(private val context: Context) {
                 )
                 null
             } else if (from != edge.fromNodeId || to != edge.toNodeId) {
+                conflicts += MigrationConflict(
+                    code = "duplicate_reference_resolved",
+                    message = "Edge '${edge.id}' endpoint(s) resolved to canonical ids ('$from' -> '$to')",
+                    severity = MigrationConflict.Severity.INFO
+                )
                 edge.copy(fromNodeId = from, toNodeId = to)
             } else {
                 edge
