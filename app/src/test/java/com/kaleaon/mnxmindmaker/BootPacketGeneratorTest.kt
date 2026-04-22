@@ -8,6 +8,7 @@ import com.kaleaon.mnxmindmaker.util.run_continuity_audit
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.Assert.fail
 import org.junit.Test
 
 class BootPacketGeneratorTest {
@@ -155,6 +156,9 @@ class BootPacketGeneratorTest {
 
         assertTrue(context.contains("- [identity] Core Identity"))
         assertTrue(context.contains("…"))
+    }
+
+    @Test
     fun `boot packet retrieval payload retains chunk metadata attributes`() {
         val sessionChunk = MindNode(
             id = "memory-chunk-1",
@@ -184,5 +188,55 @@ class BootPacketGeneratorTest {
         assertTrue(json.contains("\"turn_index\": \"5\""))
         assertTrue(json.contains("\"chunk_span\": \"5:0-128\""))
         assertTrue(json.contains("\"source\": \"assistant\""))
+    }
+
+    @Test
+    fun `boot packet serialization keeps mixed primitive attributes in deterministic key order`() {
+        val mixed = linkedMapOf<String, Any?>(
+            "zeta" to 7,
+            "alpha" to true,
+            "middle" to listOf("x", 3, false)
+        )
+        @Suppress("UNCHECKED_CAST")
+        val unsafeAttributes = mixed as MutableMap<String, String>
+        val node = MindNode(
+            id = "node-mixed",
+            label = "Mixed",
+            type = NodeType.MEMORY,
+            attributes = unsafeAttributes
+        )
+
+        val packet = BootPacketGenerator.generate(MindGraph(nodes = mutableListOf(node)))
+        val json = packet.toJson()
+        val alphaIdx = json.indexOf("\"alpha\"")
+        val middleIdx = json.indexOf("\"middle\"")
+        val zetaIdx = json.indexOf("\"zeta\"")
+        assertTrue(alphaIdx in 0 until middleIdx)
+        assertTrue(middleIdx in 0 until zetaIdx)
+    }
+
+    @Test
+    fun `boot packet serialization fails with structured error for unsupported attribute values`() {
+        val mixed = mutableMapOf<String, Any?>(
+            "ok" to "value",
+            "bad" to Object()
+        )
+        @Suppress("UNCHECKED_CAST")
+        val unsafeAttributes = mixed as MutableMap<String, String>
+        val node = MindNode(
+            id = "node-invalid",
+            label = "Invalid",
+            type = NodeType.MEMORY,
+            attributes = unsafeAttributes
+        )
+        val packet = BootPacketGenerator.generate(MindGraph(nodes = mutableListOf(node)))
+
+        try {
+            packet.toJson()
+            fail("Expected structured serialization error")
+        } catch (ex: BootPacketGenerator.SerializationValidationException) {
+            assertEquals("unsupported_value_type", ex.issue.code)
+            assertTrue(ex.issue.path.contains(".bad"))
+        }
     }
 }

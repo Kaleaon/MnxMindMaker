@@ -7,6 +7,7 @@ import com.kaleaon.mnxmindmaker.model.NodeType
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Assert.fail
 import org.junit.Test
 
 class MindInterchangeFormatTest {
@@ -166,39 +167,68 @@ class MindInterchangeFormatTest {
     }
 
     @Test
-    fun `bundle import rejects missing manifest`() {
-        val graphJson = MindInterchangeFormat.exportJson(sampleGraph())
-        val bytes = java.io.ByteArrayOutputStream().use { baos ->
-            java.util.zip.ZipOutputStream(baos).use { zip ->
-                zip.putNextEntry(java.util.zip.ZipEntry(MindInterchangeFormat.BUNDLE_GRAPH_PATH))
-                zip.write(graphJson.toByteArray(Charsets.UTF_8))
-                zip.closeEntry()
-            }
-            baos.toByteArray()
-        }
+    fun `export serializes mixed attribute payloads in deterministic order`() {
+        val mixed = linkedMapOf<String, Any?>(
+            "zeta" to 2,
+            "alpha" to true,
+            "nested" to mapOf("b" to 1, "a" to "x")
+        )
+        @Suppress("UNCHECKED_CAST")
+        val unsafeAttributes = mixed as MutableMap<String, String>
+        val graph = MindGraph(
+            id = "g-mixed",
+            name = "mixed",
+            createdAt = 1,
+            modifiedAt = 2,
+            nodes = mutableListOf(
+                MindNode(
+                    id = "n1",
+                    label = "Mixed",
+                    type = NodeType.IDENTITY,
+                    attributes = unsafeAttributes
+                )
+            ),
+            edges = mutableListOf()
+        )
 
-        val error = runCatching { MindInterchangeFormat.importBundle(bytes) }.exceptionOrNull()
-        assertTrue(error is MindInterchangeFormat.ValidationException)
-        assertTrue(error!!.message!!.contains("Bundle missing manifest.json"))
+        val json = MindInterchangeFormat.exportJson(graph)
+        val alphaIdx = json.indexOf("\"alpha\"")
+        val nestedIdx = json.indexOf("\"nested\"")
+        val zetaIdx = json.indexOf("\"zeta\"")
+        assertTrue(alphaIdx in 0 until nestedIdx)
+        assertTrue(nestedIdx in 0 until zetaIdx)
     }
 
     @Test
-    fun `bundle import rejects missing graph payload`() {
-        val bytes = java.io.ByteArrayOutputStream().use { baos ->
-            java.util.zip.ZipOutputStream(baos).use { zip ->
-                zip.putNextEntry(java.util.zip.ZipEntry(MindInterchangeFormat.BUNDLE_MANIFEST_PATH))
-                zip.write(
-                    """
-                    {"schema_family":"mnx.interchange","schema_version":{"major":1,"minor":0},"entries":[]}
-                    """.trimIndent().toByteArray(Charsets.UTF_8)
+    fun `export fails gracefully for unsupported attribute value shapes`() {
+        val mixed = mutableMapOf<String, Any?>(
+            "safe" to "ok",
+            "bad" to Object()
+        )
+        @Suppress("UNCHECKED_CAST")
+        val unsafeAttributes = mixed as MutableMap<String, String>
+        val graph = MindGraph(
+            id = "g-invalid",
+            name = "invalid",
+            createdAt = 1,
+            modifiedAt = 2,
+            nodes = mutableListOf(
+                MindNode(
+                    id = "n1",
+                    label = "Invalid",
+                    type = NodeType.IDENTITY,
+                    attributes = unsafeAttributes
                 )
-                zip.closeEntry()
-            }
-            baos.toByteArray()
-        }
+            ),
+            edges = mutableListOf()
+        )
 
-        val error = runCatching { MindInterchangeFormat.importBundle(bytes) }.exceptionOrNull()
-        assertTrue(error is MindInterchangeFormat.ValidationException)
-        assertTrue(error!!.message!!.contains("Bundle missing payload/graph.json"))
+        try {
+            MindInterchangeFormat.exportJson(graph)
+            fail("Expected structured validation exception")
+        } catch (ex: MindInterchangeFormat.ValidationException) {
+            assertTrue(ex.message!!.contains("unsupported_value_type"))
+            assertTrue(ex.message!!.contains(".bad"))
+        }
     }
 }

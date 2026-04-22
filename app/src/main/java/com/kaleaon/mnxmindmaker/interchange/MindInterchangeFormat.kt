@@ -51,6 +51,11 @@ object MindInterchangeFormat {
     )
 
     class ValidationException(message: String) : IllegalArgumentException(message)
+    data class ValidationIssue(
+        val code: String,
+        val path: String,
+        val detail: String
+    )
 
     fun exportJson(
         graph: MindGraph,
@@ -286,9 +291,9 @@ object MindInterchangeFormat {
                     .put("x", node.x.toDouble())
                     .put("y", node.y.toDouble())
                     .put("parent_id", node.parentId)
-                    .put("attributes", JSONObject(node.attributes as Map<String, Any?>))
+                    .put("attributes", toDeterministicJsonObject(node.attributes, "graph.nodes[${node.id}].attributes"))
                     .put("is_expanded", node.isExpanded)
-                    .put("dimensions", JSONObject(node.dimensions.mapValues { it.value.toDouble() }))
+                    .put("dimensions", toDeterministicJsonObject(node.dimensions, "graph.nodes[${node.id}].dimensions"))
             })
         )
         .put(
@@ -369,6 +374,64 @@ object MindInterchangeFormat {
             throw ValidationException("Blob path must be relative and must not contain '..'")
         }
         return normalized
+    }
+
+    private fun toDeterministicJsonObject(
+        raw: Any?,
+        path: String
+    ): JSONObject {
+        val map = raw as? Map<*, *>
+            ?: throw validationError("invalid_map_shape", path, "Expected object/map but got ${raw?.javaClass?.name ?: "null"}")
+        val json = JSONObject()
+        map.keys
+            .mapIndexed { index, key ->
+                val keyString = key as? String
+                    ?: throw validationError("invalid_key_type", "$path.keys[$index]", "Expected string key but got ${key?.javaClass?.name ?: "null"}")
+                if (keyString.isBlank()) {
+                    throw validationError("invalid_key_blank", "$path.keys[$index]", "Attribute keys must be non-blank")
+                }
+                keyString
+            }
+            .sorted()
+            .forEach { key ->
+                json.put(key, toJsonCompatibleValue(map[key], "$path.$key"))
+            }
+        return json
+    }
+
+    private fun toJsonCompatibleValue(raw: Any?, path: String): Any {
+        return when (raw) {
+            null -> JSONObject.NULL
+            is String, is Boolean, is Int, is Long -> raw
+            is Float -> {
+                if (!raw.isFinite()) throw validationError("invalid_number", path, "Float must be finite")
+                raw.toDouble()
+            }
+            is Double -> {
+                if (!raw.isFinite()) throw validationError("invalid_number", path, "Double must be finite")
+                raw
+            }
+            is Short, is Byte -> (raw as Number).toLong()
+            is Number -> {
+                val value = raw.toDouble()
+                if (!value.isFinite()) throw validationError("invalid_number", path, "Number must be finite")
+                value
+            }
+            is CharSequence -> raw.toString()
+            is Char -> raw.toString()
+            is Map<*, *> -> toDeterministicJsonObject(raw, path)
+            is Iterable<*> -> JSONArray(raw.mapIndexed { index, value -> toJsonCompatibleValue(value, "$path[$index]") })
+            is Array<*> -> JSONArray(raw.mapIndexed { index, value -> toJsonCompatibleValue(value, "$path[$index]") })
+            else -> throw validationError(
+                "unsupported_value_type",
+                path,
+                "Unsupported value type: ${raw.javaClass.name}"
+            )
+        }
+    }
+
+    private fun validationError(code: String, path: String, detail: String): ValidationException {
+        return ValidationException("Validation error [$code] at $path: $detail")
     }
 
     private fun JSONObject.toStringMap(): Map<String, String> {
