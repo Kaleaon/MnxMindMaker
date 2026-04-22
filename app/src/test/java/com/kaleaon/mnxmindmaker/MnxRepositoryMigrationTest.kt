@@ -103,4 +103,27 @@ class MnxRepositoryMigrationTest {
             migratedMeta.entries[MnxRepository.META_SCHEMA_VERSION_KEY]
         )
     }
+
+    @Test
+    fun `workspace pack import fails when raw section is missing`() {
+        val repo = MnxRepository(context)
+        val fileWithoutPack = MnxFile(
+            header = MnxHeader(),
+            sections = mapOf(
+                MnxFormat.MnxSectionType.META to MnxCodec.serializeMeta(
+                    MnxMeta(mapOf("pack_type" to "workspace_pack"))
+                )
+            ),
+            rawSections = emptyMap()
+        )
+
+        val error = runCatching {
+            repo.importWorkspacePack(ByteArrayInputStream(MnxCodec.encodeToBytes(fileWithoutPack)))
+        }.exceptionOrNull()
+
+        assertTrue(error is IllegalArgumentException)
+        assertTrue(
+            error!!.message!!.contains("does not contain a workspace pack raw section")
+        )
+    }
 }
