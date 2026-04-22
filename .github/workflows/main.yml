@@ -13,9 +13,97 @@ env:
   JAVA_DISTRIBUTION: 'temurin'
 
 jobs:
+  kotlin-compile-inventory:
+    name: Kotlin Compile Inventory
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up JDK ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v5
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: ${{ env.JAVA_DISTRIBUTION }}
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.4
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          cmdline-tools-version: 11076708
+
+      - name: Install required Android SDK packages
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-34" "build-tools;34.0.0" "platform-tools"
+
+      - name: Compile Kotlin source sets with isolated task logs
+        id: kotlin_compile
+        run: |
+          mkdir -p artifacts/kotlin-compile/raw
+          status=0
+
+          run_task() {
+            local source_set="$1"
+            local task="$2"
+            local log_file="artifacts/kotlin-compile/raw/${task}.log"
+
+            echo "Running $task for ${source_set}"
+            set +e
+            ./gradlew "${task}" --stacktrace --warning-mode all 2>&1 | tee "${log_file}"
+            local task_status=${PIPESTATUS[0]}
+            set -e
+
+            if [ "${task_status}" -ne 0 ]; then
+              status=1
+            fi
+
+            echo "task=${task} source_set=${source_set} exit_code=${task_status}" | tee -a artifacts/kotlin-compile/raw/task-status.log
+          }
+
+          set -e
+          run_task "main" "compileDebugKotlin"
+          run_task "test" "compileDebugUnitTestKotlin"
+          run_task "androidTest" "compileDebugAndroidTestKotlin"
+
+          echo "status=${status}" >> "$GITHUB_OUTPUT"
+
+      - name: Build normalized Kotlin compiler summary
+        if: always()
+        run: |
+          python3 .github/scripts/kotlin_error_inventory.py \
+            --logs-dir artifacts/kotlin-compile/raw \
+            --summary-tsv artifacts/kotlin-compile/normalized-summary.tsv \
+            --tracker-md docs/kotlin-error-baseline.md \
+            --github-repository "${GITHUB_REPOSITORY}"
+
+      - name: Upload Kotlin compile diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kotlin-compile-diagnostics
+          path: |
+            artifacts/kotlin-compile/raw/
+            artifacts/kotlin-compile/normalized-summary.tsv
+            docs/kotlin-error-baseline.md
+
+      - name: Fail job when any compile task fails
+        if: always()
+        run: |
+          if [ "${{ steps.kotlin_compile.outputs.status }}" != "0" ]; then
+            echo "One or more Kotlin compile tasks failed."
+            exit 1
+          fi
+
   test:
     name: Run Tests
     runs-on: ubuntu-latest
+    needs: kotlin-compile-inventory
 
     steps:
       - name: Checkout code
