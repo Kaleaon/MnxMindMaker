@@ -105,25 +105,52 @@ class MnxRepositoryMigrationTest {
     }
 
     @Test
-    fun `workspace pack import fails when raw section is missing`() {
+    fun `normalization handles three duplicate ids with deterministic canonical rewrites`() {
         val repo = MnxRepository(context)
-        val fileWithoutPack = MnxFile(
-            header = MnxHeader(),
-            sections = mapOf(
-                MnxFormat.MnxSectionType.META to MnxCodec.serializeMeta(
-                    MnxMeta(mapOf("pack_type" to "workspace_pack"))
-                )
+        val legacyGraph = MindGraph(
+            id = "g-dup",
+            name = "Dup graph",
+            nodes = mutableListOf(
+                MindNode(id = "dup", label = "dup-1", type = NodeType.IDENTITY),
+                MindNode(id = "dup", label = "dup-2", type = NodeType.BELIEF, parentId = "dup"),
+                MindNode(id = "dup", label = "dup-3", type = NodeType.CUSTOM, parentId = "dup"),
+                MindNode(id = "unique", label = "unique", type = NodeType.CUSTOM, parentId = "dup")
             ),
-            rawSections = emptyMap()
+            edges = mutableListOf(
+                MindEdge(id = "e1", fromNodeId = "dup", toNodeId = "unique", label = "a"),
+                MindEdge(id = "e2", fromNodeId = "unique", toNodeId = "dup", label = "b"),
+                MindEdge(id = "e3", fromNodeId = "dup", toNodeId = "dup", label = "c")
+            )
+        )
+        val payload = MnxRepository.serializeGraphPayload(legacyGraph)
+        val legacyMeta = MnxMeta(
+            mapOf(
+                "app" to "MnxMindMaker",
+                MnxRepository.META_SCHEMA_VERSION_KEY to "3"
+            )
+        )
+        val file = MnxFile(
+            header = MnxHeader(),
+            sections = mapOf(MnxFormat.MnxSectionType.META to MnxCodec.serializeMeta(legacyMeta)),
+            rawSections = mapOf(MnxRepository.GRAPH_PAYLOAD_SECTION_TYPE to payload)
         )
 
-        val error = runCatching {
-            repo.importWorkspacePack(ByteArrayInputStream(MnxCodec.encodeToBytes(fileWithoutPack)))
-        }.exceptionOrNull()
-
-        assertTrue(error is IllegalArgumentException)
-        assertTrue(
-            error!!.message!!.contains("does not contain a workspace pack raw section")
+        val report = repo.migrateArtifact(ByteArrayInputStream(MnxCodec.encodeToBytes(file)))
+        val normalized = MnxRepository.deserializeGraphPayload(
+a            report.migratedFile.rawSections[MnxRepository.GRAPH_PAYLOAD_SECTION_TYPE]!!
         )
+
+        assertEquals(listOf("dup", "dup#2", "dup#3", "unique"), normalized.nodes.map { it.id })
+        assertEquals(listOf("dup", "dup", "dup"), normalized.nodes.mapNotNull { it.parentId })
+        assertTrue(normalized.edges.all { edge ->
+            normalized.nodes.any { it.id == edge.fromNodeId } && normalized.nodes.any { it.id == edge.toNodeId }
+        })
+        assertEquals("dup", normalized.edges.first { it.id == "e1" }.fromNodeId)
+        assertEquals("dup", normalized.edges.first { it.id == "e2" }.toNodeId)
+        assertEquals(
+            "dup" to "dup",
+            normalized.edges.first { it.id == "e3" }.let { it.fromNodeId to it.toNodeId }
+        )
+        assertFalse(report.conflicts.any { it.code == "dangling_edge" })
     }
 }
