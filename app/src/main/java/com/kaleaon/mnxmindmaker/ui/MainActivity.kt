@@ -4,6 +4,7 @@ import android.content.Intent
 import android.content.res.ColorStateList
 import android.net.Uri
 import android.os.Bundle
+import android.util.Log
 import androidx.appcompat.app.AppCompatActivity
 import androidx.navigation.NavController
 import androidx.navigation.fragment.NavHostFragment
@@ -36,8 +37,7 @@ class MainActivity : AppCompatActivity() {
         setContentView(binding.root)
         setSupportActionBar(binding.toolbar)
 
-        val navHostFragment =
-            supportFragmentManager.findFragmentById(R.id.nav_host_fragment) as NavHostFragment
+        val navHostFragment = findNavHostFragment()
         navController = navHostFragment.navController
 
         appBarConfiguration = AppBarConfiguration(
@@ -147,9 +147,28 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onSupportNavigateUp(): Boolean {
-        val navHostFragment =
-            supportFragmentManager.findFragmentById(R.id.nav_host_fragment) as NavHostFragment
+        val navHostFragment = findNavHostFragment()
         return navHostFragment.navController.navigateUp(appBarConfiguration) ||
                 super.onSupportNavigateUp()
+    }
+
+    private fun findNavHostFragment(): NavHostFragment {
+        val fragment = supportFragmentManager.findFragmentById(R.id.nav_host_fragment)
+        return requireNavHostFragment(fragment)
+    }
+
+    companion object {
+        private const val TAG = "MainActivity"
+
+        internal fun requireNavHostFragment(fragment: Any?): NavHostFragment {
+            return fragment as? NavHostFragment ?: run {
+                val actualType = fragment?.javaClass?.name ?: "null"
+                val message =
+                    "Expected NavHostFragment at R.id.nav_host_fragment, but found $actualType. " +
+                            "Ensure activity_main.xml defines a NavHostFragment with that id."
+                Log.e(TAG, message)
+                throw IllegalStateException(message)
+            }
+        }
     }
 }
