@@ -139,6 +139,14 @@ jobs:
       - name: Run lint checks
         run: gradle lintDebug -Plint.abortOnError=true --stacktrace
 
+      - name: Run detekt (warning mode)
+        continue-on-error: true
+        run: gradle :app:checkNonNullAssertions :app:detekt --stacktrace
+
+      - name: Run detekt gate (fail on new issues)
+        run: gradle :app:checkNonNullAssertions :app:detekt -Pdetekt.failOnIssues=true --stacktrace
+
+
       - name: Upload test reports
         if: always()
         uses: actions/upload-artifact@v4
@@ -149,6 +157,7 @@ jobs:
             app/build/reports/lint-results-debug.html
             app/build/reports/lint-results-debug.xml
             app/build/reports/lint-results-debug.txt
+            app/build/reports/detekt/
 
   build:
     name: Build APK

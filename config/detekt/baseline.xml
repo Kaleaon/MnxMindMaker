@@ -1,0 +1,16 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>SwallowedException:HttpClientFactory.kt$HttpClientFactory$e: IllegalArgumentException</ID>
+    <ID>TooGenericExceptionCaught:AssistantProvider.kt$AssistantProvider$throwable: Throwable</ID>
+    <ID>TooGenericExceptionCaught:LlmEdgeProvider.kt$LlmEdgeProvider$throwable: Throwable</ID>
+    <ID>TooGenericExceptionCaught:LocalProvider.kt$LocalProvider$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:OutboundOperationQueue.kt$OutboundOperationQueue$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:PromptPipelineEngine.kt$PromptPipelineEngine$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:ProviderPreflightDiagnostics.kt$ProviderPreflightDiagnostics$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:ProviderRouter.kt$ProviderRouter$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:SkillPackLoader.kt$SkillPackLoader$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:ToolExecutionEngine.kt$ToolExecutionEngine$e: Exception</ID>
+  </CurrentIssues>
+</SmellBaseline>

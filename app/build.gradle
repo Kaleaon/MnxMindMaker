@@ -2,6 +2,7 @@ plugins {
     id 'com.android.application'
     id 'org.jetbrains.kotlin.android'
     id 'org.jetbrains.kotlin.plugin.serialization'
+    id 'io.gitlab.arturbosch.detekt'
 }
 
 def generatedComplianceAssetsDir = layout.buildDirectory.dir("generated/complianceAssets/main")
@@ -58,6 +59,71 @@ android {
             excludes += ['META-INF/INDEX.LIST', 'META-INF/DEPENDENCIES']
         }
     }
+}
+
+
+
+detekt {
+    toolVersion = "1.23.8"
+    config.setFrom(files("$rootDir/config/detekt/detekt.yml"))
+    baseline = file("$rootDir/config/detekt/baseline.xml")
+    parallel = true
+    allRules = false
+    ignoreFailures = !providers.gradleProperty("detekt.failOnIssues").present
+}
+
+tasks.withType(io.gitlab.arturbosch.detekt.Detekt).configureEach {
+    reports {
+        html.required.set(true)
+        sarif.required.set(true)
+        txt.required.set(false)
+        xml.required.set(true)
+    }
+}
+
+def nonNullAssertionBaseline = rootProject.file('config/detekt/non-null-assertion-baseline.txt')
+def mainKotlinSources = fileTree('src/main/java') {
+    include '**/*.kt'
+}
+
+tasks.register('checkNonNullAssertions') {
+    group = 'verification'
+    description = 'Warns on current !! usages and fails CI on new !! usages.'
+
+    doLast {
+        def baselineEntries = nonNullAssertionBaseline.exists()
+            ? nonNullAssertionBaseline.readLines().findAll { !it.trim().isEmpty() && !it.trim().startsWith('#') }.toSet()
+            : [] as Set<String>
+
+        def findings = [] as Set<String>
+        mainKotlinSources.files.each { file ->
+            file.readLines().eachWithIndex { line, idx ->
+                if (line.contains('!!')) {
+                    findings << "${project.relativePath(file)}:${idx + 1}".toString()
+                }
+            }
+        }
+
+        def newFindings = findings.findAll { !baselineEntries.contains(it) }
+
+        if (!findings.isEmpty()) {
+            logger.warn("Kotlin quality gate: found ${findings.size()} total non-null assertions (!!).")
+        }
+        if (!newFindings.isEmpty()) {
+            logger.warn("Kotlin quality gate: found ${newFindings.size()} new non-null assertions not in baseline:")
+            newFindings.sort().each { logger.warn(" - ${it}") }
+            if (providers.gradleProperty('detekt.failOnIssues').present) {
+                throw new GradleException(
+                    "New non-null assertions detected. Remove them or update config/detekt/non-null-assertion-baseline.txt intentionally."
+                )
+            }
+        }
+    }
+}
+
+tasks.named('check') {
+    dependsOn(tasks.named('detekt'))
+    dependsOn(tasks.named('checkNonNullAssertions'))
 }
 
 dependencies {

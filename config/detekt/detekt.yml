@@ -1,0 +1,54 @@
+build:
+  maxIssues: 0
+
+config:
+  validation: true
+  warningsAsErrors: false
+
+processors:
+  active: true
+
+style:
+  MaxLineLength:
+    active: false
+
+potential-bugs:
+  UnsafeCast:
+    active: true
+    includes:
+      - '**/src/main/java/com/kaleaon/mnxmindmaker/repository/**'
+      - '**/src/main/java/com/kaleaon/mnxmindmaker/util/**'
+      - '**/src/main/java/com/kaleaon/mnxmindmaker/interchange/**'
+      - '**/src/main/java/com/kaleaon/mnxmindmaker/mnx/**'
+      - '**/src/main/java/com/kaleaon/mnxmindmaker/persona/**'
+
+exceptions:
+  TooGenericExceptionCaught:
+    active: true
+    exceptionNames:
+      - Exception
+      - RuntimeException
+      - Throwable
+    excludes:
+      - '**/test/**'
+    includes:
+      - '**/src/main/java/com/kaleaon/mnxmindmaker/repository/**'
+      - '**/src/main/java/com/kaleaon/mnxmindmaker/util/**'
+      - '**/src/main/java/com/kaleaon/mnxmindmaker/interchange/**'
+      - '**/src/main/java/com/kaleaon/mnxmindmaker/mnx/**'
+      - '**/src/main/java/com/kaleaon/mnxmindmaker/persona/**'
+  SwallowedException:
+    active: true
+    ignoredExceptionTypes:
+      - InterruptedException
+      - NumberFormatException
+      - ParseException
+      - MalformedURLException
+    excludes:
+      - '**/test/**'
+
+comments:
+  UndocumentedPublicClass:
+    active: false
+  UndocumentedPublicFunction:
+    active: false
