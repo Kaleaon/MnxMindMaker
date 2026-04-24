@@ -1,0 +1,21 @@
+# Existing non-null assertion usages (path:line).
+# New entries are blocked in CI unless explicitly reviewed.
+src/main/java/com/kaleaon/mnxmindmaker/interchange/MindInterchangeFormat.kt:251
+src/main/java/com/kaleaon/mnxmindmaker/repository/MnxRepository.kt:477
+src/main/java/com/kaleaon/mnxmindmaker/repository/MnxRepository.kt:550
+src/main/java/com/kaleaon/mnxmindmaker/repository/MnxRepository.kt:575
+src/main/java/com/kaleaon/mnxmindmaker/repository/MnxRepository.kt:598
+src/main/java/com/kaleaon/mnxmindmaker/repository/MnxRepository.kt:656
+src/main/java/com/kaleaon/mnxmindmaker/repository/MnxRepository.kt:675
+src/main/java/com/kaleaon/mnxmindmaker/repository/MnxRepository.kt:704
+src/main/java/com/kaleaon/mnxmindmaker/repository/MnxRepository.kt:714
+src/main/java/com/kaleaon/mnxmindmaker/repository/MnxRepository.kt:734
+src/main/java/com/kaleaon/mnxmindmaker/repository/MnxRepository.kt:813
+src/main/java/com/kaleaon/mnxmindmaker/ui/deploy/DeployFragment.kt:15
+src/main/java/com/kaleaon/mnxmindmaker/ui/importdata/ImportFragment.kt:20
+src/main/java/com/kaleaon/mnxmindmaker/ui/mindmap/MindMapFragment.kt:42
+src/main/java/com/kaleaon/mnxmindmaker/ui/mindmap/MindMapView.kt:158
+src/main/java/com/kaleaon/mnxmindmaker/ui/settings/SettingsFragment.kt:61
+src/main/java/com/kaleaon/mnxmindmaker/util/MarkdownImporter.kt:138
+src/main/java/com/kaleaon/mnxmindmaker/util/tooling/ToolRegistry.kt:557
+src/main/java/com/kaleaon/mnxmindmaker/util/tooling/ToolRegistry.kt:561
