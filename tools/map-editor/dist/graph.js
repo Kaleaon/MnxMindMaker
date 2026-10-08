@@ -1,4 +1,4 @@
-export const MAX_BYTES = 10 * 1024 * 1024;
+export const MAX_BYTES = 64 * 1024 * 1024;
 export const NODE_TYPES = ['IDENTITY', 'MEMORY', 'KNOWLEDGE', 'STATE', 'AFFECT', 'PERSONALITY', 'BELIEF', 'VALUE', 'RELATIONSHIP', 'DRIFT_RULE', 'CUSTOM'];
 const requireValue = (condition, message) => { if (!condition) throw new Error(message); };
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -50,11 +50,22 @@ export function validateMap(map) {
     requireValue(edge.label === undefined || typeof edge.label === 'string', 'Connection labels must be text.');
     edges.add(edge.id);
   }
+  // Internal content references must resolve in this same map. External URLs
+  // remain provenance and do not substitute for retained content.
+  const pending = [map];
+  while (pending.length) {
+    const value = pending.pop();
+    if (typeof value === 'string') {
+      for (const match of value.matchAll(/mnx:\/\/node\/([A-Za-z0-9:_-]+)/g)) {
+        requireValue(nodes.has(match[1]), 'An internal content reference points to a missing node: ' + match[1]);
+      }
+    } else if (value && typeof value === 'object') pending.push(...Object.values(value));
+  }
   return map;
 }
 
 export function parseMap(raw) {
-  requireValue(new TextEncoder().encode(raw).length <= MAX_BYTES, 'Maps must be smaller than 10 MiB.');
+  requireValue(new TextEncoder().encode(raw).length <= MAX_BYTES, 'Maps must be smaller than 64 MiB.');
   return validateMap(JSON.parse(raw));
 }
 export function createMap(name = 'Untitled map') {
@@ -93,7 +104,7 @@ export function removeNode(map, id) {
 }
 export function serializeMap(map) {
   validateMap(map); const raw = JSON.stringify(map, null, 2);
-  requireValue(new TextEncoder().encode(raw).length <= MAX_BYTES, 'Maps must be smaller than 10 MiB.');
+  requireValue(new TextEncoder().encode(raw).length <= MAX_BYTES, 'Maps must be smaller than 64 MiB.');
   return raw;
 }
 

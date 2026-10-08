@@ -27,7 +27,7 @@ test('invalid schemas, duplicate IDs, broken references and oversized maps fail'
  const duplicate=fixture(); duplicate.graph.nodes.push(structuredClone(duplicate.graph.nodes[0])); assert.throws(()=>parseMap(JSON.stringify(duplicate)),/Duplicate/);
  const newer=fixture(); newer.schema.version.major=2; assert.throws(()=>parseMap(JSON.stringify(newer)),/version 1/);
  const broken=fixture(); broken.graph.edges[0].to_node_id='missing'; assert.throws(()=>parseMap(JSON.stringify(broken)),/missing node/);
- assert.throws(()=>parseMap(' '.repeat(10*1024*1024+1)),/10 MiB/);
+ assert.throws(()=>parseMap(' '.repeat(64*1024*1024+1)),/64 MiB/);
 });
 test('folder listing follows pagination and sends resource-key and token headers', async () => {
  const calls=[]; const drive=new DriveClient('token',async(url,options)=>{

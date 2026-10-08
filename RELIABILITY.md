@@ -8,7 +8,7 @@ recovery; no component promises universal failure prevention.
 
 - Browser map validation rejects duplicate IDs, dangling edges, cyclic parents,
   invalid attribute/dimension types and files over the supported limits.
-- The editor retains the latest and previous valid local draft, offers recovery
+- The editor retains the latest and previous valid local draft in IndexedDB, offers recovery
   on reload, and warns when browser storage is unavailable. Tokens are excluded.
 - Drive saves require matching versions and a conditional-write ETag. Missing
   ETags block writes. Save success requires content readback. Network requests
@@ -53,3 +53,14 @@ Browser recovery can be lost by clearing storage or changing browser/origin, and
 space is limited. Downloaded or off-site backups remain necessary. Drive writes
 may commit before a network timeout; a failed response does not prove no write
 occurred. Conditional-save support must be verified against real Google credentials.
+
+Embedded source data is directly readable in the inspector. Embedded PDFs can be
+downloaded from the map with a SHA-256 check. Internal `mnx://node/<id>` links are
+validated against the same graph. Browser map size is bounded at 64 MiB and undo
+history retains at most 20 MiB of snapshots, or one larger snapshot. IndexedDB
+is preferred to accommodate maps containing full retained sources.
+
+Known Android blocker: after fixing SDK setup, CI now reaches Kotlin compilation
+and reports existing conflicting declarations and missing braces in encryption
+and mind-map sources. Android build reliability is not yet established. Track
+these through the compiler inventory before claiming a working Android release.

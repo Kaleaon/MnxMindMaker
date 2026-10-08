@@ -51,3 +51,8 @@ test('editing a verified statement resets verification and retains provenance',a
  assert.equal(n.attributes.verification_status,'unchecked');assert.equal(n.attributes.source_uri,'https://source.test');
  assert.equal(n.label,'[UNVERIFIED] Changed claim');assert.equal(JSON.parse(n.attributes.history_json)[0].previous.label,'[PROVEN] Old theorem');
 });
+test('internal content links must resolve without needing Drive',()=>{
+ const m=createMap(),n=addNode(m);n.attributes.supporting_data_uri='mnx://node/missing';
+ assert.throws(()=>serializeMap(m),/internal content reference/);n.attributes.supporting_data_uri='mnx://node/'+n.id;
+ assert.equal(parseMap(serializeMap(m)).graph.nodes[0].attributes.supporting_data_uri,'mnx://node/'+n.id);
+});

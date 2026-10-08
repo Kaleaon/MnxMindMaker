@@ -1,6 +1,6 @@
-import { NODE_TYPES, addNode, createMap, editorLink, parseDriveLink, parseMap, removeNode, reviseNode, serializeMap } from './graph.js';
+import { MAX_BYTES, NODE_TYPES, addNode, createMap, editorLink, parseDriveLink, parseMap, removeNode, reviseNode, serializeMap, validateMap } from './graph.js';
 import { ConflictError, DriveClient, connectGoogle } from './drive.js';
-import { DraftRecovery } from './recovery.js';
+import { DraftRecovery, IndexedDraftRecovery } from './recovery.js';
 const $ = id => document.getElementById(id);
 const state = { map: createMap(), file: null, folder: null, files: [], drive: null, selected: null, dirty: false,
   busy: false, undo: [], box: [-500, -350, 1000, 700], connected: false, generation: 0 };
@@ -8,11 +8,12 @@ const config = window.MNX_CONFIG || {};
 let storage; try { storage = window.localStorage; } catch { /* storage may be blocked */ }
 let clientId = config.googleClientId || '';
 try { clientId ||= storage?.getItem('mnx.googleClientId') || ''; } catch { /* settings storage unavailable */ }
-const recovery = storage ? new DraftRecovery(storage) : null;
+let recovery = storage ? new DraftRecovery(storage) : null;
+try { if (window.indexedDB) recovery = new IndexedDraftRecovery(window.indexedDB); } catch { /* retain localStorage fallback */ }
 let draftTimer;
-function checkpoint() {
+async function checkpoint() {
   clearTimeout(draftTimer);
-  try { if (!recovery) throw new Error('Storage unavailable'); recovery.write(state.map, state.file, state.dirty); }
+  try { if (!recovery) throw new Error('Storage unavailable'); await recovery.write(state.map, state.file, state.dirty); }
   catch { say('Local recovery is unavailable or full. Download your draft to keep a backup.', true, true); }
 }
 let messageTimer;
@@ -36,10 +37,20 @@ async function action(fn) {
   finally { state.busy = false; render(); }
 }
 function remember() {
-  state.undo.push(serializeMap(state.map)); if (state.undo.length > 30) state.undo.shift();
+  state.undo.push(serializeMap(state.map));
+  let bytes = state.undo.reduce((total, raw) => total + new TextEncoder().encode(raw).length, 0);
+  while (state.undo.length > 1 && (state.undo.length > 30 || bytes > 20 * 1024 * 1024)) bytes -= new TextEncoder().encode(state.undo.shift()).length;
 }
 function changed() { state.dirty = true; state.generation++; state.map.graph.modified_at = Date.now(); clearTimeout(draftTimer); draftTimer = setTimeout(checkpoint, 250); }
-function mutate(fn) { if (!editable()) return; remember(); fn(); changed(); render(); }
+function mutate(fn) {
+  if (!editable()) return;
+  let rollback;
+  try { remember(); rollback = state.undo.at(-1); fn(); validateMap(state.map); changed(); render(); }
+  catch (error) {
+    if (rollback) { state.map = parseMap(rollback); state.undo.pop(); state.selected = null; render(); }
+    say(error.message || 'The edit was rejected; the previous map is retained.', true, true);
+  }
+}
 function canLeave() { return !state.dirty || confirm('This map has unsaved changes. Download or save your draft to keep them. Discard changes and continue?'); }
 function updateLink() { history.replaceState(null, '', editorLink(location.href, state.folder, state.file)); }
 function loadMap(map, file = null) {
@@ -123,7 +134,15 @@ function renderInspector() {
   $('node-label').value = node.label; $('node-description').value = node.description || '';
   if (![...$('node-type').options].some(option => option.value === node.type)) $('node-type').add(new Option(node.type, node.type));
   $('node-type').value = node.type;
-  $('node-attributes').textContent = JSON.stringify({ attributes: node.attributes || {}, dimensions: node.dimensions || {} }, null, 2);
+  const attributes = { ...(node.attributes || {}) };
+  for (const key of ['embedded_text', 'embedded_pdf_base64', 'embedded_data_json']) {
+    if (attributes[key]) attributes[key] = '[Retained in this map: ' + attributes[key].length + ' characters]';
+  }
+  $('node-attributes').textContent = JSON.stringify({ attributes, dimensions: node.dimensions || {} }, null, 2);
+  $('embedded-content').hidden = !(node.attributes?.embedded_text || node.attributes?.embedded_data_json || node.attributes?.embedded_pdf_base64);
+  const sourceText = node.attributes?.embedded_text || node.attributes?.embedded_data_json || '';
+  $('embedded-text').textContent = sourceText;
+  $('embedded-pdf-button').hidden = !node.attributes?.embedded_pdf_base64;
   $('edge-target').replaceChildren();
   for (const other of state.map.graph.nodes) if (other.id !== node.id) $('edge-target').add(new Option(other.label, other.id));
   $('edge-list').replaceChildren();
@@ -177,7 +196,7 @@ $('new-map-button').onclick = () => { if (!state.busy && canLeave()) { loadMap(c
 $('import-button').onclick = () => { if (canLeave()) $('import-input').click(); };
 $('import-input').onchange = event => {
   const file = event.target.files[0]; if (!file) return;
-  action(async () => { if (file.size > 10*1024*1024) throw new Error('Maps must be smaller than 10 MiB.'); loadMap(parseMap(await file.text())); say('Map imported as a local draft. Save it to your Drive folder to share it.'); });
+  action(async () => { if (file.size > MAX_BYTES) throw new Error('Maps must be smaller than 64 MiB.'); loadMap(parseMap(await file.text())); say('Map imported as a local draft. Save it to your Drive folder to share it.'); });
   event.target.value = '';
 };
 $('map-name').onchange = () => { const name = $('map-name').value.trim(); if (!name) { say('Give your map a name.', true); $('map-name').value = state.map.graph.name; return; } mutate(() => { state.map.graph.name = name; }); };
@@ -196,6 +215,16 @@ $('node-form').onsubmit = event => { event.preventDefault(); const label = $('no
   if (!label) return say('Concept labels cannot be empty.', true);
   mutate(() => { const node = state.map.graph.nodes.find(item => item.id === state.selected); reviseNode(node, { label, description, type }); });
 };
+$('embedded-pdf-button').onclick = () => action(async () => {
+  const node = state.map.graph.nodes.find(item => item.id === state.selected);
+  const a = node?.attributes; if (!a?.embedded_pdf_base64) return;
+  const bytes = Uint8Array.from(atob(a.embedded_pdf_base64), c => c.charCodeAt(0));
+  const digest = [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map(n => n.toString(16).padStart(2, '0')).join('');
+  if (digest !== a.embedded_pdf_sha256) throw new Error('Embedded PDF failed its integrity check. Keep this map and recover a verified version.');
+  const url = URL.createObjectURL(new Blob([bytes], {type:'application/pdf'}));
+  const anchor = document.createElement('a'); anchor.href = url; anchor.download = a.embedded_pdf_name || 'source.pdf'; anchor.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+});
 $('delete-node-button').onclick = () => { if (confirm('Delete this concept and its connections?')) mutate(() => { removeNode(state.map, state.selected); state.selected = null; }); };
 $('edge-form').onsubmit = event => { event.preventDefault(); const target = $('edge-target').value, label = $('edge-label').value.trim(); if (!target) return;
   mutate(() => { state.map.graph.edges.push({ id: crypto.randomUUID(), from_node_id: state.selected, to_node_id: target, label, strength: 1 }); }); $('edge-label').value = '';
@@ -265,9 +294,16 @@ if (document.modelContext?.registerTool) {
   }, { signal: lifetime.signal })).catch(() => {}); } catch { /* optional browser API */ }
   window.addEventListener('pagehide', () => lifetime.abort(), { once: true });
 }
-const recovered = recovery?.read();
-if (recovered?.dirty && confirm('Recover your unsaved map draft from this browser?')) {
-  state.map = recovered.map; state.file = recovered.file; state.dirty = true; fit();
-  say('Draft recovered. Connect Drive to save; concurrent edits will be checked.', false, true);
-}
-render();
+// Keep editing disabled until recovery is inspected, preventing an empty map
+// from overwriting a stored draft during startup.
+(async () => {
+  state.busy = true; render();
+  try {
+    const recovered = await recovery?.read() || (storage ? new DraftRecovery(storage).read() : null);
+    if (recovered?.dirty && confirm('Recover your unsaved map draft from this browser?')) {
+      state.map = recovered.map; state.file = recovered.file; state.dirty = true; fit();
+      say('Draft recovered. Connect Drive to save; concurrent edits will be checked.', false, true);
+    }
+  } catch { say('Local recovery could not be read. Keep a downloaded backup of your map.', true, true); }
+  finally { state.busy = false; render(); }
+})();

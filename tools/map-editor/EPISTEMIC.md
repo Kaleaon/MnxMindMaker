@@ -31,3 +31,9 @@ unchecked until recorded and reviewed; missing evidence records imply unchecked.
 
 The knowledge-core claim/entity contract remains unchanged. Map classifications
 are authoring metadata, not accepted core revisions or proof certificates.
+
+Content retention: internal `mnx://node/<id>` references resolve inside the same
+map. Data payloads use `embedded_data_json`; source reading text uses
+`embedded_text`; original PDFs use `embedded_pdf_base64`, with name and SHA-256
+attributes. External provenance URLs do not replace retained data. The inspector
+reads embedded text and exports checksum-verified PDFs without fetching them.

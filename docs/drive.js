@@ -45,10 +45,10 @@ export class DriveClient {
     // A before/after version check prevents combining content and metadata from
     // different revisions while another editor is saving.
     const before = await this.metadata(file);
-    if (Number(before.size) > MAX_BYTES) throw new Error('Maps must be smaller than 10 MiB.');
+    if (Number(before.size) > MAX_BYTES) throw new Error('Maps must be smaller than 64 MiB.');
     const response = await this.request(`/files/${encodeURIComponent(file.id)}?alt=media&supportsAllDrives=true`, {}, [file]);
     const length = Number(response.headers.get('content-length'));
-    if (length > MAX_BYTES) throw new Error('Maps must be smaller than 10 MiB.');
+    if (length > MAX_BYTES) throw new Error('Maps must be smaller than 64 MiB.');
     const map = parseMap(await response.text());
     const after = await this.metadata(file);
     if (before.version !== after.version) throw new ConflictError('This map changed while opening. Try opening it again.');
@@ -62,7 +62,7 @@ export class DriveClient {
     if (!current.etag) throw new ConflictError('Drive did not provide a conditional-save token. Download your draft; saving is blocked to protect simultaneous edits.');
     headers['If-Match'] = current.etag;
     const body = serializeMap(map);
-    if (new TextEncoder().encode(body).length > MAX_BYTES) throw new Error('Maps must be smaller than 10 MiB.');
+    if (new TextEncoder().encode(body).length > MAX_BYTES) throw new Error('Maps must be smaller than 64 MiB.');
     const response = await this.request(`https://www.googleapis.com/upload/drive/v3/files/${encodeURIComponent(file.id)}?uploadType=media&supportsAllDrives=true&fields=id,name,version,resourceKey,capabilities(canEdit,canShare)`, { method: 'PATCH', headers, body }, [file]);
     const saved = { ...file, ...await response.json() };
     const verified = await this.readMap(saved);
@@ -73,7 +73,7 @@ export class DriveClient {
     if (!folder?.capabilities?.canAddChildren) throw new Error('You cannot add maps to this folder. Ask its owner for edit access.');
     const boundary = 'mnx_' + crypto.randomUUID();
     const body = `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify({ name: map.graph.name + '.mnxj', mimeType: 'application/json', parents: [folder.id] })}\r\n--${boundary}\r\nContent-Type: application/json\r\n\r\n${serializeMap(map)}\r\n--${boundary}--`;
-    if (new TextEncoder().encode(body).length > MAX_BYTES) throw new Error('Maps must be smaller than 10 MiB.');
+    if (new TextEncoder().encode(body).length > MAX_BYTES) throw new Error('Maps must be smaller than 64 MiB.');
     const response = await this.request('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&supportsAllDrives=true&fields=id,name,version,resourceKey,capabilities(canEdit,canShare)', { method: 'POST', headers: { 'Content-Type': 'multipart/related; boundary=' + boundary }, body }, [folder]);
     return response.json();
   }

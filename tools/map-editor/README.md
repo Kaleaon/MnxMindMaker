@@ -63,7 +63,7 @@ content is read back before success is reported. Writes are never retried
 automatically; an interrupted request may already have committed, so reload
 before retrying. Requests time out after 30 seconds.
 
-Local recovery stores the latest and previous valid draft in browser storage,
+Local recovery stores the latest and previous valid draft in IndexedDB (with a localStorage fallback),
 without OAuth tokens. On reload the editor offers recovery. Storage denial or
 quota exhaustion produces a persistent download warning. Recovery is local to
 this browser and origin, not an off-site backup. Edits checkpoint after 250 ms
@@ -73,6 +73,6 @@ the latest edits.
 Parent cycles and invalid native attributes/dimensions are rejected. Editing a
 statement with epistemic schema v1 resets its verification to unchecked while
 preserving provenance and recording the previous statement in history.
-Limits: 10 MiB, 10,000 nodes, 30,000 connections. Folder listing follows pagination
+Limits: 64 MiB, 10,000 nodes, 30,000 connections. Folder listing follows pagination
 and supports resource keys/shared-drive flags. A map can open even if the visitor
 cannot browse its parent folder. Optional browser WebMCP has one read-only tool.

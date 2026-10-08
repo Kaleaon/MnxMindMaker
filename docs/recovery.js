@@ -24,3 +24,46 @@ export class DraftRecovery {
     this.storage.setItem(this.key, JSON.stringify({ version: 1, raw, file: safeFile, dirty, savedAt: Date.now() }));
   }
 }
+
+export class IndexedDraftRecovery {
+  constructor(indexedDB, key = 'mnx-draft-v1') { this.indexedDB = indexedDB; this.key = key; }
+  async open() {
+    if (!this.database) this.database = new Promise((resolve, reject) => {
+      const request = this.indexedDB.open(this.key, 1);
+      request.onupgradeneeded = () => request.result.createObjectStore('drafts');
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => { this.database = null; reject(request.error); };
+      request.onblocked = () => { this.database = null; reject(new Error('Draft storage is blocked by another tab.')); };
+    });
+    return this.database;
+  }
+  async read() {
+    const db = await this.open();
+    const records = await new Promise((resolve, reject) => {
+      const tx = db.transaction('drafts', 'readonly'), store = tx.objectStore('drafts');
+      const current = store.get('current'), previous = store.get('previous');
+      tx.oncomplete = () => resolve([current.result, previous.result]);
+      tx.onabort = tx.onerror = () => reject(tx.error || new Error('Draft read failed.'));
+    });
+    const decoder = new DraftRecovery(null);
+    for (const raw of records) { try { const result = decoder.decode(raw); if (result) return result; } catch { /* previous slot */ } }
+    return null;
+  }
+  async write(map, file, dirty) {
+    // Serialize before awaiting storage, so later edits cannot alter this checkpoint.
+    let record;
+    const encoder = new DraftRecovery({getItem:()=>null, setItem:(_,value)=>{record=value;}});
+    encoder.write(map, file, dirty);
+    const db = await this.open();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction('drafts', 'readwrite'), store = tx.objectStore('drafts');
+      const request = store.get('current');
+      request.onsuccess = () => {
+        try { if (encoder.decode(request.result)) store.put(request.result, 'previous'); } catch { /* retain valid previous */ }
+        store.put(record, 'current');
+      };
+      tx.oncomplete = () => resolve();
+      tx.onabort = tx.onerror = () => reject(tx.error || new Error('Draft write failed.'));
+    });
+  }
+}
