@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "id": "demo-seed-v1",
+  "base_revision": 0,
+  "contributor": {"id": "demo-adapter", "method": "hand-authored synthetic fixture"},
+  "changes": {
+    "concepts": [
+      {"id": "demo:apple", "label": "Apple", "aliases": ["apple fruit"]},
+      {"id": "demo:fruit", "label": "Fruit"},
+      {"id": "demo:pear", "label": "Pear"}
+    ],
+    "sources": [
+      {"id": "demo:fixture", "kind": "dataset", "title": "Synthetic fruit demonstration; not research evidence", "uri": "urn:mnxmindmaker:synthetic-fruit-fixture:v1"}
+    ],
+    "spaces": [
+      {"id": "demo:shape-v1", "model": "synthetic-two-axis-shape-v1", "dimensions": 2}
+    ],
+    "claims": [
+      {"id": "demo:apple-is-fruit", "subject_id": "demo:apple", "predicate": "is_a", "object": {"concept_id": "demo:fruit"}, "evidence": [{"source_id": "demo:fixture", "locator": "synthetic statement 1"}], "confidence": 0.9},
+      {"id": "demo:apple-summary", "subject_id": "demo:apple", "predicate": "summary", "object": {"literal": "This demo connects an apple concept to a fruit category and a synthetic shape observation."}, "evidence": [{"source_id": "demo:fixture", "locator": "entire fixture"}], "confidence": 1.0}
+    ],
+    "observations": [
+      {"id": "demo:apple-shape", "concept_id": "demo:apple", "modality": "shape", "source_id": "demo:fixture", "locator": "synthetic observation 1", "features": {"description": "invented roundness and elongation values", "units": "arbitrary demo values"}, "embedding": {"space_id": "demo:shape-v1", "values": [0.9, 0.2]}},
+      {"id": "demo:pear-shape", "concept_id": "demo:pear", "modality": "shape", "source_id": "demo:fixture", "locator": "synthetic observation 2", "features": {"description": "invented roundness and elongation values", "units": "arbitrary demo values"}, "embedding": {"space_id": "demo:shape-v1", "values": [0.5, 0.7]}},
+      {"id": "demo:apple-sound", "concept_id": "demo:apple", "modality": "audio", "source_id": "demo:fixture", "locator": "synthetic observation 3", "features": {"description": "placeholder for the sound of a bite; no recording or analysis performed"}},
+      {"id": "demo:apple-chemistry", "concept_id": "demo:apple", "modality": "chemical", "source_id": "demo:fixture", "locator": "synthetic observation 4", "features": {"description": "placeholder for a chemical signature; no measurement performed"}}
+    ]
+  }
+}

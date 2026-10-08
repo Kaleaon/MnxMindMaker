@@ -1,0 +1,355 @@
+{
+  "schema": {
+    "family": "mnx.interchange",
+    "version": {
+      "major": 1,
+      "minor": 0
+    }
+  },
+  "compatibility": {
+    "min_reader_version": {
+      "major": 1,
+      "minor": 0
+    },
+    "forward_compat_extensions": [],
+    "migration_hint": "knowledge attributes are strings"
+  },
+  "metadata": {
+    "source": "mnx.knowledge.core.v1",
+    "knowledge_revision": "1"
+  },
+  "graph": {
+    "id": "synthetic-knowledge-fixture",
+    "name": "Shared Knowledge",
+    "created_at": 1,
+    "modified_at": 2,
+    "nodes": [
+      {
+        "id": "mnx.knowledge/concepts/demo%3Aapple",
+        "label": "Apple",
+        "type": "KNOWLEDGE",
+        "description": "Concept; see connected claims and observations.",
+        "x": 80,
+        "y": 80,
+        "parent_id": null,
+        "attributes": {
+          "knowledge_kind": "concept",
+          "knowledge_record": "{\"aliases\": [\"apple fruit\"], \"id\": \"demo:apple\", \"label\": \"Apple\"}",
+          "knowledge_proposal_id": "demo-seed-v1",
+          "knowledge_contributor": "{\"id\": \"demo-adapter\", \"method\": \"hand-authored synthetic fixture\"}",
+          "knowledge_review": "{\"reason\": \"Synthetic fixture\", \"reviewed_at\": \"2026-01-01T00:00:00+00:00\", \"reviewer\": \"maintainer\", \"revision\": 1}",
+          "knowledge_review_status": "accepted"
+        },
+        "is_expanded": true,
+        "dimensions": {}
+      },
+      {
+        "id": "mnx.knowledge/concepts/demo%3Afruit",
+        "label": "Fruit",
+        "type": "KNOWLEDGE",
+        "description": "Concept; see connected claims and observations.",
+        "x": 320,
+        "y": 80,
+        "parent_id": null,
+        "attributes": {
+          "knowledge_kind": "concept",
+          "knowledge_record": "{\"id\": \"demo:fruit\", \"label\": \"Fruit\"}",
+          "knowledge_proposal_id": "demo-seed-v1",
+          "knowledge_contributor": "{\"id\": \"demo-adapter\", \"method\": \"hand-authored synthetic fixture\"}",
+          "knowledge_review": "{\"reason\": \"Synthetic fixture\", \"reviewed_at\": \"2026-01-01T00:00:00+00:00\", \"reviewer\": \"maintainer\", \"revision\": 1}",
+          "knowledge_review_status": "accepted"
+        },
+        "is_expanded": true,
+        "dimensions": {}
+      },
+      {
+        "id": "mnx.knowledge/concepts/demo%3Apear",
+        "label": "Pear",
+        "type": "KNOWLEDGE",
+        "description": "Concept; see connected claims and observations.",
+        "x": 560,
+        "y": 80,
+        "parent_id": null,
+        "attributes": {
+          "knowledge_kind": "concept",
+          "knowledge_record": "{\"id\": \"demo:pear\", \"label\": \"Pear\"}",
+          "knowledge_proposal_id": "demo-seed-v1",
+          "knowledge_contributor": "{\"id\": \"demo-adapter\", \"method\": \"hand-authored synthetic fixture\"}",
+          "knowledge_review": "{\"reason\": \"Synthetic fixture\", \"reviewed_at\": \"2026-01-01T00:00:00+00:00\", \"reviewer\": \"maintainer\", \"revision\": 1}",
+          "knowledge_review_status": "accepted"
+        },
+        "is_expanded": true,
+        "dimensions": {}
+      },
+      {
+        "id": "mnx.knowledge/sources/demo%3Afixture",
+        "label": "Synthetic fruit demonstration; not research evidence",
+        "type": "MEMORY",
+        "description": "urn:mnxmindmaker:synthetic-fruit-fixture:v1",
+        "x": 800,
+        "y": 80,
+        "parent_id": null,
+        "attributes": {
+          "knowledge_kind": "source",
+          "knowledge_record": "{\"id\": \"demo:fixture\", \"kind\": \"dataset\", \"title\": \"Synthetic fruit demonstration; not research evidence\", \"uri\": \"urn:mnxmindmaker:synthetic-fruit-fixture:v1\"}",
+          "knowledge_proposal_id": "demo-seed-v1",
+          "knowledge_contributor": "{\"id\": \"demo-adapter\", \"method\": \"hand-authored synthetic fixture\"}",
+          "knowledge_review": "{\"reason\": \"Synthetic fixture\", \"reviewed_at\": \"2026-01-01T00:00:00+00:00\", \"reviewer\": \"maintainer\", \"revision\": 1}",
+          "knowledge_review_status": "accepted",
+          "source_reference": "urn:mnxmindmaker:synthetic-fruit-fixture:v1",
+          "source_type": "dataset"
+        },
+        "is_expanded": true,
+        "dimensions": {}
+      },
+      {
+        "id": "mnx.knowledge/spaces/demo%3Ashape-v1",
+        "label": "synthetic-two-axis-shape-v1",
+        "type": "CUSTOM",
+        "description": "Embedding space: 2 dimensions",
+        "x": 80,
+        "y": 260,
+        "parent_id": null,
+        "attributes": {
+          "knowledge_kind": "space",
+          "knowledge_record": "{\"dimensions\": 2, \"id\": \"demo:shape-v1\", \"model\": \"synthetic-two-axis-shape-v1\"}",
+          "knowledge_proposal_id": "demo-seed-v1",
+          "knowledge_contributor": "{\"id\": \"demo-adapter\", \"method\": \"hand-authored synthetic fixture\"}",
+          "knowledge_review": "{\"reason\": \"Synthetic fixture\", \"reviewed_at\": \"2026-01-01T00:00:00+00:00\", \"reviewer\": \"maintainer\", \"revision\": 1}",
+          "knowledge_review_status": "accepted"
+        },
+        "is_expanded": true,
+        "dimensions": {}
+      },
+      {
+        "id": "mnx.knowledge/claims/demo%3Aapple-is-fruit",
+        "label": "is_a",
+        "type": "BELIEF",
+        "description": "{\"concept_id\": \"demo:fruit\"}",
+        "x": 320,
+        "y": 260,
+        "parent_id": null,
+        "attributes": {
+          "knowledge_kind": "claim",
+          "knowledge_record": "{\"confidence\": 0.9, \"evidence\": [{\"locator\": \"synthetic statement 1\", \"source_id\": \"demo:fixture\"}], \"id\": \"demo:apple-is-fruit\", \"object\": {\"concept_id\": \"demo:fruit\"}, \"predicate\": \"is_a\", \"subject_id\": \"demo:apple\"}",
+          "knowledge_proposal_id": "demo-seed-v1",
+          "knowledge_contributor": "{\"id\": \"demo-adapter\", \"method\": \"hand-authored synthetic fixture\"}",
+          "knowledge_review": "{\"reason\": \"Synthetic fixture\", \"reviewed_at\": \"2026-01-01T00:00:00+00:00\", \"reviewer\": \"maintainer\", \"revision\": 1}",
+          "knowledge_review_status": "accepted"
+        },
+        "is_expanded": true,
+        "dimensions": {
+          "confidence": 0.9
+        }
+      },
+      {
+        "id": "mnx.knowledge/claims/demo%3Aapple-summary",
+        "label": "summary",
+        "type": "BELIEF",
+        "description": "{\"literal\": \"This demo connects an apple concept to a fruit category and a synthetic shape observation.\"}",
+        "x": 560,
+        "y": 260,
+        "parent_id": null,
+        "attributes": {
+          "knowledge_kind": "claim",
+          "knowledge_record": "{\"confidence\": 1.0, \"evidence\": [{\"locator\": \"entire fixture\", \"source_id\": \"demo:fixture\"}], \"id\": \"demo:apple-summary\", \"object\": {\"literal\": \"This demo connects an apple concept to a fruit category and a synthetic shape observation.\"}, \"predicate\": \"summary\", \"subject_id\": \"demo:apple\"}",
+          "knowledge_proposal_id": "demo-seed-v1",
+          "knowledge_contributor": "{\"id\": \"demo-adapter\", \"method\": \"hand-authored synthetic fixture\"}",
+          "knowledge_review": "{\"reason\": \"Synthetic fixture\", \"reviewed_at\": \"2026-01-01T00:00:00+00:00\", \"reviewer\": \"maintainer\", \"revision\": 1}",
+          "knowledge_review_status": "accepted"
+        },
+        "is_expanded": true,
+        "dimensions": {
+          "confidence": 1.0
+        }
+      },
+      {
+        "id": "mnx.knowledge/observations/demo%3Aapple-chemistry",
+        "label": "chemical: demo:apple-chemistry",
+        "type": "MEMORY",
+        "description": "{\"description\": \"placeholder for a chemical signature; no measurement performed\"}",
+        "x": 800,
+        "y": 260,
+        "parent_id": null,
+        "attributes": {
+          "knowledge_kind": "observation",
+          "knowledge_record": "{\"concept_id\": \"demo:apple\", \"features\": {\"description\": \"placeholder for a chemical signature; no measurement performed\"}, \"id\": \"demo:apple-chemistry\", \"locator\": \"synthetic observation 4\", \"modality\": \"chemical\", \"source_id\": \"demo:fixture\"}",
+          "knowledge_proposal_id": "demo-seed-v1",
+          "knowledge_contributor": "{\"id\": \"demo-adapter\", \"method\": \"hand-authored synthetic fixture\"}",
+          "knowledge_review": "{\"reason\": \"Synthetic fixture\", \"reviewed_at\": \"2026-01-01T00:00:00+00:00\", \"reviewer\": \"maintainer\", \"revision\": 1}",
+          "knowledge_review_status": "accepted",
+          "modality": "chemical"
+        },
+        "is_expanded": true,
+        "dimensions": {}
+      },
+      {
+        "id": "mnx.knowledge/observations/demo%3Aapple-shape",
+        "label": "shape: demo:apple-shape",
+        "type": "MEMORY",
+        "description": "{\"description\": \"invented roundness and elongation values\", \"units\": \"arbitrary demo values\"}",
+        "x": 80,
+        "y": 440,
+        "parent_id": null,
+        "attributes": {
+          "knowledge_kind": "observation",
+          "knowledge_record": "{\"concept_id\": \"demo:apple\", \"embedding\": {\"space_id\": \"demo:shape-v1\", \"values\": [0.9, 0.2]}, \"features\": {\"description\": \"invented roundness and elongation values\", \"units\": \"arbitrary demo values\"}, \"id\": \"demo:apple-shape\", \"locator\": \"synthetic observation 1\", \"modality\": \"shape\", \"source_id\": \"demo:fixture\"}",
+          "knowledge_proposal_id": "demo-seed-v1",
+          "knowledge_contributor": "{\"id\": \"demo-adapter\", \"method\": \"hand-authored synthetic fixture\"}",
+          "knowledge_review": "{\"reason\": \"Synthetic fixture\", \"reviewed_at\": \"2026-01-01T00:00:00+00:00\", \"reviewer\": \"maintainer\", \"revision\": 1}",
+          "knowledge_review_status": "accepted",
+          "modality": "shape"
+        },
+        "is_expanded": true,
+        "dimensions": {}
+      },
+      {
+        "id": "mnx.knowledge/observations/demo%3Aapple-sound",
+        "label": "audio: demo:apple-sound",
+        "type": "MEMORY",
+        "description": "{\"description\": \"placeholder for the sound of a bite; no recording or analysis performed\"}",
+        "x": 320,
+        "y": 440,
+        "parent_id": null,
+        "attributes": {
+          "knowledge_kind": "observation",
+          "knowledge_record": "{\"concept_id\": \"demo:apple\", \"features\": {\"description\": \"placeholder for the sound of a bite; no recording or analysis performed\"}, \"id\": \"demo:apple-sound\", \"locator\": \"synthetic observation 3\", \"modality\": \"audio\", \"source_id\": \"demo:fixture\"}",
+          "knowledge_proposal_id": "demo-seed-v1",
+          "knowledge_contributor": "{\"id\": \"demo-adapter\", \"method\": \"hand-authored synthetic fixture\"}",
+          "knowledge_review": "{\"reason\": \"Synthetic fixture\", \"reviewed_at\": \"2026-01-01T00:00:00+00:00\", \"reviewer\": \"maintainer\", \"revision\": 1}",
+          "knowledge_review_status": "accepted",
+          "modality": "audio"
+        },
+        "is_expanded": true,
+        "dimensions": {}
+      },
+      {
+        "id": "mnx.knowledge/observations/demo%3Apear-shape",
+        "label": "shape: demo:pear-shape",
+        "type": "MEMORY",
+        "description": "{\"description\": \"invented roundness and elongation values\", \"units\": \"arbitrary demo values\"}",
+        "x": 560,
+        "y": 440,
+        "parent_id": null,
+        "attributes": {
+          "knowledge_kind": "observation",
+          "knowledge_record": "{\"concept_id\": \"demo:pear\", \"embedding\": {\"space_id\": \"demo:shape-v1\", \"values\": [0.5, 0.7]}, \"features\": {\"description\": \"invented roundness and elongation values\", \"units\": \"arbitrary demo values\"}, \"id\": \"demo:pear-shape\", \"locator\": \"synthetic observation 2\", \"modality\": \"shape\", \"source_id\": \"demo:fixture\"}",
+          "knowledge_proposal_id": "demo-seed-v1",
+          "knowledge_contributor": "{\"id\": \"demo-adapter\", \"method\": \"hand-authored synthetic fixture\"}",
+          "knowledge_review": "{\"reason\": \"Synthetic fixture\", \"reviewed_at\": \"2026-01-01T00:00:00+00:00\", \"reviewer\": \"maintainer\", \"revision\": 1}",
+          "knowledge_review_status": "accepted",
+          "modality": "shape"
+        },
+        "is_expanded": true,
+        "dimensions": {}
+      }
+    ],
+    "edges": [
+      {
+        "id": "mnx.knowledge/edge/0",
+        "from_node_id": "mnx.knowledge/concepts/demo%3Aapple",
+        "to_node_id": "mnx.knowledge/claims/demo%3Aapple-is-fruit",
+        "label": "has_claim",
+        "strength": 1.0
+      },
+      {
+        "id": "mnx.knowledge/edge/1",
+        "from_node_id": "mnx.knowledge/claims/demo%3Aapple-is-fruit",
+        "to_node_id": "mnx.knowledge/concepts/demo%3Afruit",
+        "label": "is_a",
+        "strength": 0.9
+      },
+      {
+        "id": "mnx.knowledge/edge/2",
+        "from_node_id": "mnx.knowledge/claims/demo%3Aapple-is-fruit",
+        "to_node_id": "mnx.knowledge/sources/demo%3Afixture",
+        "label": "evidence: synthetic statement 1",
+        "strength": 1.0
+      },
+      {
+        "id": "mnx.knowledge/edge/3",
+        "from_node_id": "mnx.knowledge/concepts/demo%3Aapple",
+        "to_node_id": "mnx.knowledge/claims/demo%3Aapple-summary",
+        "label": "has_claim",
+        "strength": 1.0
+      },
+      {
+        "id": "mnx.knowledge/edge/4",
+        "from_node_id": "mnx.knowledge/claims/demo%3Aapple-summary",
+        "to_node_id": "mnx.knowledge/sources/demo%3Afixture",
+        "label": "evidence: entire fixture",
+        "strength": 1.0
+      },
+      {
+        "id": "mnx.knowledge/edge/5",
+        "from_node_id": "mnx.knowledge/observations/demo%3Aapple-chemistry",
+        "to_node_id": "mnx.knowledge/concepts/demo%3Aapple",
+        "label": "observes",
+        "strength": 1.0
+      },
+      {
+        "id": "mnx.knowledge/edge/6",
+        "from_node_id": "mnx.knowledge/observations/demo%3Aapple-chemistry",
+        "to_node_id": "mnx.knowledge/sources/demo%3Afixture",
+        "label": "observed_in: synthetic observation 4",
+        "strength": 1.0
+      },
+      {
+        "id": "mnx.knowledge/edge/7",
+        "from_node_id": "mnx.knowledge/observations/demo%3Aapple-shape",
+        "to_node_id": "mnx.knowledge/concepts/demo%3Aapple",
+        "label": "observes",
+        "strength": 1.0
+      },
+      {
+        "id": "mnx.knowledge/edge/8",
+        "from_node_id": "mnx.knowledge/observations/demo%3Aapple-shape",
+        "to_node_id": "mnx.knowledge/sources/demo%3Afixture",
+        "label": "observed_in: synthetic observation 1",
+        "strength": 1.0
+      },
+      {
+        "id": "mnx.knowledge/edge/9",
+        "from_node_id": "mnx.knowledge/observations/demo%3Aapple-shape",
+        "to_node_id": "mnx.knowledge/spaces/demo%3Ashape-v1",
+        "label": "encoded_in",
+        "strength": 1.0
+      },
+      {
+        "id": "mnx.knowledge/edge/10",
+        "from_node_id": "mnx.knowledge/observations/demo%3Aapple-sound",
+        "to_node_id": "mnx.knowledge/concepts/demo%3Aapple",
+        "label": "observes",
+        "strength": 1.0
+      },
+      {
+        "id": "mnx.knowledge/edge/11",
+        "from_node_id": "mnx.knowledge/observations/demo%3Aapple-sound",
+        "to_node_id": "mnx.knowledge/sources/demo%3Afixture",
+        "label": "observed_in: synthetic observation 3",
+        "strength": 1.0
+      },
+      {
+        "id": "mnx.knowledge/edge/12",
+        "from_node_id": "mnx.knowledge/observations/demo%3Apear-shape",
+        "to_node_id": "mnx.knowledge/concepts/demo%3Apear",
+        "label": "observes",
+        "strength": 1.0
+      },
+      {
+        "id": "mnx.knowledge/edge/13",
+        "from_node_id": "mnx.knowledge/observations/demo%3Apear-shape",
+        "to_node_id": "mnx.knowledge/sources/demo%3Afixture",
+        "label": "observed_in: synthetic observation 2",
+        "strength": 1.0
+      },
+      {
+        "id": "mnx.knowledge/edge/14",
+        "from_node_id": "mnx.knowledge/observations/demo%3Apear-shape",
+        "to_node_id": "mnx.knowledge/spaces/demo%3Ashape-v1",
+        "label": "encoded_in",
+        "strength": 1.0
+      }
+    ]
+  }
+}

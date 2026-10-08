@@ -3,6 +3,13 @@
 A standalone Android APK for designing AI minds and exporting them to the
 [`.mnx` (Mind Nexus)](https://github.com/Kaleaon/TronProtocol) binary format.
 
+The project is also developing a shared, evidence-linked knowledge layer that
+different AI systems can enrich through a common contribution format. The first
+working [Knowledge Core companion](tools/knowledge-core/README.md) stores concepts,
+claims, sensory observations, and reviewed revisions, and exports them to the
+Android mind map as `.mnxj`. See the [continuous learning roadmap](docs/Shared-Knowledge-Architecture.md)
+for the planned paper, book, video, and experience ingestion pipeline.
+
 ---
 
 ## Features
