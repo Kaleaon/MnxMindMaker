@@ -1,0 +1,52 @@
+name: Deploy Drive map editor
+on:
+  push:
+    branches: [main]
+    paths: ['tools/map-editor/**', '.github/workflows/map-editor-pages.yml']
+  pull_request:
+    paths: ['tools/map-editor/**', '.github/workflows/map-editor-pages.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: drive-map-editor-${{ github.event_name == 'pull_request' && github.ref || 'pages' }}
+  cancel-in-progress: true
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm test && npm run check
+        working-directory: tools/map-editor
+  deploy:
+    if: github.event_name != 'pull_request'
+    needs: check
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Configure public Google client ID
+        env:
+          GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_OAUTH_CLIENT_ID }}
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          config = {'googleClientId': os.environ.get('GOOGLE_CLIENT_ID', '')}
+          Path('tools/map-editor/dist/config.js').write_text('window.MNX_CONFIG = ' + json.dumps(config) + ';\n')
+          PY
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: tools/map-editor/dist
+      - name: Publish
+        id: deployment
+        uses: actions/deploy-pages@v4
