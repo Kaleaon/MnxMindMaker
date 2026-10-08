@@ -2,7 +2,7 @@
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 const root = new URL('../../', import.meta.url);
-const files = ['index.html', 'style.css', 'app.js', 'drive.js', 'graph.js', 'setup.html'];
+const files = ['index.html', 'style.css', 'app.js', 'drive.js', 'graph.js', 'recovery.js', 'setup.html'];
 const check = process.argv.includes('--check');
 for (const name of files) {
   const source = await readFile(new URL('dist/' + name, import.meta.url));

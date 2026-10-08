@@ -57,10 +57,22 @@ descriptions and connections are editable; the attribute/dimension inspector is
 read-only to preserve provenance. Existing Drive filenames stay unchanged when
 the graph title changes.
 
-Manual saves check Drive versions and use If-Match if an ETag is returned. Without
-one, simultaneous check/write races remain possible. Download conflicting drafts
-and reload; Drive revisions are another recovery path. Writes are never retried
-automatically. Failed saves retain the draft in the open tab, not durable storage.
+Manual saves check Drive versions and require an ETag for If-Match. If Drive does
+not expose the token, saving fails closed: download the draft instead. Saved
+content is read back before success is reported. Writes are never retried
+automatically; an interrupted request may already have committed, so reload
+before retrying. Requests time out after 30 seconds.
+
+Local recovery stores the latest and previous valid draft in browser storage,
+without OAuth tokens. On reload the editor offers recovery. Storage denial or
+quota exhaustion produces a persistent download warning. Recovery is local to
+this browser and origin, not an off-site backup. Edits checkpoint after 250 ms
+and on visibility/page changes; abrupt termination before a checkpoint can lose
+the latest edits.
+
+Parent cycles and invalid native attributes/dimensions are rejected. Editing a
+statement with epistemic schema v1 resets its verification to unchecked while
+preserving provenance and recording the previous statement in history.
 Limits: 10 MiB, 10,000 nodes, 30,000 connections. Folder listing follows pagination
 and supports resource keys/shared-drive flags. A map can open even if the visitor
 cannot browse its parent folder. Optional browser WebMCP has one read-only tool.

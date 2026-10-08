@@ -9,7 +9,7 @@ export class DriveClient {
     headers.set('Authorization', 'Bearer ' + this.token);
     const keys = resources.filter(resource => resource?.resourceKey).map(resource => `${resource.id}/${resource.resourceKey}`);
     if (keys.length) headers.set('X-Goog-Drive-Resource-Keys', keys.join(','));
-    const response = await this.fetcher(path.startsWith('https://www.googleapis.com/') ? path : API + path, { ...options, headers });
+    const response = await this.fetcher(path.startsWith('https://www.googleapis.com/') ? path : API + path, { ...options, headers, signal: options.signal || AbortSignal.timeout(30000) });
     if (!response.ok) {
       if (response.status === 412) throw new ConflictError('Someone changed this map. Download your draft, then reload the Drive version.');
       if (response.status === 401) throw new Error('Your Google session expired. Connect to Drive again; your draft is still here.');
@@ -59,11 +59,15 @@ export class DriveClient {
     if (!current.capabilities?.canEdit) throw new Error('You have view access. Ask the folder owner for edit access.');
     if (current.version !== file.version) throw new ConflictError('Someone changed this map. Download your draft, then reload the Drive version.');
     const headers = { 'Content-Type': 'application/json; charset=utf-8' };
-    if (current.etag) headers['If-Match'] = current.etag;
+    if (!current.etag) throw new ConflictError('Drive did not provide a conditional-save token. Download your draft; saving is blocked to protect simultaneous edits.');
+    headers['If-Match'] = current.etag;
     const body = serializeMap(map);
     if (new TextEncoder().encode(body).length > MAX_BYTES) throw new Error('Maps must be smaller than 10 MiB.');
     const response = await this.request(`https://www.googleapis.com/upload/drive/v3/files/${encodeURIComponent(file.id)}?uploadType=media&supportsAllDrives=true&fields=id,name,version,resourceKey,capabilities(canEdit,canShare)`, { method: 'PATCH', headers, body }, [file]);
-    return { ...file, ...await response.json() };
+    const saved = { ...file, ...await response.json() };
+    const verified = await this.readMap(saved);
+    if (serializeMap(verified.map) !== body) throw new ConflictError('Saved content could not be verified. Keep your draft and reload the Drive version before saving again.');
+    return verified.file;
   }
   async createMap(folder, map) {
     if (!folder?.capabilities?.canAddChildren) throw new Error('You cannot add maps to this folder. Ask its owner for edit access.');

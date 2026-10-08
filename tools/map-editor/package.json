@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "test": "node --test tests/*.test.js",
-    "check": "node --check dist/app.js && node --check dist/drive.js && node --check dist/graph.js",
+    "check": "node --check dist/app.js && node --check dist/drive.js && node --check dist/graph.js && node --check dist/recovery.js",
     "sync-docs": "node sync-docs.mjs",
     "check-docs": "node sync-docs.mjs --check"
   }

@@ -1,10 +1,20 @@
-import { NODE_TYPES, addNode, createMap, editorLink, parseDriveLink, parseMap, removeNode, serializeMap } from './graph.js';
+import { NODE_TYPES, addNode, createMap, editorLink, parseDriveLink, parseMap, removeNode, reviseNode, serializeMap } from './graph.js';
 import { ConflictError, DriveClient, connectGoogle } from './drive.js';
+import { DraftRecovery } from './recovery.js';
 const $ = id => document.getElementById(id);
 const state = { map: createMap(), file: null, folder: null, files: [], drive: null, selected: null, dirty: false,
   busy: false, undo: [], box: [-500, -350, 1000, 700], connected: false, generation: 0 };
 const config = window.MNX_CONFIG || {};
-let clientId = config.googleClientId || localStorage.getItem('mnx.googleClientId') || '';
+let storage; try { storage = window.localStorage; } catch { /* storage may be blocked */ }
+let clientId = config.googleClientId || '';
+try { clientId ||= storage?.getItem('mnx.googleClientId') || ''; } catch { /* settings storage unavailable */ }
+const recovery = storage ? new DraftRecovery(storage) : null;
+let draftTimer;
+function checkpoint() {
+  clearTimeout(draftTimer);
+  try { if (!recovery) throw new Error('Storage unavailable'); recovery.write(state.map, state.file, state.dirty); }
+  catch { say('Local recovery is unavailable or full. Download your draft to keep a backup.', true, true); }
+}
 let messageTimer;
 let requested = new URLSearchParams(location.hash.slice(1));
 const validId = id => typeof id === 'string' && /^[A-Za-z0-9_-]{1,250}$/.test(id);
@@ -28,12 +38,12 @@ async function action(fn) {
 function remember() {
   state.undo.push(serializeMap(state.map)); if (state.undo.length > 30) state.undo.shift();
 }
-function changed() { state.dirty = true; state.generation++; state.map.graph.modified_at = Date.now(); }
+function changed() { state.dirty = true; state.generation++; state.map.graph.modified_at = Date.now(); clearTimeout(draftTimer); draftTimer = setTimeout(checkpoint, 250); }
 function mutate(fn) { if (!editable()) return; remember(); fn(); changed(); render(); }
 function canLeave() { return !state.dirty || confirm('This map has unsaved changes. Download or save your draft to keep them. Discard changes and continue?'); }
 function updateLink() { history.replaceState(null, '', editorLink(location.href, state.folder, state.file)); }
 function loadMap(map, file = null) {
-  state.map = map; state.file = file; state.selected = null; state.undo = []; state.dirty = false; state.generation++; fit(); updateLink(); render();
+  state.map = map; state.file = file; state.selected = null; state.undo = []; state.dirty = false; state.generation++; fit(); updateLink(); render(); checkpoint();
 }
 function download() {
   const blob = new Blob([serializeMap(state.map)], { type: 'application/json' });
@@ -138,7 +148,7 @@ function zoom(factor) { const [x,y,w,h] = state.box; state.box = [x + w * (1-fac
 function addConcept() { mutate(() => { const [x,y,w,h] = state.box; const node = addNode(state.map, 'New concept', x+w/2+(state.map.graph.nodes.length % 3)*35, y+h/2+(state.map.graph.nodes.length % 3)*30); state.selected = node.id; }); $('node-label').focus(); $('node-label').select(); }
 async function openFolder(folder, openRequested = false) {
   const result = await state.drive.listFolder(folder); state.folder = result.folder; state.files = result.files; updateLink();
-  if (openRequested && requestedFile) { const map = await state.drive.readMap(requestedFile); loadMap(map.map, map.file); }
+  if (openRequested && requestedFile && !state.dirty) { const map = await state.drive.readMap(requestedFile); loadMap(map.map, map.file); }
   say('Folder opened. Select a map or start a new one.');
 }
 async function refreshFolder() { const result = await state.drive.listFolder(state.folder); state.folder = result.folder; state.files = result.files; }
@@ -148,9 +158,9 @@ $('connect-button').onclick = () => {
     const session = await connectGoogle(clientId); state.drive = new DriveClient(session.access_token); state.connected = true;
     const folder = $('folder-link').value ? parseDriveLink($('folder-link').value) : null;
     if (folder) {
-      try { await openFolder(folder, !!requestedFile && !state.file); }
-      catch (error) { if (requestedFile && !state.file) { const result = await state.drive.readMap(requestedFile); loadMap(result.map, result.file); say('Map opened. The parent folder is not accessible to this account.'); } else throw error; }
-    } else if (requestedFile && !state.file) { const result = await state.drive.readMap(requestedFile); loadMap(result.map, result.file); }
+      try { await openFolder(folder, !!requestedFile && !state.file && !state.dirty); }
+      catch (error) { if (requestedFile && !state.file && !state.dirty) { const result = await state.drive.readMap(requestedFile); loadMap(result.map, result.file); say('Map opened. The parent folder is not accessible to this account.'); } else throw error; }
+    } else if (requestedFile && !state.file && !state.dirty) { const result = await state.drive.readMap(requestedFile); loadMap(result.map, result.file); }
     else say('Connected to Google Drive. Paste a folder link to open it.');
   });
 };
@@ -176,7 +186,7 @@ $('save-button').onclick = () => action(async () => {
   const map = structuredClone(state.map), generation = state.generation;
   const file = state.file ? await state.drive.saveMap(state.file, map) : await state.drive.createMap(state.folder, map);
   state.file = file; if (generation === state.generation) state.dirty = false;
-  updateLink(); say('Saved to Google Drive.');
+  checkpoint(); updateLink(); say('Saved to Google Drive and verified.');
   try { await refreshFolder(); } catch { say('Map saved, but the folder list could not refresh. Use Refresh to try again.', true); }
 });
 $('add-node-button').onclick = addConcept; $('empty-add-button').onclick = addConcept;
@@ -184,7 +194,7 @@ $('undo-button').onclick = () => { if (!editable() || !state.undo.length) return
 $('fit-button').onclick = () => { fit(); renderCanvas(); }; $('zoom-in-button').onclick = () => zoom(.8); $('zoom-out-button').onclick = () => zoom(1.25);
 $('node-form').onsubmit = event => { event.preventDefault(); const label = $('node-label').value.trim(), description = $('node-description').value, type = $('node-type').value;
   if (!label) return say('Concept labels cannot be empty.', true);
-  mutate(() => { const node = state.map.graph.nodes.find(item => item.id === state.selected); Object.assign(node, { label, description, type }); });
+  mutate(() => { const node = state.map.graph.nodes.find(item => item.id === state.selected); reviseNode(node, { label, description, type }); });
 };
 $('delete-node-button').onclick = () => { if (confirm('Delete this concept and its connections?')) mutate(() => { removeNode(state.map, state.selected); state.selected = null; }); };
 $('edge-form').onsubmit = event => { event.preventDefault(); const target = $('edge-target').value, label = $('edge-label').value.trim(); if (!target) return;
@@ -192,7 +202,7 @@ $('edge-form').onsubmit = event => { event.preventDefault(); const target = $('e
 };
 $('settings-button').onclick = () => { $('client-id').value = clientId; $('settings-dialog').showModal(); };
 $('settings-form').onsubmit = event => { event.preventDefault(); const value = $('client-id').value.trim(); if (!/^[\w.-]+\.apps\.googleusercontent\.com$/.test(value)) return say('Use a Google OAuth web client ID ending in .apps.googleusercontent.com.', true);
-  clientId = value; localStorage.setItem('mnx.googleClientId', value); $('settings-dialog').close(); say('Settings saved. Connect Google Drive when you’re ready.');
+  clientId = value; try { storage?.setItem('mnx.googleClientId', value); } catch { /* retain session setting */ } $('settings-dialog').close(); say('Settings saved. Connect Google Drive when you’re ready.');
 };
 for (const button of document.querySelectorAll('[data-close]')) button.onclick = () => $(button.dataset.close).close();
 $('share-button').onclick = () => {
@@ -242,6 +252,8 @@ $('canvas').onpointermove = event => {
 };
 $('canvas').onpointerup = $('canvas').onpointercancel = () => { drag = null; renderControls(); renderCanvas(); };
 $('canvas').onwheel = event => { event.preventDefault(); zoom(event.deltaY>0 ? 1.1 : .9); };
+window.addEventListener('pagehide', () => { if (state.dirty) checkpoint(); });
+document.addEventListener('visibilitychange', () => { if (document.hidden && state.dirty) checkpoint(); });
 window.addEventListener('beforeunload', event => { if (state.dirty) { event.preventDefault(); event.returnValue = ''; } });
 if (document.modelContext?.registerTool) {
   const lifetime = new AbortController();
@@ -252,5 +264,10 @@ if (document.modelContext?.registerTool) {
     execute(input) { if (!input || typeof input !== 'object' || Object.keys(input).length) throw new Error('No arguments expected.'); return { map: structuredClone(state.map), savedToDrive: !!state.file && !state.dirty, canEdit: editable() }; }
   }, { signal: lifetime.signal })).catch(() => {}); } catch { /* optional browser API */ }
   window.addEventListener('pagehide', () => lifetime.abort(), { once: true });
+}
+const recovered = recovery?.read();
+if (recovered?.dirty && confirm('Recover your unsaved map draft from this browser?')) {
+  state.map = recovered.map; state.file = recovered.file; state.dirty = true; fit();
+  say('Draft recovered. Connect Drive to save; concurrent edits will be checked.', false, true);
 }
 render();

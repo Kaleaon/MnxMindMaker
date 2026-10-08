@@ -12,6 +12,7 @@ export function validateMap(map) {
   requireValue(object(map.compatibility) && Array.isArray(map.compatibility.forward_compat_extensions), 'Missing compatibility information.');
   const reader = map.compatibility.min_reader_version;
   requireValue(reader?.major === 1 && reader?.minor === 0, 'This map requires a newer reader.');
+  requireValue(map.metadata === undefined || (object(map.metadata) && Object.values(map.metadata).every(v => typeof v === 'string')), 'Map metadata must contain text values.');
   const graph = map.graph;
   requireValue(object(graph) && text(graph.id) && text(graph.name), 'Missing map ID or name.');
   requireValue(finite(graph.created_at) && finite(graph.modified_at), 'Invalid map timestamps.');
@@ -24,10 +25,22 @@ export function validateMap(map) {
     requireValue(finite(node.x) && finite(node.y), 'Node positions must be finite numbers.');
     requireValue(text(node.type), 'Every node needs a type.');
     requireValue(node.description === undefined || typeof node.description === 'string', 'Node descriptions must be text.');
+    requireValue(node.attributes === undefined || (object(node.attributes) && Object.values(node.attributes).every(v => typeof v === 'string')), 'Node attributes must contain text values.');
+    requireValue(node.dimensions === undefined || (object(node.dimensions) && Object.values(node.dimensions).every(finite)), 'Node dimensions must contain finite numbers.');
     nodes.add(node.id);
   }
   for (const node of graph.nodes) {
     requireValue(node.parent_id == null || nodes.has(node.parent_id), 'A parent node is missing.');
+  }
+  const parents = new Map(graph.nodes.map(node => [node.id, node.parent_id]));
+  const checked = new Set();
+  for (const node of graph.nodes) {
+    const path = new Set(); let id = node.id;
+    while (id != null && !checked.has(id)) {
+      requireValue(!path.has(id), 'Parent relationships must not contain cycles.');
+      path.add(id); id = parents.get(id);
+    }
+    for (const visited of path) checked.add(visited);
   }
   const edges = new Set();
   for (const edge of graph.edges) {
@@ -56,12 +69,33 @@ export function addNode(map, label = 'New concept', x = 0, y = 0) {
   map.graph.nodes.push(node);
   return node;
 }
+export function reviseNode(node, { label, description, type }) {
+  const before = { label: node.label, description: node.description || '', type: node.type };
+  if (before.label === label && before.description === description && before.type === type) return;
+  Object.assign(node, { label, description, type });
+  // Editing a statement invalidates inherited verification, not its provenance.
+  if (node.attributes?.epistemic_schema_version === '1') {
+    const a = node.attributes;
+    let history = []; try { history = JSON.parse(a.history_json || '[]'); } catch { /* retain malformed original separately */ }
+    if (!Array.isArray(history)) history = [];
+    history.push({ date: new Date().toISOString(), actor: 'browser editor', action: 'Statement edited; verification reset', previous: before, previous_verification: a.verification_status });
+    a.history_json = JSON.stringify(history); a.verification_status = 'unchecked';
+    a.evidence_status = 'needs_revalidation'; a.epistemic_status = 'unverified';
+    a.original_label = label.replace(/^\[[^\]]+\]\s*/, '');
+    node.label = '[UNVERIFIED] ' + a.original_label;
+    node.description = 'Verification reset after editing. Prior sources and history retained; recheck support for the new statement.\n\n' + description;
+  }
+}
 export function removeNode(map, id) {
   map.graph.nodes = map.graph.nodes.filter(node => node.id !== id);
   map.graph.edges = map.graph.edges.filter(edge => edge.from_node_id !== id && edge.to_node_id !== id);
   for (const node of map.graph.nodes) if (node.parent_id === id) node.parent_id = null;
 }
-export function serializeMap(map) { validateMap(map); return JSON.stringify(map, null, 2); }
+export function serializeMap(map) {
+  validateMap(map); const raw = JSON.stringify(map, null, 2);
+  requireValue(new TextEncoder().encode(raw).length <= MAX_BYTES, 'Maps must be smaller than 10 MiB.');
+  return raw;
+}
 
 export function parseDriveLink(raw, kind = 'folder') {
   let url;
