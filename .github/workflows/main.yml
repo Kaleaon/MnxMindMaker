@@ -36,6 +36,8 @@ jobs:
         uses: android-actions/setup-android@v3
         with:
           cmdline-tools-version: 11076708
+          packages: platform-tools
+          log-accepted-android-sdk-licenses: false
 
       - name: Install required Android SDK packages
         run: |
@@ -124,6 +126,8 @@ jobs:
         uses: android-actions/setup-android@v3
         with:
           cmdline-tools-version: 11076708
+          packages: platform-tools
+          log-accepted-android-sdk-licenses: false
 
       - name: Install required Android SDK packages
         run: |
@@ -183,6 +187,8 @@ jobs:
         uses: android-actions/setup-android@v3
         with:
           cmdline-tools-version: 11076708
+          packages: platform-tools
+          log-accepted-android-sdk-licenses: false
 
       - name: Install required Android SDK packages
         run: |
