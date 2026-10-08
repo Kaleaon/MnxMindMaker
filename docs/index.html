@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Open and edit MnxMindMaker mind maps in a shared Google Drive folder.">
+  <meta name="referrer" content="no-referrer">
+  <title>Mnx · Drive maps</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23142132'/%3E%3Cpath d='M8 23V9l8 9 8-9v14' fill='none' stroke='%23c9ef79' stroke-width='3'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="./style.css">
+  <script src="./config.js"></script>
+  <script async src="https://accounts.google.com/gsi/client"></script>
+  <script type="module" src="./app.js"></script>
+</head>
+<body>
+<header>
+  <a class="brand" href="./" aria-label="Mnx Drive maps home"><span class="brand-mark">M</span><span>Mnx <span class="quiet">/ Drive maps</span></span></a>
+  <div class="header-actions"><button id="settings-button" class="subtle">Settings</button><button id="connect-button" class="primary">Connect Google Drive</button><button id="disconnect-button" class="subtle" hidden>Disconnect</button></div>
+</header>
+<main>
+  <aside class="library" aria-label="Drive folder and maps">
+    <div class="section-label">YOUR WORKSPACE</div>
+    <h1>Shared maps</h1>
+    <form id="folder-form">
+      <label for="folder-link">Google Drive folder link</label>
+      <input id="folder-link" type="url" placeholder="https://drive.google.com/drive/folders/…" required>
+      <button id="open-folder-button" class="wide" type="submit">Open folder</button>
+    </form>
+    <div class="folder-heading"><h2 id="folder-name">No folder open</h2><button id="refresh-button" class="icon-button" aria-label="Refresh folder" title="Refresh folder" disabled>↻</button></div>
+    <p id="folder-help" class="help">Connect your Google account to see the maps you can access.</p>
+    <div id="map-list" class="map-list"></div>
+    <div class="library-bottom">
+      <button id="new-map-button" class="wide">New map</button>
+      <button id="import-button" class="wide subtle">Import .mnxj</button>
+      <input id="import-input" type="file" accept=".mnxj,application/json" hidden>
+      <p class="help">Files stay in Google Drive. Folder and file permissions decide who can view or edit.</p>
+    </div>
+  </aside>
+  <section class="workspace" aria-label="Mind map editor">
+    <div class="map-toolbar">
+      <div class="map-heading"><label class="sr-only" for="map-name">Map name</label><input id="map-name" value="Untitled map" maxlength="200"><span id="save-state" class="save-state">Local draft</span></div>
+      <div class="map-actions"><button id="download-button" class="subtle">Download</button><button id="share-button" class="subtle" disabled>Share</button><button id="save-button" class="primary" disabled>Save to Drive</button></div>
+    </div>
+    <div class="canvas-wrap">
+      <svg id="canvas" role="img" aria-label="Mind map. Select nodes on the canvas or from the node list." tabindex="0" viewBox="-500 -350 1000 700">
+        <defs><pattern id="grid" width="28" height="28" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r="1" fill="#cbd5df"/></pattern></defs>
+        <rect id="canvas-background" x="-100000" y="-100000" width="200000" height="200000" fill="url(#grid)"/>
+        <g id="connections"></g><g id="nodes"></g>
+      </svg>
+      <div id="empty-canvas" class="empty-canvas"><span class="empty-symbol">+</span><h2>Make room for your ideas.</h2><p>Add a concept, open a Drive map,<br>or import an existing .mnxj file.</p><button id="empty-add-button" class="primary">Add first concept</button></div>
+      <div class="canvas-controls"><button id="add-node-button">+ Concept</button><button id="undo-button" disabled>Undo</button><span class="control-divider"></span><button id="zoom-out-button" aria-label="Zoom out">−</button><button id="zoom-in-button" aria-label="Zoom in">+</button><button id="fit-button">Fit map</button></div>
+      <div id="map-count" class="map-count">0 concepts · 0 connections</div>
+    </div>
+    <div id="message" role="status" aria-live="polite" class="message" hidden></div>
+  </section>
+  <aside class="inspector" aria-label="Map details">
+    <div class="section-label">MAP DETAILS</div><h2 id="inspector-title">Concepts</h2>
+    <div id="node-list" class="node-list"></div>
+    <p id="inspector-help" class="help">Select a concept to edit its label and description. Drag concepts to arrange the map.</p>
+    <form id="node-form" hidden>
+      <label for="node-label">Label</label><input id="node-label" required maxlength="500">
+      <label for="node-type">Type</label><select id="node-type"></select>
+      <label for="node-description">Description</label><textarea id="node-description" rows="5"></textarea>
+      <button id="apply-node-button" class="wide primary" type="submit">Apply changes</button>
+      <details><summary>Preserved attributes</summary><pre id="node-attributes"></pre></details>
+      <button id="delete-node-button" class="wide danger" type="button">Delete concept</button>
+    </form>
+    <div id="connection-section" hidden>
+      <h3>Connections</h3><div id="edge-list"></div>
+      <form id="edge-form">
+        <label for="edge-target">Connect to</label><select id="edge-target" required></select>
+        <label for="edge-label">Relationship</label><input id="edge-label" placeholder="e.g. depends on" maxlength="500">
+        <button id="add-edge-button" class="wide" type="submit">Add connection</button>
+      </form>
+    </div>
+  </aside>
+</main>
+<dialog id="settings-dialog">
+  <form id="settings-form"><div class="dialog-heading"><h2>Google Drive connection</h2><button type="button" data-close="settings-dialog" class="icon-button" aria-label="Close">×</button></div>
+    <p>The editor needs the app’s Google OAuth web client ID. Your access token stays in this tab and is sent only to Google.</p>
+    <label for="client-id">Google OAuth web client ID</label><input id="client-id" placeholder="….apps.googleusercontent.com" required>
+    <p class="help">The owner configures this once for the published site. A value entered here is a setting for this browser only.</p>
+    <p><a href="./setup.html" target="_blank" rel="noopener">Google setup instructions</a></p><button class="primary" type="submit">Save settings</button>
+  </form>
+</dialog>
+<dialog id="share-dialog">
+  <form id="share-form"><div class="dialog-heading"><h2>Share this map</h2><button type="button" data-close="share-dialog" class="icon-button" aria-label="Close">×</button></div>
+    <p>People open the map in this editor and sign in to Google. Drive decides whether they can save changes.</p>
+    <label for="link-access">Link access</label><select id="link-access"><option value="keep">Keep current Drive permissions</option><option value="reader">Anyone with the link can view</option><option value="writer">Anyone with the link can edit</option></select>
+    <p id="sharing-help" class="help">Changing link access affects the Drive file. Your organization may restrict public sharing.</p>
+    <label for="share-link">Editor link</label><input id="share-link" readonly><a id="drive-file-link" target="_blank" rel="noopener">Manage permissions in Google Drive</a>
+    <button id="apply-share-button" class="wide primary" type="submit">Apply and copy link</button>
+  </form>
+</dialog>
+</body></html>

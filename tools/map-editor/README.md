@@ -26,18 +26,18 @@ assessment. The token stays in tab memory, is sent only to Google, and is never
 stored in browser storage or sent to GitHub. Browser storage holds only an
 optional public-client-ID setting.
 
-Set Actions repository variable `GOOGLE_OAUTH_CLIENT_ID` to the public client ID.
-The workflow embeds it into config.js; run the workflow after updating the value.
-Never supply client secrets/access tokens/refresh tokens. For a local test use
-Settings and authorize `http://localhost:8000`.
+Set `googleClientId` in `docs/config.js` to the public web client ID once for all
+visitors. Never supply a client secret, access token or refresh token. For a local
+test, use Settings and authorize `http://localhost:8000`.
 
-## GitHub Pages
+## GitHub Pages: main/docs
 
-Initial publication can use `gh-pages` without merging unrelated app work.
-For automatic publication after the deployment workflow is merged, switch
-Settings → Pages → Source to **GitHub Actions**. The workflow deploys only
-`tools/map-editor/dist`, runs checks and supplies the public client ID.
-It does not publish SQLite files or private Drive contents.
+The site publishes from the `docs/` directory on `main`. Existing Markdown
+documentation stays alongside the editor. No switch to an Actions deployment or
+separate Pages branch is needed. `npm run sync-docs` copies the editor assets to
+`docs/`, preserving site-specific `docs/config.js`. Commit source and generated
+assets together. CI verifies they match (excluding the intentional config override).
+The published files contain no SQLite databases or private Drive map contents.
 
 ```sh
 cd tools/map-editor
