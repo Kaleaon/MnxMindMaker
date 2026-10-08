@@ -1,0 +1,21 @@
+name: Knowledge core
+on:
+  push:
+    paths: ['tools/knowledge-core/**', '.github/workflows/knowledge-core.yml']
+  pull_request:
+    paths: ['tools/knowledge-core/**', '.github/workflows/knowledge-core.yml']
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ['3.11', '3.12', '3.13']
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python -m unittest discover -s tests -v
+        working-directory: tools/knowledge-core

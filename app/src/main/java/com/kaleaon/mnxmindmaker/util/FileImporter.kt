@@ -54,7 +54,7 @@ object FileImporter {
             mimeType == "text/csv" || mimeType == "application/csv" ||
                     mimeType == "text/comma-separated-values" || ext == "csv" -> Format.CSV
             mimeType == "text/tab-separated-values" || ext == "tsv" -> Format.TSV
-            mimeType == "application/json" || ext == "json" -> Format.JSON
+            mimeType == "application/json" || ext == "json" || ext == "mnxj" -> Format.JSON
             mimeType == "text/plain" || ext == "txt" -> Format.PLAIN_TEXT
             else -> Format.UNKNOWN
         }

@@ -1,5 +1,6 @@
 package com.kaleaon.mnxmindmaker.util
 
+import com.kaleaon.mnxmindmaker.interchange.MindInterchangeFormat
 import com.kaleaon.mnxmindmaker.model.MindEdge
 import com.kaleaon.mnxmindmaker.model.MindGraph
 import com.kaleaon.mnxmindmaker.model.MindNode
@@ -94,6 +95,9 @@ object DataMapper {
             fromProviderExportIfRecognized(array, graphName) ?: fromJsonArray(array, graphName)
         } else {
             val obj = JSONObject(trimmed)
+            if (obj.optJSONObject("schema")?.optString("family") == MindInterchangeFormat.SCHEMA_FAMILY) {
+                return MindInterchangeFormat.importJson(trimmed)
+            }
             fromProviderExportIfRecognized(obj, graphName) ?: fromJsonObject(obj, graphName)
         }
     }
