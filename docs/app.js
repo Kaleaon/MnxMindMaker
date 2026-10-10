@@ -88,6 +88,7 @@ function element(tag, attrs = {}, text) {
   return item;
 }
 function renderCanvas() {
+  const focusedId = document.activeElement?.dataset?.id;
   $('canvas').setAttribute('viewBox', state.box.join(' '));
   $('nodes').replaceChildren(); $('connections').replaceChildren();
   const nodes = new Map(state.map.graph.nodes.map(node => [node.id, node]));
@@ -104,8 +105,46 @@ function renderCanvas() {
     group.append(element('text', { x: -78, y: -10, class: 'node-kind' }, node.type.replaceAll('_', ' ')));
     group.append(element('text', { x: -78, y: 14 }, node.label.length > 22 ? node.label.slice(0, 21) + '…' : node.label));
     group.append(element('title', {}, node.label + (node.description ? '\n' + node.description : '')));
-    group.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); state.selected = node.id; render(); $('node-label').focus(); } });
+    group.addEventListener('keydown', event => {
+      const step = event.shiftKey ? 50 : 10;
+      let moved = false;
+      if (event.key === 'ArrowUp') { moved = true; }
+      else if (event.key === 'ArrowDown') { moved = true; }
+      else if (event.key === 'ArrowLeft') { moved = true; }
+      else if (event.key === 'ArrowRight') { moved = true; }
+
+      if (moved) {
+        event.preventDefault();
+        mutate(() => {
+          if (event.key === 'ArrowUp') node.y -= step;
+          else if (event.key === 'ArrowDown') node.y += step;
+          else if (event.key === 'ArrowLeft') node.x -= step;
+          else if (event.key === 'ArrowRight') node.x += step;
+        });
+        return;
+      }
+
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        state.selected = node.id;
+        render();
+        $('node-label').focus();
+      } else if (event.key === ' ') {
+        event.preventDefault();
+        state.selected = state.selected === node.id ? null : node.id;
+        render();
+      } else if (event.key === 'Escape') {
+        event.preventDefault();
+        state.selected = null;
+        render();
+        $('canvas').focus();
+      }
+    });
     $('nodes').append(group);
+  }
+  if (focusedId) {
+    const nodeEl = $('nodes').querySelector(`[data-id="${focusedId}"]`);
+    if (nodeEl) nodeEl.focus();
   }
   $('empty-canvas').hidden = state.map.graph.nodes.length > 0;
   $('map-count').textContent = `${nodes.size} concepts · ${state.map.graph.edges.length} connections`;
