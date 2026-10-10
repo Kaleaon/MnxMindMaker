@@ -267,14 +267,6 @@ class MemoryStoreRepository(
             records = MemoryRecordCollections()
         )
     }
-
-    private fun loadStateLocked(): PersistedMemoryStore {
-        val initial = defaultState()
-        if (!storageFile.exists()) {
-            saveStateLocked(initial)
-        }
-        return initial
-    }
     private fun itemId(item: Any): String = when (item) {
         is SessionMemoryRecord -> item.metadata.id
         is ProfileMemoryRecord -> item.metadata.id
