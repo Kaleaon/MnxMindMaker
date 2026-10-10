@@ -1,7 +1,5 @@
 package com.kaleaon.mnxmindmaker
 
-import android.content.Context
-import androidx.test.core.app.ApplicationProvider
 import com.kaleaon.mnxmindmaker.mnx.MnxCodec
 import com.kaleaon.mnxmindmaker.mnx.MnxFile
 import com.kaleaon.mnxmindmaker.mnx.MnxFormat
@@ -25,11 +23,9 @@ import org.robolectric.RobolectricTestRunner
 @RunWith(RobolectricTestRunner::class)
 class MnxRepositoryMigrationTest {
 
-    private val context: Context = ApplicationProvider.getApplicationContext()
-
     @Test
     fun `dry-run preview reports migrations without mutating artifact`() {
-        val repo = MnxRepository(context)
+        val repo = MnxRepository()
         val legacyGraph = MindGraph(
             name = "Legacy",
             nodes = mutableListOf(
@@ -66,7 +62,7 @@ class MnxRepositoryMigrationTest {
 
     @Test
     fun `migration supports rollback and fixes legacy artifacts`() {
-        val repo = MnxRepository(context)
+        val repo = MnxRepository()
         val identity = MnxIdentity(
             name = "Migrated",
             createdAt = 1000L,
@@ -113,7 +109,7 @@ class MnxRepositoryMigrationTest {
 
     @Test
     fun `normalization handles three duplicate ids with deterministic canonical rewrites`() {
-        val repo = MnxRepository(context)
+        val repo = MnxRepository()
         val legacyGraph = MindGraph(
             id = "g-dup",
             name = "Dup graph",

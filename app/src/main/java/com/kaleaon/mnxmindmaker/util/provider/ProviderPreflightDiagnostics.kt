@@ -27,6 +27,7 @@ object ProviderPreflightDiagnostics {
         val probePath = when (settings.provider) {
             LlmProvider.ANTHROPIC -> "/messages"
             LlmProvider.OPENAI,
+            LlmProvider.OPENAI_COMPATIBLE_SELF_HOSTED,
             LlmProvider.GEMINI,
             LlmProvider.VLLM_GEMMA4,
             LlmProvider.OPENAI_COMPATIBLE_SELF_HOSTED,

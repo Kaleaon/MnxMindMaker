@@ -303,8 +303,24 @@ class MemoryStoreRepository(
         val initial = defaultState()
         if (!storageFile.exists()) {
             saveStateLocked(initial)
+            return initial
         }
-        return initial
+
+        maybeRunPeriodicIntegrityScanLocked()
+
+        if (verifyChecksumLocked()) {
+            return recoverFromSnapshotLocked() ?: recoverFromCorruptionLocked()
+        }
+
+        return try {
+            val raw = storageFile.readText()
+            val payload = json.parseToJsonElement(raw).jsonObject
+            val payloadVersion = payload[SCHEMA_VERSION_FIELD]?.jsonPrimitive?.intOrNull ?: 1
+            val migratedPayload = applyMigrationsLocked(payload, payloadVersion)
+            json.decodeFromString<PersistedMemoryStore>(migratedPayload.toString())
+        } catch (_: Exception) {
+            recoverFromCorruptionLocked()
+        }
     }
     private fun itemId(item: Any): String = when (item) {
         is SessionMemoryRecord -> item.metadata.id
@@ -380,15 +396,6 @@ class MemoryStoreRepository(
             saveStoreLocked(file, encode(default))
             return default
         }
-
-        maybeRunPeriodicIntegrityScanLocked()
-
-        val restoredFromSnapshot = verifyChecksumLocked()
-        if (restoredFromSnapshot) {
-            saveStoreLocked(file, encode(default))
-            return default
-        }
-
         return try {
             val raw = file.readText()
             val payload = json.parseToJsonElement(raw).jsonObject
@@ -412,6 +419,7 @@ class MemoryStoreRepository(
         checksumFile.writeText(HashUtils.sha256Hex(payload))
         encryptedStore.writeEncryptedBytes(storageFile, json.encodeToString(state).toByteArray(), "memory_index")
     }
+
     private fun defaultGraphStore(now: Long = System.currentTimeMillis()): GraphMemoryStore {
         return GraphMemoryStore(
             schemaVersion = SCHEMA_VERSION,
@@ -636,7 +644,6 @@ class MemoryStoreRepository(
         private const val EPISODIC_SUFFIX = "episodic"
         private const val METADATA_SUFFIX = "metadata_index"
         private const val SCHEMA_VERSION_FIELD = "schemaVersion"
-        private const val SCHEMA_VERSION = 1
         private const val INTEGRITY_SCAN_INTERVAL_MS = 15 * 60 * 1000L
     }
 }

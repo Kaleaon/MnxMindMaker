@@ -230,15 +230,6 @@ class MemoryManagerTest {
                 attributes = mutableMapOf("timestamp" to "1000")
             )
         )
-
-        manager.runMaintenance(50_000L)
-
-        val retrieved = manager.retrieveForPromptInjection(
-            prompt = "check",
-            task = "check",
-            limit = 10,
-            nowEpochMs = 50_000L
-        )
         val initialFingerprint = manager.getMemory("semantic-cache")
             ?.attributes
             ?.get("embedding_cache_fingerprint")
@@ -319,7 +310,6 @@ class MemoryManagerTest {
                 chunkSpan = "7:0-199"
             )
         )
-
         val retrieved = manager.retrieveForPromptInjection(
             prompt = "transcript",
             task = "audit",
