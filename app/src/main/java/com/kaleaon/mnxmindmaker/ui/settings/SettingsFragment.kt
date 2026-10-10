@@ -63,6 +63,7 @@ class SettingsFragment : Fragment() {
     private lateinit var repository: LlmSettingsRepository
     private lateinit var authRepository: AuthRepository
     private lateinit var externalAccountRepository: ExternalAccountRepository
+    private lateinit var oauthManager: com.kaleaon.mnxmindmaker.repository.OAuthManager
     private lateinit var modelManager: ModelManager
     private lateinit var localRuntimeCoordinator: LocalRuntimeCoordinator
     private var currentProvider: LlmProvider = LlmProvider.ANTHROPIC
@@ -79,6 +80,7 @@ class SettingsFragment : Fragment() {
         repository = LlmSettingsRepository(requireContext())
         authRepository = AuthRepository(requireContext())
         externalAccountRepository = ExternalAccountRepository(requireContext())
+        oauthManager = com.kaleaon.mnxmindmaker.repository.OAuthManager(requireContext())
         modelManager = ModelManager(requireContext())
         localRuntimeCoordinator = LocalRuntimeCoordinator(scope = viewLifecycleOwner.lifecycleScope)
         currentSettings = repository.loadAllSettings().toMutableList()
@@ -266,6 +268,9 @@ class SettingsFragment : Fragment() {
         binding.btnLinkClaude.setOnClickListener { promptLinkAccount(ExternalProvider.CLAUDE) }
         binding.btnLinkChatgpt.setOnClickListener { promptLinkAccount(ExternalProvider.CHATGPT) }
         binding.btnLinkHuggingface.setOnClickListener { promptLinkAccount(ExternalProvider.HUGGING_FACE) }
+        binding.btnOauthClaude.setOnClickListener { startOAuthFlow(ExternalProvider.CLAUDE) }
+        binding.btnOauthChatgpt.setOnClickListener { startOAuthFlow(ExternalProvider.CHATGPT) }
+        binding.btnOauthHuggingface.setOnClickListener { startOAuthFlow(ExternalProvider.HUGGING_FACE) }
         binding.btnRefreshClaude.setOnClickListener { refreshLinkedAccount(ExternalProvider.CLAUDE) }
         binding.btnRefreshChatgpt.setOnClickListener { refreshLinkedAccount(ExternalProvider.CHATGPT) }
         binding.btnRefreshHuggingface.setOnClickListener { refreshLinkedAccount(ExternalProvider.HUGGING_FACE) }
@@ -273,6 +278,37 @@ class SettingsFragment : Fragment() {
         binding.btnRevokeChatgpt.setOnClickListener { revokeLinkedAccount(ExternalProvider.CHATGPT) }
         binding.btnRevokeHuggingface.setOnClickListener { revokeLinkedAccount(ExternalProvider.HUGGING_FACE) }
         updateLinkedAccountsStatus()
+    }
+
+    private fun startOAuthFlow(provider: ExternalProvider) {
+        val clientId = externalAccountRepository.getOAuthClientId(provider)
+        if (clientId.isNullOrBlank()) {
+            Snackbar.make(
+                binding.root,
+                getString(R.string.oauth_client_id_required, provider.displayName),
+                Snackbar.LENGTH_LONG
+            ).show()
+            promptLinkAccount(provider)
+            return
+        }
+
+        val authUrl = oauthManager.buildAuthorizationUrl(
+            provider = provider,
+            clientId = clientId
+        )
+
+        if (authUrl == null) {
+            Snackbar.make(binding.root, "Failed to build OAuth authorization URL.", Snackbar.LENGTH_SHORT).show()
+            return
+        }
+
+        Snackbar.make(
+            binding.root,
+            getString(R.string.oauth_custom_tabs_launched, provider.displayName),
+            Snackbar.LENGTH_SHORT
+        ).show()
+
+        oauthManager.launchOAuthCustomTab(requireContext(), authUrl)
     }
 
     private fun promptLinkAccount(provider: ExternalProvider) {

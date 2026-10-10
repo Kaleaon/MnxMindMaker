@@ -56,8 +56,18 @@ class ExternalAccountRepository(context: Context) {
 
     fun saveOAuthClientConfig(provider: ExternalProvider, clientId: String, clientSecret: String) {
         val config = TOKEN_REFRESH_CONFIGS[provider] ?: return
-        vault.putString(config.clientIdKey, clientId.trim())
-        vault.putString(config.clientSecretKey, clientSecret.trim())
+        if (clientId.isNotBlank()) vault.putString(config.clientIdKey, clientId.trim())
+        if (clientSecret.isNotBlank()) vault.putString(config.clientSecretKey, clientSecret.trim())
+    }
+
+    fun getOAuthClientId(provider: ExternalProvider): String? {
+        val config = TOKEN_REFRESH_CONFIGS[provider] ?: return null
+        return vault.getString(config.clientIdKey)
+    }
+
+    fun getOAuthClientSecret(provider: ExternalProvider): String? {
+        val config = TOKEN_REFRESH_CONFIGS[provider] ?: return null
+        return vault.getString(config.clientSecretKey)
     }
 
     fun hasOAuthClientConfig(provider: ExternalProvider): Boolean {
@@ -209,6 +219,12 @@ class ExternalAccountRepository(context: Context) {
                 grantType = "refresh_token",
                 clientIdKey = "CHATGPT_client_id",
                 clientSecretKey = "CHATGPT_client_secret"
+            ),
+            ExternalProvider.HUGGING_FACE to TokenRefreshConfig(
+                tokenUrl = "https://huggingface.co/oauth/token",
+                grantType = "refresh_token",
+                clientIdKey = "HUGGING_FACE_client_id",
+                clientSecretKey = "HUGGING_FACE_client_secret"
             )
         )
 
