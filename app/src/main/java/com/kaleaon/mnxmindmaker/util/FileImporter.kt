@@ -97,6 +97,7 @@ object FileImporter {
      * - Contains a markdown heading (`# ` at line start) → Markdown
      * - Otherwise                → plain text
      */
+    @Suppress("TooGenericExceptionCaught")
     fun parseText(text: String, format: Format, graphName: String = "Imported Mind"): MindGraph {
         return try {
             when (format) {

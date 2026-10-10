@@ -61,7 +61,7 @@ object CsvImporter {
 
         val headers = try {
             parseCsvRow(lines[0], delimiter).map { it.trim().lowercase() }
-        } catch (e: Exception) {
+        } catch (e: IllegalArgumentException) {
             throw StructuredImportException(
                 lineNumber = 1,
                 columnNumber = null,
@@ -84,7 +84,7 @@ object CsvImporter {
             val lineContent = lines[lineIdx]
             val values = try {
                 parseCsvRow(lineContent, delimiter)
-            } catch (e: Exception) {
+            } catch (e: IllegalArgumentException) {
                 throw StructuredImportException(
                     lineNumber = lineIdx + 1,
                     columnNumber = null,
