@@ -1,5 +1,8 @@
 package com.kaleaon.mnxmindmaker.ktheme
 
+import android.graphics.Color
+import java.util.Locale
+
 /**
  * Color utilities ported from Ktheme kotlin-plugin.
  *
@@ -77,15 +80,21 @@ object ColorUtils {
     }
 
     fun colorIntToHex(color: Int): String {
-        return String.format("#%06X", 0xFFFFFF and color)
+        return String.format(Locale.ROOT, "#%06X", 0xFFFFFF and color)
     }
 
     fun hexToColorInt(hex: String): Int {
-        val clean = hex.removePrefix("#")
-        return when (clean.length) {
-            6 -> ("FF$clean").toLong(16).toInt()
-            8 -> clean.toLong(16).toInt()
-            else -> throw IllegalArgumentException("Invalid hex color: $hex")
+        val clean = if (hex.startsWith("#")) hex.substring(1) else hex
+        require(clean.length == 6 || clean.length == 8) { "Invalid hex color: $hex" }
+        val colorLong = try {
+            clean.toLong(16)
+        } catch (_: NumberFormatException) {
+            throw IllegalArgumentException("Invalid hex color: $hex")
+        }
+        return if (clean.length == 6) {
+            (0xFF000000L or colorLong).toInt()
+        } else {
+            colorLong.toInt()
         }
     }
 }

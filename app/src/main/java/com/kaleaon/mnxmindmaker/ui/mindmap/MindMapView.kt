@@ -256,7 +256,7 @@ class MindMapView @JvmOverloads constructor(
         val rect = RectF(node.x - nodeW / 2, node.y - nodeH / 2, node.x + nodeW / 2, node.y + nodeH / 2)
         nodeRects[node.id] = rect
 
-        val color = parseHexColor(node.type.colorHex)
+        val color = safeParseColor(node.type.colorHex, "#000000")
         nodePaint.color = color
         canvas.drawRoundRect(rect, 16f, 16f, nodePaint)
 
@@ -280,13 +280,11 @@ class MindMapView @JvmOverloads constructor(
         }
     }
 
-    private fun parseHexColor(hex: String): Int = Color.parseColor(hex)
-
     private fun safeParseColor(hex: String, fallback: String): Int {
         return try {
             ColorUtils.hexToColorInt(hex)
         } catch (_: Exception) {
-            Color.parseColor(fallback)
+            ColorUtils.hexToColorInt(fallback)
         }
     }
 
