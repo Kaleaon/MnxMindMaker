@@ -272,6 +272,9 @@ object MindInterchangeFormat {
             if (!nodeIds.contains(from)) throw ValidationException("graph.edges[$i].from_node_id must reference an existing node")
             if (!nodeIds.contains(to)) throw ValidationException("graph.edges[$i].to_node_id must reference an existing node")
             validateFiniteFloat(edge, "strength", "graph.edges[$i].strength")
+            if (edge.has("attributes") && edge.optJSONObject("attributes") == null) {
+                throw ValidationException("graph.edges[$i].attributes must be an object")
+            }
         }
     }
 
@@ -305,6 +308,8 @@ object MindInterchangeFormat {
                     .put("to_node_id", edge.toNodeId)
                     .put("label", edge.label)
                     .put("strength", edge.strength.toDouble())
+                    .put("relationship_type", edge.relationshipType)
+                    .put("attributes", toDeterministicJsonObject(edge.attributes, "graph.edges[${edge.id}].attributes"))
             })
         )
 
@@ -335,12 +340,20 @@ object MindInterchangeFormat {
         val edges = mutableListOf<MindEdge>()
         for (i in 0 until edgesJson.length()) {
             val edge = edgesJson.getJSONObject(i)
+            val relType = edge.optString("relationship_type").ifBlank { "relates_to" }
+            val attrs = if (edge.has("attributes") && edge.optJSONObject("attributes") != null) {
+                edge.getJSONObject("attributes").toStringMap().toMutableMap()
+            } else {
+                mutableMapOf()
+            }
             edges += MindEdge(
                 id = edge.getString("id"),
                 fromNodeId = edge.getString("from_node_id"),
                 toNodeId = edge.getString("to_node_id"),
                 label = edge.optString("label"),
-                strength = edge.optDouble("strength").toFloat()
+                strength = edge.optDouble("strength", 1.0).toFloat(),
+                relationshipType = relType,
+                attributes = attrs
             )
         }
 

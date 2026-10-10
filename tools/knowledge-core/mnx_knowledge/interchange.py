@@ -26,11 +26,15 @@ def export_mnxj(snapshot, history, name="Shared Knowledge"):
             for item in items:
                 provenance[(collection, item["id"])] = entry
 
-    def edge(from_collection, from_id, to_collection, to_id, label, strength=1.0):
+    def edge(from_collection, from_id, to_collection, to_id, label, strength=1.0, relationship_type=None, attributes=None):
+        rel_type = relationship_type or label or "relates_to"
+        edge_attrs = attributes or {}
         edges.append({"id": f"mnx.knowledge/edge/{len(edges)}",
                       "from_node_id": node_id(from_collection, from_id),
                       "to_node_id": node_id(to_collection, to_id),
-                      "label": label, "strength": strength})
+                      "label": label, "strength": strength,
+                      "relationship_type": rel_type,
+                      "attributes": edge_attrs})
 
     for collection in COLLECTIONS:
         for item in snapshot[collection]:
@@ -62,25 +66,38 @@ def export_mnxj(snapshot, history, name="Shared Knowledge"):
                 label = item["predicate"]
                 description = json.dumps(item["object"], ensure_ascii=False, allow_nan=False)
                 dimensions = {"confidence": item["confidence"]}
-                edge("concepts", item["subject_id"], "claims", item["id"], "has_claim")
+                edge("concepts", item["subject_id"], "claims", item["id"], "has_claim",
+                     relationship_type="has_claim",
+                     attributes={"claim_id": item["id"], "predicate": item["predicate"]})
                 if "concept_id" in item["object"]:
                     edge("claims", item["id"], "concepts", item["object"]["concept_id"],
-                         item["predicate"], item["confidence"])
+                         item["predicate"], item["confidence"],
+                         relationship_type=item["predicate"],
+                         attributes={"claim_id": item["id"], "predicate": item["predicate"], "confidence": str(item["confidence"])})
                 for citation in item["evidence"]:
                     edge("claims", item["id"], "sources", citation["source_id"],
-                         f"evidence: {citation['locator']}")
+                         f"evidence: {citation['locator']}",
+                         relationship_type="evidence",
+                         attributes={"evidence_locator": citation["locator"], "evidence_status": "source_attributed", "source_id": citation["source_id"], "citation": citation["locator"]})
                 for link in ("supersedes", "contradicts", "derived_from"):
                     for identifier in item.get(link, []):
-                        edge("claims", item["id"], "claims", identifier, link)
+                        edge("claims", item["id"], "claims", identifier, link,
+                             relationship_type=link,
+                             attributes={"relation_type": link})
             elif collection == "observations":
                 label = f"{item['modality']}: {item['id']}"
                 description = canonical(item["features"])
                 attributes["modality"] = item["modality"]
-                edge("observations", item["id"], "concepts", item["concept_id"], "observes")
+                edge("observations", item["id"], "concepts", item["concept_id"], "observes",
+                     relationship_type="observes",
+                     attributes={"modality": item["modality"]})
                 edge("observations", item["id"], "sources", item["source_id"],
-                     f"observed_in: {item['locator']}")
+                     f"observed_in: {item['locator']}",
+                     relationship_type="observed_in",
+                     attributes={"evidence_locator": item["locator"], "evidence_status": "source_attributed", "source_id": item["source_id"]})
                 if "embedding" in item:
-                    edge("observations", item["id"], "spaces", item["embedding"]["space_id"], "encoded_in")
+                    edge("observations", item["id"], "spaces", item["embedding"]["space_id"], "encoded_in",
+                         relationship_type="encoded_in")
             index = len(nodes)
             nodes.append({"id": node_id(collection, item["id"]), "label": label, "type": node_type,
                           "description": description, "x": 80 + (index % 4) * 240,

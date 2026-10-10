@@ -53,7 +53,9 @@ data class MindEdge(
     val fromNodeId: String,
     val toNodeId: String,
     val label: String = "",
-    val strength: Float = 1.0f
+    val strength: Float = 1.0f,
+    val relationshipType: String = "relates_to",
+    val attributes: MutableMap<String, String> = mutableMapOf()
 )
 
 /**
