@@ -2,6 +2,7 @@ package com.kaleaon.mnxmindmaker
 
 import android.content.Context
 import android.content.ContextWrapper
+import androidx.test.core.app.ApplicationProvider
 import com.kaleaon.mnxmindmaker.util.memory.persistence.MemoryCategory
 import com.kaleaon.mnxmindmaker.util.memory.persistence.MemoryRecordMetadata
 import com.kaleaon.mnxmindmaker.util.memory.persistence.MemoryStoreRepository
@@ -9,9 +10,12 @@ import com.kaleaon.mnxmindmaker.util.memory.persistence.SessionMemoryRecord
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
 import java.io.File
 import java.nio.file.Files
 
+@RunWith(RobolectricTestRunner::class)
 class MemoryStoreRepositoryIntegrityTest {
 
     @Test
@@ -64,7 +68,7 @@ class MemoryStoreRepositoryIntegrityTest {
         assertTrue(repository.getSessions().any { it.metadata.id == "session-a" })
     }
 
-    private fun tempContext(filesDir: File): Context = object : ContextWrapper(null) {
+    private fun tempContext(filesDir: File): Context = object : ContextWrapper(ApplicationProvider.getApplicationContext()) {
         override fun getFilesDir(): File = filesDir
     }
 }

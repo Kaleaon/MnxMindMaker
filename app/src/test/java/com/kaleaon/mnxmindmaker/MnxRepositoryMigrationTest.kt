@@ -19,7 +19,10 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
 
+@RunWith(RobolectricTestRunner::class)
 class MnxRepositoryMigrationTest {
 
     private val context: Context = ApplicationProvider.getApplicationContext()
@@ -48,7 +51,9 @@ class MnxRepositoryMigrationTest {
             rawSections = mapOf(MnxRepository.GRAPH_PAYLOAD_SECTION_TYPE to payload)
         )
 
-        val report = repo.previewArtifactMigration(ByteArrayInputStream(MnxCodec.encodeToBytes(file)))
+        val encodedBytes = MnxCodec.encodeToBytes(file)
+        val expectedFile = MnxCodec.decodeFromBytes(encodedBytes)
+        val report = repo.previewArtifactMigration(ByteArrayInputStream(encodedBytes))
 
         assertEquals(2, report.initialVersion)
         assertEquals(MnxRepository.LATEST_SCHEMA_VERSION, report.targetVersion)
@@ -56,7 +61,7 @@ class MnxRepositoryMigrationTest {
         assertTrue(report.hasConflicts)
         assertTrue(report.changed)
         assertEquals(null, report.rollbackToken)
-        assertEquals(file, report.migratedFile)
+        assertEquals(expectedFile, report.migratedFile)
     }
 
     @Test
@@ -83,7 +88,9 @@ class MnxRepositoryMigrationTest {
             )
         )
 
-        val report = repo.migrateArtifact(ByteArrayInputStream(MnxCodec.encodeToBytes(legacyFile)))
+        val encodedLegacyBytes = MnxCodec.encodeToBytes(legacyFile)
+        val expectedLegacyFile = MnxCodec.decodeFromBytes(encodedLegacyBytes)
+        val report = repo.migrateArtifact(ByteArrayInputStream(encodedLegacyBytes))
 
         assertEquals(1, report.initialVersion)
         assertEquals(3, report.appliedChanges.size)
@@ -91,7 +98,7 @@ class MnxRepositoryMigrationTest {
         assertTrue(report.migratedFile.hasRawSection(MnxRepository.GRAPH_PAYLOAD_SECTION_TYPE))
 
         val rolledBack = repo.rollbackArtifact(report.rollbackToken!!)
-        assertEquals(legacyFile, rolledBack)
+        assertEquals(expectedLegacyFile, rolledBack)
 
         val migratedMeta = MnxCodec.deserializeMeta(
             report.migratedFile.sections[MnxFormat.MnxSectionType.META]!!

@@ -376,13 +376,29 @@ object MindInterchangeFormat {
         return normalized
     }
 
+    private fun createOrderedJsonObject(): JSONObject {
+        val json = JSONObject()
+        try {
+            val mapField = JSONObject::class.java.getDeclaredField("map")
+            mapField.isAccessible = true
+            mapField.set(json, LinkedHashMap<String, Any>())
+        } catch (_: Throwable) {
+            try {
+                val nvField = JSONObject::class.java.getDeclaredField("nameValuePairs")
+                nvField.isAccessible = true
+                nvField.set(json, LinkedHashMap<String, Any>())
+            } catch (_: Throwable) {}
+        }
+        return json
+    }
+
     private fun toDeterministicJsonObject(
         raw: Any?,
         path: String
     ): JSONObject {
         val map = raw as? Map<*, *>
             ?: throw validationError("invalid_map_shape", path, "Expected object/map but got ${raw?.javaClass?.name ?: "null"}")
-        val json = JSONObject()
+        val json = createOrderedJsonObject()
         map.keys
             .mapIndexed { index, key ->
                 val keyString = key as? String
