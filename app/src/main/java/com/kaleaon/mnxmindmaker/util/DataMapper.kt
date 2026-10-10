@@ -5,8 +5,11 @@ import com.kaleaon.mnxmindmaker.model.MindEdge
 import com.kaleaon.mnxmindmaker.model.MindGraph
 import com.kaleaon.mnxmindmaker.model.MindNode
 import com.kaleaon.mnxmindmaker.model.NodeType
+import java.io.PrintWriter
+import java.io.StringWriter
 import java.util.Locale
 import org.json.JSONArray
+import org.json.JSONException
 import org.json.JSONObject
 
 /**
@@ -90,16 +93,49 @@ object DataMapper {
      */
     fun fromJson(jsonText: String, graphName: String = "Imported Mind"): MindGraph {
         val trimmed = jsonText.trim()
-        return if (trimmed.startsWith("[")) {
-            val array = JSONArray(trimmed)
-            fromProviderExportIfRecognized(array, graphName) ?: fromJsonArray(array, graphName)
-        } else {
-            val obj = JSONObject(trimmed)
-            if (obj.optJSONObject("schema")?.optString("family") == MindInterchangeFormat.SCHEMA_FAMILY) {
-                return MindInterchangeFormat.importJson(trimmed)
+        try {
+            return if (trimmed.startsWith("[")) {
+                val array = JSONArray(trimmed)
+                fromProviderExportIfRecognized(array, graphName) ?: fromJsonArray(array, graphName)
+            } else {
+                val obj = JSONObject(trimmed)
+                if (obj.optJSONObject("schema")?.optString("family") == MindInterchangeFormat.SCHEMA_FAMILY) {
+                    return MindInterchangeFormat.importJson(trimmed)
+                }
+                fromProviderExportIfRecognized(obj, graphName) ?: fromJsonObject(obj, graphName)
             }
-            fromProviderExportIfRecognized(obj, graphName) ?: fromJsonObject(obj, graphName)
+        } catch (e: JSONException) {
+            val (lineNum, colNum) = findJsonErrorPosition(jsonText, e)
+            val snippet = if (lineNum != null) StructuredImportException.extractLineSnippet(jsonText, lineNum) else null
+            val sw = StringWriter()
+            e.printStackTrace(PrintWriter(sw))
+            throw StructuredImportException(
+                lineNumber = lineNum ?: 1,
+                columnNumber = colNum,
+                lineContext = snippet,
+                causeExplanation = "JSON syntax error: ${e.message}",
+                fixTip = "Ensure proper JSON syntax with quotes around keys, matching brackets, and valid commas.",
+                rawTrace = sw.toString(),
+                cause = e
+            )
         }
+    }
+
+    private fun findJsonErrorPosition(rawJson: String, e: JSONException): Pair<Int?, Int?> {
+        val msg = e.message ?: ""
+        val charMatch = Regex("at (?:character|position) (\\d+)").find(msg.lowercase(Locale.ROOT))
+        if (charMatch != null) {
+            val charIndex = charMatch.groupValues[1].toIntOrNull()
+            if (charIndex != null && charIndex in 0..rawJson.length) {
+                val lines = rawJson.substring(0, charIndex.coerceAtMost(rawJson.length)).lines()
+                val lineNum = lines.size
+                val colNum = lines.last().length + 1
+                return Pair(lineNum, colNum)
+            }
+        }
+        val lineMatch = Regex("line (\\d+)").find(msg.lowercase(Locale.ROOT))
+        val lineNum = lineMatch?.groupValues?.get(1)?.toIntOrNull()
+        return Pair(lineNum ?: 1, null)
     }
 
     private fun fromProviderExportIfRecognized(json: Any, graphName: String): MindGraph? {

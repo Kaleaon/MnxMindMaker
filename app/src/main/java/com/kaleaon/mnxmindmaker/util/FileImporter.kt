@@ -98,13 +98,24 @@ object FileImporter {
      * - Otherwise                → plain text
      */
     fun parseText(text: String, format: Format, graphName: String = "Imported Mind"): MindGraph {
-        return when (format) {
-            Format.MARKDOWN -> MarkdownImporter.fromMarkdown(text, graphName)
-            Format.CSV -> CsvImporter.fromCsv(text, graphName)
-            Format.TSV -> CsvImporter.fromTsv(text, graphName)
-            Format.JSON -> DataMapper.fromJson(text, graphName)
-            Format.PLAIN_TEXT -> DataMapper.fromPlainText(text, graphName)
-            Format.UNKNOWN, Format.DOCX -> autoDetectAndParse(text, graphName)
+        return try {
+            when (format) {
+                Format.MARKDOWN -> MarkdownImporter.fromMarkdown(text, graphName)
+                Format.CSV -> CsvImporter.fromCsv(text, graphName)
+                Format.TSV -> CsvImporter.fromTsv(text, graphName)
+                Format.JSON -> DataMapper.fromJson(text, graphName)
+                Format.PLAIN_TEXT -> DataMapper.fromPlainText(text, graphName)
+                Format.UNKNOWN, Format.DOCX -> autoDetectAndParse(text, graphName)
+            }
+        } catch (e: StructuredImportException) {
+            throw e
+        } catch (e: Exception) {
+            throw StructuredImportException.create(
+                message = "Import failed: ${e.message ?: e.javaClass.simpleName}",
+                rawText = text,
+                cause = e,
+                fallbackFixTip = "Check file syntax and format structure."
+            )
         }
     }
 

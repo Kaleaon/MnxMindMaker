@@ -1,10 +1,15 @@
 package com.kaleaon.mnxmindmaker.ui.importdata
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.EditText
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
 import androidx.fragment.app.Fragment
 import androidx.navigation.fragment.findNavController
 import com.google.android.material.snackbar.Snackbar
@@ -13,6 +18,7 @@ import com.kaleaon.mnxmindmaker.databinding.FragmentImportBinding
 import com.kaleaon.mnxmindmaker.model.MindGraph
 import com.kaleaon.mnxmindmaker.util.DataMapper
 import com.kaleaon.mnxmindmaker.util.FileImporter
+import com.kaleaon.mnxmindmaker.util.StructuredImportException
 
 class ImportFragment : Fragment() {
 
@@ -108,12 +114,16 @@ class ImportFragment : Fragment() {
 
             val graph: MindGraph = try {
                 FileImporter.parseText(text, loadedFormat, graphName)
+            } catch (e: StructuredImportException) {
+                showImportErrorDialog(e)
+                return@setOnClickListener
             } catch (e: Exception) {
-                Snackbar.make(
-                    binding.root,
-                    getString(R.string.import_parse_error, e.message),
-                    Snackbar.LENGTH_LONG
-                ).show()
+                val wrapped = StructuredImportException.create(
+                    message = e.message ?: e.javaClass.simpleName,
+                    rawText = text,
+                    cause = e
+                )
+                showImportErrorDialog(wrapped)
                 return@setOnClickListener
             }
 
@@ -163,6 +173,57 @@ class ImportFragment : Fragment() {
         FileImporter.Format.JSON -> "JSON (.json)"
         FileImporter.Format.PLAIN_TEXT -> "Plain text (.txt)"
         FileImporter.Format.UNKNOWN -> "text"
+    }
+
+    private fun showImportErrorDialog(e: StructuredImportException) {
+        val lineIndicator = e.lineNumber?.let { getString(R.string.import_error_line_indicator, it) } ?: ""
+        val snippetPart = if (!e.lineContext.isNullOrBlank()) {
+            "\n${getString(R.string.import_error_snippet_label)}\n> ${e.lineContext}"
+        } else ""
+        val message = buildString {
+            append(e.causeExplanation)
+            if (lineIndicator.isNotBlank()) {
+                append("\n\n").append(lineIndicator)
+            }
+            if (snippetPart.isNotBlank()) {
+                append(snippetPart)
+            }
+            append("\n\n").append(getString(R.string.import_error_fix_tip_label)).append("\n").append(e.fixTip)
+        }
+
+        val builder = AlertDialog.Builder(requireContext())
+            .setTitle(R.string.import_error_dialog_title)
+            .setMessage(message)
+            .setNeutralButton(R.string.preflight_copy_raw_logs) { _, _ ->
+                val clipboard = requireContext().getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                val clip = ClipData.newPlainText("Import Error Logs", e.rawTrace)
+                clipboard.setPrimaryClip(clip)
+                Snackbar.make(binding.root, R.string.preflight_logs_copied, Snackbar.LENGTH_SHORT).show()
+            }
+            .setNegativeButton(R.string.cancel, null)
+
+        if (e.lineNumber != null && e.lineNumber > 0) {
+            builder.setPositiveButton(R.string.import_focus_error_line) { _, _ ->
+                focusLineInEditText(binding.etImportText, e.lineNumber)
+            }
+        } else {
+            builder.setPositiveButton(R.string.ok, null)
+        }
+
+        builder.show()
+    }
+
+    private fun focusLineInEditText(editText: EditText, lineNumber: Int) {
+        val content = editText.text.toString()
+        val lines = content.lines()
+        if (lineNumber <= 0 || lineNumber > lines.size) return
+        var startPos = 0
+        for (i in 0 until (lineNumber - 1)) {
+            startPos += lines[i].length + 1 // include newline
+        }
+        val lineLen = lines[lineNumber - 1].length
+        editText.requestFocus()
+        editText.setSelection(startPos.coerceAtMost(content.length), (startPos + lineLen).coerceAtMost(content.length))
     }
 }
 

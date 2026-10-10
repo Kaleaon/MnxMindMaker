@@ -30,6 +30,8 @@ import com.kaleaon.mnxmindmaker.ktheme.KthemeManager
 import com.kaleaon.mnxmindmaker.model.NodeType
 import com.kaleaon.mnxmindmaker.util.ContinuityAuditResult
 import com.kaleaon.mnxmindmaker.util.tooling.ToolApprovalRequest
+import com.kaleaon.mnxmindmaker.util.drive.DriveSyncError
+import com.kaleaon.mnxmindmaker.util.drive.DriveSyncErrorKind
 import com.kaleaon.mnxmindmaker.ui.deploy.DeploymentSessionState
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -165,6 +167,17 @@ class MindMapFragment : Fragment() {
             viewModel.clearToolApprovalResolution()
         }
 
+        viewModel.driveSyncSuccess.observe(viewLifecycleOwner) { msg ->
+            msg ?: return@observe
+            Snackbar.make(binding.root, msg, Snackbar.LENGTH_LONG).show()
+            viewModel.clearDriveSyncSuccess()
+        }
+
+        viewModel.driveSyncError.observe(viewLifecycleOwner) { error ->
+            error ?: return@observe
+            showDriveSyncErrorDialog(error)
+        }
+
         KthemeManager.activeTheme.observe(viewLifecycleOwner) { theme ->
             binding.mindMapCanvas.applyTheme(theme)
             theme?.colorScheme?.let { cs ->
@@ -187,6 +200,7 @@ class MindMapFragment : Fragment() {
         }
         binding.btnExportMnx.setOnClickListener { viewModel.exportToMnx() }
         binding.btnImportMnx.setOnClickListener { openMnxFile.launch(arrayOf("*/*")) }
+        binding.btnDriveSync.setOnClickListener { viewModel.syncDrive() }
         binding.btnAskAi.setOnClickListener {
             when (viewModel.askAiEntryMode.value ?: AskAiEntryMode.DATA_USE_PANEL) {
                 AskAiEntryMode.CHAT_PANEL -> showChatDialog()
@@ -636,6 +650,60 @@ class MindMapFragment : Fragment() {
             }
             .setNegativeButton(R.string.cancel, null)
             .show()
+    }
+
+    private fun showDriveSyncErrorDialog(error: DriveSyncError) {
+        val titleRes = when (error.kind) {
+            DriveSyncErrorKind.CONFLICT -> R.string.drive_sync_conflict_title
+            DriveSyncErrorKind.SESSION_EXPIRED -> R.string.drive_sync_auth_title
+            DriveSyncErrorKind.NETWORK_ERROR -> R.string.drive_sync_network_title
+            DriveSyncErrorKind.GENERIC_SYNC_ERROR -> R.string.drive_sync_error_title
+        }
+
+        val message = buildString {
+            appendLine(error.description)
+            appendLine()
+            append(error.troubleshootingTip)
+        }
+
+        val builder = AlertDialog.Builder(requireContext())
+            .setTitle(titleRes)
+            .setMessage(message)
+
+        when (error.kind) {
+            DriveSyncErrorKind.CONFLICT -> {
+                builder.setPositiveButton(R.string.drive_sync_action_save_draft) { _, _ ->
+                    viewModel.saveLocalDraft()
+                }
+                builder.setNeutralButton(R.string.drive_sync_action_overwrite) { _, _ ->
+                    viewModel.overwriteRemote()
+                }
+                builder.setNegativeButton(R.string.drive_sync_action_reload) { _, _ ->
+                    viewModel.reloadRemote()
+                }
+            }
+            DriveSyncErrorKind.SESSION_EXPIRED -> {
+                builder.setPositiveButton(R.string.drive_sync_action_reauth) { _, _ ->
+                    viewModel.reauthenticateDrive()
+                }
+                builder.setNegativeButton(R.string.cancel) { _, _ ->
+                    viewModel.clearDriveSyncError()
+                }
+            }
+            DriveSyncErrorKind.NETWORK_ERROR, DriveSyncErrorKind.GENERIC_SYNC_ERROR -> {
+                builder.setPositiveButton(R.string.deploy_ops_retry) { _, _ ->
+                    viewModel.syncDrive()
+                }
+                builder.setNegativeButton(R.string.cancel) { _, _ ->
+                    viewModel.clearDriveSyncError()
+                }
+            }
+        }
+
+        builder.setOnCancelListener {
+            viewModel.clearDriveSyncError()
+        }
+        builder.show()
     }
 
     override fun onDestroyView() {
