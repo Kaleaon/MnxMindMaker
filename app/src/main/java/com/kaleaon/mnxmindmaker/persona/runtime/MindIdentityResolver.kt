@@ -201,7 +201,7 @@ class MindIdentityResolver(
     )
 
     companion object {
-        const val DEFAULT_FUZZY_THRESHOLD: Double = 0.75
+        const val DEFAULT_FUZZY_THRESHOLD: Double = 0.80
     }
 }
 

@@ -1,15 +1,58 @@
 import { MAX_BYTES, NODE_TYPES, addNode, createMap, editorLink, parseDriveLink, parseMap, removeNode, reviseNode, serializeMap, validateMap } from './graph.js';
 import { ConflictError, DriveClient, connectGoogle } from './drive.js';
 import { DraftRecovery, IndexedDraftRecovery } from './recovery.js';
-const $ = id => document.getElementById(id);
+
+export class ModalDialogController {
+  constructor(dialogElement) {
+    this.dialog = typeof dialogElement === 'string' ? (typeof document !== 'undefined' ? document.getElementById(dialogElement) : null) : dialogElement;
+    this.triggerElement = null;
+    if (this.dialog) {
+      this._ensureAccessibleName();
+      this._bindCloseHandler();
+    }
+  }
+
+  _ensureAccessibleName() {
+    if (!this.dialog.hasAttribute('aria-labelledby') && !this.dialog.hasAttribute('aria-label')) {
+      const heading = this.dialog.querySelector('h1, h2, h3');
+      if (heading) {
+        if (!heading.id) heading.id = 'dialog-heading-' + Math.random().toString(36).slice(2, 9);
+        this.dialog.setAttribute('aria-labelledby', heading.id);
+      }
+    }
+  }
+
+  _bindCloseHandler() {
+    this.dialog.addEventListener('close', () => {
+      if (this.triggerElement && typeof this.triggerElement.focus === 'function') {
+        this.triggerElement.focus();
+        this.triggerElement = null;
+      }
+    });
+  }
+
+  open(triggerElement = (typeof document !== 'undefined' ? document.activeElement : null)) {
+    this.triggerElement = triggerElement;
+    if (this.dialog) this.dialog.showModal();
+  }
+
+  close() {
+    if (this.dialog) this.dialog.close();
+  }
+}
+
+const settingsModal = typeof document !== 'undefined' ? new ModalDialogController('settings-dialog') : null;
+const shareModal = typeof document !== 'undefined' ? new ModalDialogController('share-dialog') : null;
+
+const $ = id => typeof document !== 'undefined' ? document.getElementById(id) : null;
 const state = { map: createMap(), file: null, folder: null, files: [], drive: null, selected: null, dirty: false,
   busy: false, undo: [], box: [-500, -350, 1000, 700], connected: false, generation: 0 };
-const config = window.MNX_CONFIG || {};
-let storage; try { storage = window.localStorage; } catch { /* storage may be blocked */ }
+const config = typeof window !== 'undefined' ? (window.MNX_CONFIG || {}) : {};
+let storage; try { storage = typeof window !== 'undefined' ? window.localStorage : null; } catch { /* storage may be blocked */ }
 let clientId = config.googleClientId || '';
 try { clientId ||= storage?.getItem('mnx.googleClientId') || ''; } catch { /* settings storage unavailable */ }
 let recovery = storage ? new DraftRecovery(storage) : null;
-try { if (window.indexedDB) recovery = new IndexedDraftRecovery(window.indexedDB); } catch { /* retain localStorage fallback */ }
+try { if (typeof window !== 'undefined' && window.indexedDB) recovery = new IndexedDraftRecovery(window.indexedDB); } catch { /* retain localStorage fallback */ }
 let draftTimer;
 async function checkpoint() {
   clearTimeout(draftTimer);
@@ -17,12 +60,14 @@ async function checkpoint() {
   catch { say('Local recovery is unavailable or full. Download your draft to keep a backup.', true, true); }
 }
 let messageTimer;
-let requested = new URLSearchParams(location.hash.slice(1));
+let requested = new URLSearchParams(typeof location !== 'undefined' ? location.hash.slice(1) : '');
 const validId = id => typeof id === 'string' && /^[A-Za-z0-9_-]{1,250}$/.test(id);
 const requestedFile = validId(requested.get('file')) ? { id: requested.get('file'), resourceKey: requested.get('filekey') || '' } : null;
 const initialFolder = validId(requested.get('folder')) ? { id: requested.get('folder'), resourceKey: requested.get('folderkey') || '' } : config.defaultFolder;
-if (initialFolder?.id) $('folder-link').value = 'https://drive.google.com/drive/folders/' + initialFolder.id + (initialFolder.resourceKey ? '?resourcekey=' + encodeURIComponent(initialFolder.resourceKey) : '');
-for (const type of NODE_TYPES) $('node-type').add(new Option(type.replaceAll('_', ' '), type));
+if (typeof document !== 'undefined') {
+  if (initialFolder?.id && $('folder-link')) $('folder-link').value = 'https://drive.google.com/drive/folders/' + initialFolder.id + (initialFolder.resourceKey ? '?resourcekey=' + encodeURIComponent(initialFolder.resourceKey) : '');
+  if ($('node-type')) { for (const type of NODE_TYPES) $('node-type').add(new Option(type.replaceAll('_', ' '), type)); }
+}
 
 function editable() { return !state.busy && (!state.file || state.file.capabilities?.canEdit === true); }
 function say(message, error = false, permanent = false) {
@@ -210,8 +255,9 @@ async function openFolder(folder, openRequested = false) {
   say('Folder opened. Select a map or start a new one.');
 }
 async function refreshFolder() { const result = await state.drive.listFolder(state.folder); state.folder = result.folder; state.files = result.files; }
+if (typeof document !== 'undefined') {
 $('connect-button').onclick = () => {
-  if (!clientId) { $('client-id').value = ''; $('settings-dialog').showModal(); return; }
+  if (!clientId) { $('client-id').value = ''; settingsModal.open($('connect-button')); return; }
   action(async () => {
     const session = await connectGoogle(clientId); state.drive = new DriveClient(session.access_token); state.connected = true;
     const folder = $('folder-link').value ? parseDriveLink($('folder-link').value) : null;
@@ -268,9 +314,9 @@ $('delete-node-button').onclick = () => { if (confirm('Delete this concept and i
 $('edge-form').onsubmit = event => { event.preventDefault(); const target = $('edge-target').value, label = $('edge-label').value.trim(); if (!target) return;
   mutate(() => { state.map.graph.edges.push({ id: crypto.randomUUID(), from_node_id: state.selected, to_node_id: target, label, strength: 1 }); }); $('edge-label').value = '';
 };
-$('settings-button').onclick = () => { $('client-id').value = clientId; $('settings-dialog').showModal(); };
+$('settings-button').onclick = () => { $('client-id').value = clientId; settingsModal.open($('settings-button')); };
 $('settings-form').onsubmit = event => { event.preventDefault(); const value = $('client-id').value.trim(); if (!/^[\w.-]+\.apps\.googleusercontent\.com$/.test(value)) return say('Use a Google OAuth web client ID ending in .apps.googleusercontent.com.', true);
-  clientId = value; try { storage?.setItem('mnx.googleClientId', value); } catch { /* retain session setting */ } $('settings-dialog').close(); say('Settings saved. Connect Google Drive when you’re ready.');
+  clientId = value; try { storage?.setItem('mnx.googleClientId', value); } catch { /* retain session setting */ } settingsModal.close(); say('Settings saved. Connect Google Drive when you’re ready.');
 };
 for (const button of document.querySelectorAll('[data-close]')) button.onclick = () => $(button.dataset.close).close();
 $('share-button').onclick = () => {
@@ -278,7 +324,7 @@ $('share-button').onclick = () => {
   $('link-access').value = 'keep'; for (const option of $('link-access').options) option.disabled = option.value !== 'keep' && !state.file.capabilities?.canShare;
   $('drive-file-link').href = state.file.webViewLink || 'https://drive.google.com/file/d/' + state.file.id + '/view';
   $('sharing-help').textContent = state.dirty ? 'You have unsaved edits. Save them first if you want others to see those changes.' : 'Changing link access affects the Drive file. Your organization may restrict public sharing.';
-  $('share-dialog').showModal();
+  shareModal.open($('share-button'));
 };
 $('share-form').onsubmit = event => {
   event.preventDefault(); $('apply-share-button').disabled = true;
@@ -291,7 +337,7 @@ $('share-form').onsubmit = event => {
         state.file = { ...state.file, resourceKey: updated.resourceKey || state.file.resourceKey, capabilities: updated.capabilities };
       }
       const link = editorLink(location.href, state.folder, state.file); $('share-link').value = link; updateLink();
-      try { await navigator.clipboard.writeText(link); $('share-dialog').close(); say('Editor link copied.'); }
+      try { await navigator.clipboard.writeText(link); shareModal.close(); say('Editor link copied.'); }
       catch { $('share-link').focus(); $('share-link').select(); say('Link ready. Copy the selected editor link.'); }
     } finally { $('apply-share-button').disabled = false; }
   });
@@ -346,3 +392,4 @@ if (document.modelContext?.registerTool) {
   } catch { say('Local recovery could not be read. Keep a downloaded backup of your map.', true, true); }
   finally { state.busy = false; render(); }
 })();
+}
