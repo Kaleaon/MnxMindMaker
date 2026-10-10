@@ -501,8 +501,6 @@ class MemoryManager(
         return PurgeSelection(expiredIds = expiredIds, malformedTimestampCount = malformedTimestampCount)
     }
 
-    private fun parseTimestamp(rawTimestamp: String?): Long? = rawTimestamp?.toLongOrNull()
-
     private fun archiveDormantAndOverRetention(nowEpochMs: Long): Map<MemoryCategory, Int> {
         val policy = policySettings.maintenancePolicy
         val archivedCounts = mutableMapOf<MemoryCategory, Int>()
