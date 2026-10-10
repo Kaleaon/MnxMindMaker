@@ -2,7 +2,7 @@ package com.kaleaon.mnxmindmaker.util.tooling
 
 import org.json.JSONObject
 
-/** JSON manifest root for a tool skill pack under assets/skills/*.json. */
+/** JSON manifest root for a tool skill pack under assets/skills. */
 data class SkillPackManifest(
     val packId: String,
     val version: String,

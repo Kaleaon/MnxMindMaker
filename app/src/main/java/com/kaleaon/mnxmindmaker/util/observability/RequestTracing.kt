@@ -1,11 +1,11 @@
 package com.kaleaon.mnxmindmaker.util.observability
 
 import com.kaleaon.mnxmindmaker.model.MindNode
+import com.kaleaon.mnxmindmaker.util.HashUtils
 import com.kaleaon.mnxmindmaker.util.tooling.ToolInvocation
 import com.kaleaon.mnxmindmaker.util.tooling.ToolResult
 import org.json.JSONArray
 import org.json.JSONObject
-import java.security.MessageDigest
 
 enum class TraceEventType {
     PROMPT_PIPELINE,
@@ -114,7 +114,7 @@ object TraceReplayEngine {
             .toSortedMap()
             .entries
             .joinToString("|") { (k, v) -> "$k=$v" }
-        return Hashing.sha256Hex("${event.type.name}|${event.atEpochMs}|$canonicalPayload")
+        return HashUtils.sha256Hex("${event.type.name}|${event.atEpochMs}|$canonicalPayload")
     }
 }
 
@@ -169,7 +169,7 @@ class RequestTracer(
             mapOf(
                 "stage" to stage,
                 "prompt_preview" to promptPreview.take(300),
-                "prompt_hash" to Hashing.sha256Hex(promptPreview)
+                "prompt_hash" to HashUtils.sha256Hex(promptPreview)
             )
         )
     }
@@ -189,7 +189,7 @@ class RequestTracer(
                     "label" to node.label,
                     "confidence" to (node.attributes["confidence"] ?: ""),
                     "source" to source,
-                    "retrieval_hash" to Hashing.sha256Hex(retrievalEvidence)
+                    "retrieval_hash" to HashUtils.sha256Hex(retrievalEvidence)
                 )
             )
         }
@@ -204,8 +204,8 @@ class RequestTracer(
                 "success" to result.success.toString(),
                 "latency_ms" to latencyMs.toString(),
                 "output_preview" to result.outputText.take(220),
-                "tool_arguments_hash" to Hashing.sha256Hex(invocation.argumentsJson.toString()),
-                "tool_output_hash" to Hashing.sha256Hex(result.contentJson.toString())
+                "tool_arguments_hash" to HashUtils.sha256Hex(invocation.argumentsJson.toString()),
+                "tool_output_hash" to HashUtils.sha256Hex(result.contentJson.toString())
             )
         )
     }
@@ -218,7 +218,7 @@ class RequestTracer(
                 "model" to model,
                 "latency_ms" to latencyMs.toString(),
                 "response_preview" to responsePreview.take(300),
-                "response_hash" to Hashing.sha256Hex(responsePreview)
+                "response_hash" to HashUtils.sha256Hex(responsePreview)
             )
         )
     }
@@ -299,7 +299,7 @@ class RequestTracer(
             mapOf(
                 "stage" to stage,
                 "message" to message.take(400),
-                "error_hash" to Hashing.sha256Hex("$stage:$message")
+                "error_hash" to HashUtils.sha256Hex("$stage:$message")
             )
         )
     }
@@ -321,12 +321,5 @@ class RequestTracer(
 
     private fun record(type: TraceEventType, payload: Map<String, String>) {
         events += TraceEvent(type = type, atEpochMs = nowMs(), payload = payload)
-    }
-}
-
-private object Hashing {
-    fun sha256Hex(value: String): String {
-        val digest = MessageDigest.getInstance("SHA-256").digest(value.toByteArray(Charsets.UTF_8))
-        return digest.joinToString("") { "%02x".format(it) }
     }
 }

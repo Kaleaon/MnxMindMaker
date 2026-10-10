@@ -4,10 +4,10 @@ import android.content.Context
 import com.kaleaon.mnxmindmaker.model.MindGraph
 import com.kaleaon.mnxmindmaker.repository.MnxRepository
 import com.kaleaon.mnxmindmaker.security.EncryptedArtifactStore
+import com.kaleaon.mnxmindmaker.util.HashUtils
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
-import java.security.MessageDigest
 import java.util.UUID
 
 class ContinuityManager(context: Context) {
@@ -120,8 +120,7 @@ class ContinuityManager(context: Context) {
                 append(':').append(edge.strength)
             }
         }
-        val digest = MessageDigest.getInstance("SHA-256").digest(canonical.toByteArray())
-        return digest.joinToString("") { "%02x".format(it) }
+        return HashUtils.sha256Hex(canonical)
     }
 
     private fun readTimeline(): List<SnapshotRecord> {

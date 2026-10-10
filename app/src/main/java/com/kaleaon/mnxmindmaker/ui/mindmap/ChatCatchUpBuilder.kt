@@ -109,7 +109,7 @@ class ChatCatchUpBuilder {
         if (targetMindId.isBlank()) return emptyList()
         return history.asReversed()
             .flatMap { message ->
-                listOf("user" to message.prompt, "assistant" to message.response)
+                listOf("user" to message.prompt.orEmpty(), "assistant" to message.response.orEmpty())
             }
             .filter { (_, text) -> text.contains(targetMindId, ignoreCase = true) }
             .take(limit)
@@ -137,8 +137,8 @@ class ChatCatchUpBuilder {
 
     private fun summarizeTurn(index: Int, message: ChatMessage, remainingBudget: Int): String {
         val remainingChars = max(remainingBudget * 4, 48)
-        val userExcerpt = truncate(clean(message.prompt), remainingChars / 2)
-        val assistantExcerpt = truncate(clean(message.response), remainingChars / 2)
+        val userExcerpt = truncate(clean(message.prompt.orEmpty()), remainingChars / 2)
+        val assistantExcerpt = truncate(clean(message.response.orEmpty()), remainingChars / 2)
         return "Turn ${index + 1} — User: $userExcerpt | Assistant: $assistantExcerpt"
     }
 
