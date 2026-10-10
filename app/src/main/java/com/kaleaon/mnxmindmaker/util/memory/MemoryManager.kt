@@ -498,7 +498,7 @@ class MemoryManager(
         val expiredIds = this.filter { memory ->
             val ts = memory.attributes["timestamp"]?.toLongOrNull()
             if (ts == null) malformedTimestampCount += 1
-            nowEpochMs - (ts ?: 0L) > maxAgeMs
+            nowEpochMs - (ts ?: nowEpochMs) > maxAgeMs
         }.map { it.id }
         return PurgeSelection(expiredIds = expiredIds, malformedTimestampCount = malformedTimestampCount)
     }

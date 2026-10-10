@@ -1,13 +1,8 @@
 package com.kaleaon.mnxmindmaker.security
 
 import org.json.JSONObject
-<<<<<<< HEAD
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertTrue
-=======
-import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNotNull
->>>>>>> a3d2a5d (fix(ci): resolve Kotlin compilation errors across debug, test, and androidTest source sets)
 import org.junit.Assert.assertThrows
 import org.junit.Test
 
@@ -24,7 +19,6 @@ class EncryptedArtifactStoreRecoveryTest {
     }
 
     @Test
-<<<<<<< HEAD
     fun `recoverHierarchyFromBackup imports recovery payload for valid bundle`() {
         val passphrase = "correct horse battery staple"
         val sourceHierarchy = AppManagedKeyHierarchy(FakeStore())
@@ -43,26 +37,6 @@ class EncryptedArtifactStoreRecoveryTest {
 
         assertArrayEquals(expectedV1, restoredHierarchy.keyForVersion(1))
         assertTrue(restoredHierarchy.keyForVersion(2) != null)
-=======
-    fun `recoverHierarchyFromBackup imports valid recovery bundle`() {
-        val passphrase = "correct horse battery staple"
-        val sourceHierarchy = AppManagedKeyHierarchy(FakeStore())
-        sourceHierarchy.rotate()
-        val wrappedHierarchy = sourceHierarchy.exportEncryptedSnapshot(passphrase)
-        val bundle = JSONObject()
-            .put("magic", "MMK-BUNDLE-1")
-            .put("recovery", JSONObject(wrappedHierarchy))
-            .toString()
-
-        val targetHierarchy = AppManagedKeyHierarchy(FakeStore())
-        val store = EncryptedArtifactStore(targetHierarchy)
-
-        store.recoverHierarchyFromBackup(bundle, passphrase)
-
-        assertNotNull(targetHierarchy.keyForVersion(1))
-        assertNotNull(targetHierarchy.keyForVersion(2))
-        assertEquals(2, targetHierarchy.activeKey().version)
->>>>>>> a3d2a5d (fix(ci): resolve Kotlin compilation errors across debug, test, and androidTest source sets)
     }
 
     @Test
@@ -98,20 +72,12 @@ class EncryptedArtifactStoreRecoveryTest {
             store.recoverHierarchyFromBackup(missingRecoveryBundle, "passphrase")
         }
 
-<<<<<<< HEAD
         val nonObjectRecovery = JSONObject()
-=======
-        val nonObjectRecoveryBundle = JSONObject()
->>>>>>> a3d2a5d (fix(ci): resolve Kotlin compilation errors across debug, test, and androidTest source sets)
             .put("magic", "MMK-BUNDLE-1")
             .put("recovery", "not-an-object")
             .toString()
         assertThrows(IllegalArgumentException::class.java) {
-<<<<<<< HEAD
             store.recoverHierarchyFromBackup(nonObjectRecovery, "passphrase")
-=======
-            store.recoverHierarchyFromBackup(nonObjectRecoveryBundle, "passphrase")
->>>>>>> a3d2a5d (fix(ci): resolve Kotlin compilation errors across debug, test, and androidTest source sets)
         }
     }
 }

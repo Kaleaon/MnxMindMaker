@@ -662,6 +662,7 @@ class MemoryStoreRepository(
         private const val EPISODIC_SUFFIX = "episodic"
         private const val METADATA_SUFFIX = "metadata_index"
         private const val SCHEMA_VERSION_FIELD = "schemaVersion"
+        private const val SCHEMA_VERSION = 1
         private const val INTEGRITY_SCAN_INTERVAL_MS = 15 * 60 * 1000L
     }
 }
