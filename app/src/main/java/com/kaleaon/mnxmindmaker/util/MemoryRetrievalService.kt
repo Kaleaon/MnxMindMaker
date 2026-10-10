@@ -245,7 +245,8 @@ object MemoryRetrievalService {
         val lexical = (overlap / queryTokens.size.toFloat()).coerceIn(0f, 1f)
         val intrinsic = node.attributeAsFloat("current_relevance", default = 0.5f)
 
-        return (lexical * 0.65f + intrinsic * 0.35f).coerceIn(0f, 1f)
+        val blended = (lexical * 0.65f + intrinsic * 0.35f).coerceIn(0f, 1f)
+        return maxOf(blended, intrinsic * 0.5f)
     }
 
     private fun buildRouteHints(context: RetrievalContext): RouteHints {
@@ -336,7 +337,7 @@ object MemoryRetrievalService {
 
         val seedIds = memories
             .map { it to relevanceScore(it, context) }
-            .sortedByDescending { (_, score) -> score }
+            .sortedWith(compareByDescending<Pair<MindNode, Float>> { it.second }.thenBy { it.first.id })
             .take(3)
             .mapNotNull { (node, score) -> node.id.takeIf { score >= 0.3f } }
             .toSet()
@@ -404,8 +405,8 @@ object MemoryRetrievalService {
         RetrievalPolicyProfile.DEPLOYMENT -> PolicyWeights(
             relevance = 0.2f,
             confidence = 0.12f,
-            recency = 0.14f,
-            importance = 0.28f,
+            recency = 0.12f,
+            importance = 0.25f,
             vectorSimilarity = 0.14f,
             graphProximity = 0.12f,
             riskPenaltyWeight = 0.95f

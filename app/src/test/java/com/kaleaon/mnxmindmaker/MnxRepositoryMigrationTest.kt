@@ -48,7 +48,7 @@ class MnxRepositoryMigrationTest {
         )
 
         val encodedBytes = MnxCodec.encodeToBytes(file)
-        val expectedFile = MnxCodec.decodeFromBytes(encodedBytes)
+        val decodedOriginal = MnxCodec.decodeFromBytes(encodedBytes)
         val report = repo.previewArtifactMigration(ByteArrayInputStream(encodedBytes))
 
         assertEquals(2, report.initialVersion)
@@ -57,7 +57,7 @@ class MnxRepositoryMigrationTest {
         assertTrue(report.hasConflicts)
         assertTrue(report.changed)
         assertEquals(null, report.rollbackToken)
-        assertEquals(expectedFile, report.migratedFile)
+        assertEquals(decodedOriginal, report.migratedFile)
     }
 
     @Test
@@ -84,9 +84,9 @@ class MnxRepositoryMigrationTest {
             )
         )
 
-        val encodedLegacyBytes = MnxCodec.encodeToBytes(legacyFile)
-        val expectedLegacyFile = MnxCodec.decodeFromBytes(encodedLegacyBytes)
-        val report = repo.migrateArtifact(ByteArrayInputStream(encodedLegacyBytes))
+        val legacyBytes = MnxCodec.encodeToBytes(legacyFile)
+        val decodedLegacy = MnxCodec.decodeFromBytes(legacyBytes)
+        val report = repo.migrateArtifact(ByteArrayInputStream(legacyBytes))
 
         assertEquals(1, report.initialVersion)
         assertEquals(3, report.appliedChanges.size)
@@ -94,7 +94,7 @@ class MnxRepositoryMigrationTest {
         assertTrue(report.migratedFile.hasRawSection(MnxRepository.GRAPH_PAYLOAD_SECTION_TYPE))
 
         val rolledBack = repo.rollbackArtifact(report.rollbackToken!!)
-        assertEquals(expectedLegacyFile, rolledBack)
+        assertEquals(decodedLegacy, rolledBack)
 
         val migratedMeta = MnxCodec.deserializeMeta(
             report.migratedFile.sections[MnxFormat.MnxSectionType.META]!!
