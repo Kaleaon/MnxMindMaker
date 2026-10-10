@@ -22,12 +22,15 @@ invented_quotation, source_mismatch. None detected is not a certification.
 "Hallucination" requires documented failure evidence, not just absence of support.
 Do not confuse an unchecked manuscript proof with an unproved conjecture.
 
-Relationships support `supports`, `contradicts`, `depends_on`, `believed_by` and
-`supersedes`. The canonical map stores per-edge records in the string-valued
-`metadata.relationship_evidence_json`, keyed by edge ID, because native edges do
-not have a portable attribute map. Every relation has its own verification and
-support. Organizational inclusion carries no entailment. Added edges remain
-unchecked until recorded and reviewed; missing evidence records imply unchecked.
+Relationships support explicit typed links including `supports`, `contradicts`, `depends_on`, `believed_by`, `supersedes`, `evidence`, `has_claim`, `observes`, `observed_in`, and default `relates_to`. Native edges carry key-value attribute maps (`MindEdge.attributes`) so per-edge evidence records, citations, and review metadata are stored directly on edge instances rather than relying solely on indirect JSON blobs. Every relation has its own verification and support.
+
+Standard edge attribute keys include:
+- `evidence_status`: `unchecked`, `source_attributed`, `corroborated`, `computed_locally`, `established_in_literature`, `disputed`, `refuted`, `superseded`.
+- Citations & Locators: `citation`, `evidence_locator`, `source_id`, `source_uri`, `evidence_json`.
+- Review History: `last_reviewed_at`, `reviewer`, `review_history`, `history_json`, `review_reason`.
+- Relational Metadata: `confidence`, `claim_id`, `predicate`.
+
+Organizational inclusion carries no entailment. Added edges remain unchecked until recorded and reviewed; missing evidence records imply unchecked.
 
 The knowledge-core claim/entity contract remains unchanged. Map classifications
 are authoring metadata, not accepted core revisions or proof certificates.
