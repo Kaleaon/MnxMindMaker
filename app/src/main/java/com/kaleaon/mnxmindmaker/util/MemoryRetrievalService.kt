@@ -336,7 +336,7 @@ object MemoryRetrievalService {
 
         val seedIds = memories
             .map { it to relevanceScore(it, context) }
-            .sortedByDescending { (_, score) -> score }
+            .sortedWith(compareByDescending<Pair<MindNode, Float>> { it.second }.thenBy { it.first.id })
             .take(3)
             .mapNotNull { (node, score) -> node.id.takeIf { score >= 0.3f } }
             .toSet()
