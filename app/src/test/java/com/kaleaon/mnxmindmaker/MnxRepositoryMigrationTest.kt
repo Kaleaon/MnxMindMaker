@@ -1,7 +1,5 @@
 package com.kaleaon.mnxmindmaker
 
-import android.content.Context
-import androidx.test.core.app.ApplicationProvider
 import com.kaleaon.mnxmindmaker.mnx.MnxCodec
 import com.kaleaon.mnxmindmaker.mnx.MnxFile
 import com.kaleaon.mnxmindmaker.mnx.MnxFormat
@@ -25,11 +23,9 @@ import org.robolectric.RobolectricTestRunner
 @RunWith(RobolectricTestRunner::class)
 class MnxRepositoryMigrationTest {
 
-    private val context: Context = ApplicationProvider.getApplicationContext()
-
     @Test
     fun `dry-run preview reports migrations without mutating artifact`() {
-        val repo = MnxRepository(context)
+        val repo = MnxRepository()
         val legacyGraph = MindGraph(
             name = "Legacy",
             nodes = mutableListOf(
@@ -52,7 +48,7 @@ class MnxRepositoryMigrationTest {
         )
 
         val encodedBytes = MnxCodec.encodeToBytes(file)
-        val expectedFile = MnxCodec.decodeFromBytes(encodedBytes)
+        val decodedOriginal = MnxCodec.decodeFromBytes(encodedBytes)
         val report = repo.previewArtifactMigration(ByteArrayInputStream(encodedBytes))
 
         assertEquals(2, report.initialVersion)
@@ -61,12 +57,12 @@ class MnxRepositoryMigrationTest {
         assertTrue(report.hasConflicts)
         assertTrue(report.changed)
         assertEquals(null, report.rollbackToken)
-        assertEquals(expectedFile, report.migratedFile)
+        assertEquals(decodedOriginal, report.migratedFile)
     }
 
     @Test
     fun `migration supports rollback and fixes legacy artifacts`() {
-        val repo = MnxRepository(context)
+        val repo = MnxRepository()
         val identity = MnxIdentity(
             name = "Migrated",
             createdAt = 1000L,
@@ -88,9 +84,9 @@ class MnxRepositoryMigrationTest {
             )
         )
 
-        val encodedLegacyBytes = MnxCodec.encodeToBytes(legacyFile)
-        val expectedLegacyFile = MnxCodec.decodeFromBytes(encodedLegacyBytes)
-        val report = repo.migrateArtifact(ByteArrayInputStream(encodedLegacyBytes))
+        val legacyBytes = MnxCodec.encodeToBytes(legacyFile)
+        val decodedLegacy = MnxCodec.decodeFromBytes(legacyBytes)
+        val report = repo.migrateArtifact(ByteArrayInputStream(legacyBytes))
 
         assertEquals(1, report.initialVersion)
         assertEquals(3, report.appliedChanges.size)
@@ -98,7 +94,7 @@ class MnxRepositoryMigrationTest {
         assertTrue(report.migratedFile.hasRawSection(MnxRepository.GRAPH_PAYLOAD_SECTION_TYPE))
 
         val rolledBack = repo.rollbackArtifact(report.rollbackToken!!)
-        assertEquals(expectedLegacyFile, rolledBack)
+        assertEquals(decodedLegacy, rolledBack)
 
         val migratedMeta = MnxCodec.deserializeMeta(
             report.migratedFile.sections[MnxFormat.MnxSectionType.META]!!
@@ -113,7 +109,7 @@ class MnxRepositoryMigrationTest {
 
     @Test
     fun `normalization handles three duplicate ids with deterministic canonical rewrites`() {
-        val repo = MnxRepository(context)
+        val repo = MnxRepository()
         val legacyGraph = MindGraph(
             id = "g-dup",
             name = "Dup graph",

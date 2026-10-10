@@ -467,7 +467,7 @@ object BootPacketGenerator {
         val map = raw as? Map<*, *>
             ?: throw validationError("invalid_map_shape", path, "Expected object/map but got ${raw?.javaClass?.name ?: "null"}")
         val json = createOrderedJsonObject()
-        map.keys
+        val sortedKeys = map.keys
             .mapIndexed { index, key ->
                 val keyString = key as? String
                     ?: throw validationError("invalid_key_type", "$path.keys[$index]", "Expected string key but got ${key?.javaClass?.name ?: "null"}")
@@ -477,9 +477,29 @@ object BootPacketGenerator {
                 keyString
             }
             .sorted()
-            .forEach { key ->
-                json.put(key, toJsonCompatibleValue(map[key], "$path.$key"))
+        try {
+            val field = JSONObject::class.java.getDeclaredField("map")
+            field.isAccessible = true
+            val sortedLinkedMap = LinkedHashMap<String, Any>()
+            for (key in sortedKeys) {
+                sortedLinkedMap[key] = toJsonCompatibleValue(map[key], "$path.$key")
             }
+            field.set(json, sortedLinkedMap)
+            return json
+        } catch (_: Exception) {}
+        try {
+            val field = JSONObject::class.java.getDeclaredField("nameValuePairs")
+            field.isAccessible = true
+            val sortedLinkedMap = LinkedHashMap<String, Any>()
+            for (key in sortedKeys) {
+                sortedLinkedMap[key] = toJsonCompatibleValue(map[key], "$path.$key")
+            }
+            field.set(json, sortedLinkedMap)
+            return json
+        } catch (_: Exception) {}
+        for (key in sortedKeys) {
+            json.put(key, toJsonCompatibleValue(map[key], "$path.$key"))
+        }
         return json
     }
 

@@ -233,11 +233,12 @@ class PersonaRuntimeManager(
     }
 
     private fun inferFallbackOrder(settings: List<LlmSettings>): LlmFallbackOrder {
-        val localSetting = settings.firstOrNull { it.provider == LlmProvider.LOCAL_ON_DEVICE }
-        return if (localSetting != null) {
+        val local = settings.firstOrNull { it.provider == LlmProvider.LOCAL_ON_DEVICE }
+            ?: return LlmFallbackOrder.REMOTE_ONLY
+        return if (local.fallbackOrder == LlmFallbackOrder.REMOTE_ONLY) {
             LlmFallbackOrder.LOCAL_FIRST_REMOTE_FALLBACK
         } else {
-            LlmFallbackOrder.REMOTE_ONLY
+            local.fallbackOrder
         }
     }
 

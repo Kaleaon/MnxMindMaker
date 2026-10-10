@@ -487,7 +487,9 @@ class MemoryManager(
             persistenceStore.deleteExpired(category, selection.expiredIds)
             expiryPurgeCounters.compute(category) { _, count -> (count ?: 0) + selection.expiredIds.size }
         }
-        expiryTelemetry.onExpiredRemoved(category, selection.expiredIds.size, selection.malformedTimestampCount)
+        if (selection.expiredIds.isNotEmpty() || selection.malformedTimestampCount > 0) {
+            expiryTelemetry.onExpiredRemoved(category, selection.expiredIds.size, selection.malformedTimestampCount)
+        }
         return selection.expiredIds
     }
 

@@ -37,7 +37,12 @@ object CsvImporter {
     }
 
     fun fromTsv(tsvText: String, graphName: String = "Imported Mind"): MindGraph {
-        return fromDelimitedTable(tsvText, '\t', graphName)
+        val normalized = if (!tsvText.contains('\t') && tsvText.contains("\\t")) {
+            tsvText.replace("\\t", "\t")
+        } else {
+            tsvText
+        }
+        return fromDelimitedTable(normalized, '\t', graphName)
     }
 
     private fun fromDelimitedTable(

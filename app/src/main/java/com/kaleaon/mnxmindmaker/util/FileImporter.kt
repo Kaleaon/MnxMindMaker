@@ -111,13 +111,18 @@ object FileImporter {
     /** Content-based format detection and parsing fallback. */
     private fun autoDetectAndParse(text: String, graphName: String): MindGraph {
         val trimmed = text.trimStart()
+        val normalizedTsv = if (!text.contains('\t') && text.contains("\\t")) {
+            text.replace("\\t", "\t")
+        } else {
+            text
+        }
         return when {
             trimmed.startsWith("{") || trimmed.startsWith("[") ->
                 DataMapper.fromJson(text, graphName)
             text.contains(Regex("(?m)^#{1,3} ")) ->
                 MarkdownImporter.fromMarkdown(text, graphName)
-            looksLikeDelimitedTable(text, '\t') ->
-                CsvImporter.fromTsv(text, graphName)
+            looksLikeDelimitedTable(normalizedTsv, '\t') ->
+                CsvImporter.fromTsv(normalizedTsv, graphName)
             looksLikeDelimitedTable(text, ',') ->
                 CsvImporter.fromCsv(text, graphName)
             else ->
