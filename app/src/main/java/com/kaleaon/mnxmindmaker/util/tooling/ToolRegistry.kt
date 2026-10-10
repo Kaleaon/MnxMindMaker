@@ -561,7 +561,7 @@ class ToolRegistry(
                             fromNodeId = node.parentId!!,
                             toNodeId = node.id
                         )
-                        existingPairs.add(key)
+                        existingPairs += key
                     }
                 }
         }
@@ -966,7 +966,9 @@ class ToolRegistry(
 
     private data class EdgePair(val fromNodeId: String, val toNodeId: String) : Comparable<EdgePair> {
         fun serialized(): String = "$fromNodeId->$toNodeId"
-        override fun compareTo(other: EdgePair): Int =
-            compareValuesBy(this, other, EdgePair::fromNodeId, EdgePair::toNodeId)
+        override fun compareTo(other: EdgePair): Int {
+            val cmp = fromNodeId.compareTo(other.fromNodeId)
+            return if (cmp != 0) cmp else toNodeId.compareTo(other.toNodeId)
+        }
     }
 }

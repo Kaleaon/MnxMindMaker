@@ -151,7 +151,7 @@ class MemoryManager(
     private var policySettings: MemoryPolicySettings = MemoryPolicySettings()
 
     @Volatile
-    var lastMaintenanceRunMs: Long? = null
+    private var lastMaintenanceRunMs: Long? = null
 
     constructor() : this(storage = InMemoryMemoryStorage())
 

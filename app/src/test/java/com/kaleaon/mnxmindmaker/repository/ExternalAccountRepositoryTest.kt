@@ -10,8 +10,11 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
 import java.util.concurrent.TimeUnit
 
+@RunWith(RobolectricTestRunner::class)
 class ExternalAccountRepositoryTest {
 
     private class TestSharedPreferences : android.content.SharedPreferences {

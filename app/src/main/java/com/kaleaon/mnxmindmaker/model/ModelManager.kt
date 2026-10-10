@@ -9,13 +9,11 @@ import okio.sink
 import okio.source
 import org.json.JSONArray
 import org.json.JSONObject
+import com.kaleaon.mnxmindmaker.util.HashUtils
 import java.io.File
-import java.io.FileInputStream
 import java.security.KeyFactory
-import java.security.MessageDigest
 import java.security.Signature
 import java.security.spec.X509EncodedKeySpec
-import java.util.Locale
 
 enum class ModelInstallState {
     DISCOVERED,
@@ -170,7 +168,7 @@ class ModelManager(private val context: Context) {
         publicKeyBase64: String? = null
     ): Boolean {
         if (!file.exists() || !file.isFile) return false
-        val hash = sha256(file)
+        val hash = HashUtils.sha256Hex(file)
         val hashMatch = hash.equals(expectedSha256, ignoreCase = true)
         if (!hashMatch) return false
 
@@ -252,19 +250,6 @@ class ModelManager(private val context: Context) {
                 arr.optJSONObject(idx)?.toModelDescriptor()
             }
         }.getOrDefault(emptyList())
-    }
-
-    private fun sha256(file: File): String {
-        val digest = MessageDigest.getInstance("SHA-256")
-        FileInputStream(file).use { input ->
-            val buffer = ByteArray(16 * 1024)
-            while (true) {
-                val read = input.read(buffer)
-                if (read <= 0) break
-                digest.update(buffer, 0, read)
-            }
-        }
-        return digest.digest().joinToString("") { "%02x".format(Locale.US, it) }
     }
 
     private fun defaultCatalog(): List<ModelDescriptor> = listOf(

@@ -16,7 +16,9 @@ class FileImporterDelimitedFormatsTest {
 
     @Test
     fun `unknown format auto-detect parses TSV as table`() {
-        val tsv = "label\ttype\tdescription\nIntegrity\tVALUE\tMoral consistency\nCuriosity\tPERSONALITY\tExploration drive"
+        val tsv = "label\ttype\tdescription\n" +
+            "Integrity\tVALUE\tMoral consistency\n" +
+            "Curiosity\tPERSONALITY\tExploration drive"
 
         val graph = FileImporter.parseText(tsv, FileImporter.Format.UNKNOWN, "TSV Mind")
 

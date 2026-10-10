@@ -200,8 +200,20 @@ class MemoryManagerTest {
         manager.editMemory("tone") { node ->
             node.copy(attributes = node.attributes.toMutableMap().apply { put("timestamp", "not-a-number") })
         }
-        val report = manager.runMaintenance(50_000L)
-        assertEquals(1, telemetry.events.firstOrNull { it.first == MemoryManager.MemoryCategory.PROFILE }?.third)
+        manager.upsertSemanticMemory(
+            MindNode(
+                id = "semantic-malformed",
+                label = "Malformed timestamp",
+                type = NodeType.MEMORY,
+                description = "bad timestamp",
+                attributes = mutableMapOf("timestamp" to "not-a-number", "current_relevance" to "0.8")
+            )
+        )
+
+        manager.runMaintenance(50_000L)
+
+        assertTrue(telemetry.events.contains(Triple(MemoryManager.MemoryCategory.PROFILE, 0, 1)))
+        assertTrue(telemetry.events.contains(Triple(MemoryManager.MemoryCategory.SEMANTIC, 0, 1)))
     }
 
     @Test
@@ -307,8 +319,19 @@ class MemoryManagerTest {
                 chunkSpan = "7:0-199"
             )
         )
-        val retrieved = manager.retrieveForPromptInjection("transcript", "task", 10)
-        assertTrue(retrieved.isNotEmpty())
+
+        val retrieved = manager.retrieveForPromptInjection(
+            prompt = "transcript",
+            task = "audit",
+            limit = 5
+        )
+
+        val sessionNode = retrieved.first { it.attributes["semantic_subtype"] == "session" }
+        assertEquals("conv-42", sessionNode.attributes["conversation_id"])
+        assertEquals("7", sessionNode.attributes["turn_index"])
+        assertEquals("7:0-199", sessionNode.attributes["chunk_span"])
+        assertEquals("import", sessionNode.attributes["source"])
+        assertEquals("assistant", sessionNode.attributes["role"])
     }
 
     @Test

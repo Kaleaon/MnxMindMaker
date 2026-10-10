@@ -2,6 +2,7 @@ package com.kaleaon.mnxmindmaker.util.memory.persistence
 
 import android.content.Context
 import com.kaleaon.mnxmindmaker.security.EncryptedArtifactStore
+import com.kaleaon.mnxmindmaker.util.HashUtils
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -10,11 +11,10 @@ import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import java.io.File
-import java.security.MessageDigest
 
 class MemoryStoreRepository(
     context: Context,
-    fileName: String = "$DEFAULT_FILE_STEM.json",
+    fileName: String = DEFAULT_FILE_NAME,
     private val baseFileName: String = DEFAULT_FILE_STEM,
     private val remoteSyncLayer: RemoteMemorySyncLayer? = null
 ) : MemoryStore {
@@ -63,7 +63,7 @@ class MemoryStoreRepository(
                 episodic.copy(updatedTimestamp = System.currentTimeMillis(), episodes = updated)
             )
             upsertMetadataLocked(record.metadata)
-            saveStateLocked(composePersistedMemoryStoreLocked())
+            savePersistedStateLocked()
             syncToRemoteLocked()
         }
     }
@@ -79,7 +79,7 @@ class MemoryStoreRepository(
                 graph.copy(updatedTimestamp = System.currentTimeMillis(), profiles = updated)
             )
             upsertMetadataLocked(record.metadata)
-            saveStateLocked(composePersistedMemoryStoreLocked())
+            savePersistedStateLocked()
             syncToRemoteLocked()
         }
     }
@@ -95,7 +95,7 @@ class MemoryStoreRepository(
                 semantic.copy(updatedTimestamp = System.currentTimeMillis(), semantics = updated)
             )
             upsertMetadataLocked(record.metadata)
-            saveStateLocked(composePersistedMemoryStoreLocked())
+            savePersistedStateLocked()
             syncToRemoteLocked()
         }
     }
@@ -143,7 +143,7 @@ class MemoryStoreRepository(
 
         if (changed) {
             removeMetadataLocked(id)
-            saveStateLocked(composePersistedMemoryStoreLocked())
+            savePersistedStateLocked()
             syncToRemoteLocked()
         }
         changed
@@ -155,7 +155,7 @@ class MemoryStoreRepository(
             saveSemanticLocked(defaultSemanticStore())
             saveEpisodicLocked(defaultEpisodicStore())
             saveMetadataLocked(defaultMetadataStore())
-            saveStateLocked(composePersistedMemoryStoreLocked())
+            savePersistedStateLocked()
             syncToRemoteLocked()
         }
     }
@@ -168,7 +168,7 @@ class MemoryStoreRepository(
         saveSemanticLocked(merged.semanticStore)
         saveEpisodicLocked(merged.episodicStore)
         saveMetadataLocked(merged.metadataIndex)
-        saveStateLocked(composePersistedMemoryStoreLocked())
+        savePersistedStateLocked()
         true
     }
 
@@ -254,43 +254,57 @@ class MemoryStoreRepository(
     override fun restoreLastKnownGoodSnapshot(): Boolean = synchronized(lock) {
         if (!snapshotFile.exists()) return@synchronized false
         val snapshotPayload = runCatching { snapshotFile.readText() }.getOrNull() ?: return@synchronized false
-        val snapshotChecksum = runCatching { sha256Hex(snapshotPayload) }.getOrNull() ?: return@synchronized false
+        val snapshotChecksum = runCatching { HashUtils.sha256Hex(snapshotPayload) }.getOrNull() ?: return@synchronized false
         val expectedChecksum = runCatching { checksumFile.takeIf(File::exists)?.readText()?.trim() }.getOrNull()
             ?: return@synchronized false
         if (!snapshotChecksum.equals(expectedChecksum, ignoreCase = true)) return@synchronized false
         if (!validatePayloadLocked(snapshotPayload).isHealthy) return@synchronized false
         storageFile.parentFile?.mkdirs()
         storageFile.writeText(snapshotPayload)
-        runCatching {
-            val restoredState = json.decodeFromString<PersistedMemoryStore>(snapshotPayload)
-            saveEpisodicLocked(defaultEpisodicStore().copy(episodes = restoredState.records.sessions))
-            saveGraphLocked(defaultGraphStore().copy(profiles = restoredState.records.profiles))
-            saveSemanticLocked(defaultSemanticStore().copy(semantics = restoredState.records.semantics))
+        val decoded = runCatching { json.decodeFromString<PersistedMemoryStore>(snapshotPayload) }.getOrNull()
+        if (decoded != null) {
+            val now = System.currentTimeMillis()
+            saveEpisodicLocked(EpisodicTimelineStore(SCHEMA_VERSION, now, now, decoded.records.sessions))
+            saveGraphLocked(GraphMemoryStore(SCHEMA_VERSION, now, now, decoded.records.profiles))
+            saveSemanticLocked(SemanticMemoryStore(SCHEMA_VERSION, now, now, decoded.records.semantics))
         }
         true
     }
 
-    private fun composePersistedMemoryStoreLocked(): PersistedMemoryStore {
+    private fun savePersistedStateLocked() {
+        val episodic = loadEpisodicLocked()
+        val graph = loadGraphLocked()
+        val semantic = loadSemanticLocked()
+        val now = System.currentTimeMillis()
+        val persisted = PersistedMemoryStore(
+            schemaVersion = SCHEMA_VERSION,
+            createdTimestamp = now,
+            updatedTimestamp = now,
+            records = MemoryRecordCollections(
+                sessions = episodic.episodes,
+                profiles = graph.profiles,
+                semantics = semantic.semantics
+            )
+        )
+        saveStateLocked(persisted)
+    }
+
+    private fun defaultState(): PersistedMemoryStore {
         val now = System.currentTimeMillis()
         return PersistedMemoryStore(
             schemaVersion = SCHEMA_VERSION,
             createdTimestamp = now,
             updatedTimestamp = now,
-            records = MemoryRecordCollections(
-                sessions = loadEpisodicLocked().episodes,
-                profiles = loadGraphLocked().profiles,
-                semantics = loadSemanticLocked().semantics
-            )
+            records = MemoryRecordCollections()
         )
     }
 
     private fun loadStateLocked(): PersistedMemoryStore {
+        val initial = defaultState()
         if (!storageFile.exists()) {
-            val initial = defaultState()
             saveStateLocked(initial)
-            return initial
         }
-        return runCatching { json.decodeFromString<PersistedMemoryStore>(storageFile.readText()) }.getOrElse { defaultState() }
+        return initial
     }
     private fun itemId(item: Any): String = when (item) {
         is SessionMemoryRecord -> item.metadata.id
@@ -356,15 +370,6 @@ class MemoryStoreRepository(
         file.writeText(payload)
     }
 
-    private fun defaultState(now: Long = System.currentTimeMillis()): PersistedMemoryStore {
-        return PersistedMemoryStore(
-            schemaVersion = SCHEMA_VERSION,
-            createdTimestamp = now,
-            updatedTimestamp = now,
-            records = MemoryRecordCollections(sessions = emptyList(), profiles = emptyList(), semantics = emptyList())
-        )
-    }
-
     private fun <T> loadStoreLocked(
         file: File,
         default: T,
@@ -378,13 +383,22 @@ class MemoryStoreRepository(
 
         maybeRunPeriodicIntegrityScanLocked()
 
+        val restoredFromSnapshot = verifyChecksumLocked()
+        if (restoredFromSnapshot) {
+            saveStoreLocked(file, encode(default))
+            return default
+        }
+
         return try {
             val raw = file.readText()
             val payload = json.parseToJsonElement(raw).jsonObject
             val payloadVersion = payload[SCHEMA_VERSION_FIELD]?.jsonPrimitive?.intOrNull ?: 1
             val migratedPayload = applyMigrationsLocked(payload, payloadVersion)
             decode(migratedPayload)
-        } catch (_: Exception) {
+        } catch (_: SerializationException) {
+            saveStoreLocked(file, encode(default))
+            default
+        } catch (_: IllegalArgumentException) {
             saveStoreLocked(file, encode(default))
             default
         }
@@ -395,10 +409,9 @@ class MemoryStoreRepository(
         val payload = json.encodeToString(state)
         storageFile.writeText(payload)
         snapshotFile.writeText(payload)
-        checksumFile.writeText(sha256Hex(payload))
+        checksumFile.writeText(HashUtils.sha256Hex(payload))
         encryptedStore.writeEncryptedBytes(storageFile, json.encodeToString(state).toByteArray(), "memory_index")
     }
-
     private fun defaultGraphStore(now: Long = System.currentTimeMillis()): GraphMemoryStore {
         return GraphMemoryStore(
             schemaVersion = SCHEMA_VERSION,
@@ -476,7 +489,7 @@ class MemoryStoreRepository(
         val expectedChecksum = runCatching { checksumFile.readText().trim() }.getOrNull() ?: return false
         if (expectedChecksum.isBlank()) return true
         val currentPayload = runCatching { storageFile.readText() }.getOrNull() ?: return true
-        val currentChecksum = runCatching { sha256Hex(currentPayload) }.getOrNull() ?: return true
+        val currentChecksum = runCatching { HashUtils.sha256Hex(currentPayload) }.getOrNull() ?: return true
         return !currentChecksum.equals(expectedChecksum, ignoreCase = true)
     }
 
@@ -512,7 +525,7 @@ class MemoryStoreRepository(
                     ""
                 }
                 if (expectedChecksum.isNotBlank()) {
-                    val actualChecksum = runCatching { sha256Hex(payload) }.getOrElse {
+                    val actualChecksum = runCatching { HashUtils.sha256Hex(payload) }.getOrElse {
                         issues += "Checksum cannot be computed."
                         ""
                     }
@@ -604,7 +617,7 @@ class MemoryStoreRepository(
     private fun recoverFromSnapshotLocked(): PersistedMemoryStore? {
         if (!snapshotFile.exists()) return null
         val snapshotPayload = runCatching { snapshotFile.readText() }.getOrNull() ?: return null
-        val snapshotChecksum = runCatching { sha256Hex(snapshotPayload) }.getOrNull() ?: return null
+        val snapshotChecksum = runCatching { HashUtils.sha256Hex(snapshotPayload) }.getOrNull() ?: return null
         val expectedChecksum = runCatching { checksumFile.takeIf(File::exists)?.readText()?.trim() }.getOrNull()
             ?: return null
         if (!snapshotChecksum.equals(expectedChecksum, ignoreCase = true)) return null
@@ -615,19 +628,15 @@ class MemoryStoreRepository(
         return runCatching { json.decodeFromString<PersistedMemoryStore>(snapshotPayload) }.getOrNull()
     }
 
-    private fun sha256Hex(content: String): String {
-        val digest = MessageDigest.getInstance("SHA-256").digest(content.toByteArray(Charsets.UTF_8))
-        return digest.joinToString("") { byte -> "%02x".format(byte) }
-    }
-
     companion object {
+        private const val DEFAULT_FILE_NAME = "memory_store.json"
         private const val DEFAULT_FILE_STEM = "memory_store"
         private const val GRAPH_SUFFIX = "graph"
         private const val SEMANTIC_SUFFIX = "semantic"
         private const val EPISODIC_SUFFIX = "episodic"
         private const val METADATA_SUFFIX = "metadata_index"
         private const val SCHEMA_VERSION_FIELD = "schemaVersion"
-        private const val SCHEMA_VERSION = 2
+        private const val SCHEMA_VERSION = 1
         private const val INTEGRITY_SCAN_INTERVAL_MS = 15 * 60 * 1000L
     }
 }

@@ -202,11 +202,8 @@ class EncryptedArtifactStore private constructor(
         require(root.optString("magic") == BUNDLE_MAGIC) {
             "Invalid backup bundle: expected magic '$BUNDLE_MAGIC'."
         }
-        if (!root.has("recovery")) {
-            throw IllegalArgumentException("Invalid backup bundle: missing 'recovery' object.")
-        }
         val recovery = root.optJSONObject("recovery")
-            ?: throw IllegalArgumentException("Invalid backup bundle: 'recovery' must be a JSON object.")
+            ?: throw IllegalArgumentException("Invalid backup bundle: missing or invalid 'recovery' object.")
         hierarchy.importEncryptedSnapshot(recovery.toString(), passphrase)
     }
 }

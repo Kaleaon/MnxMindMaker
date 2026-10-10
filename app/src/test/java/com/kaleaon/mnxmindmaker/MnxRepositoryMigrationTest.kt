@@ -1,8 +1,7 @@
 package com.kaleaon.mnxmindmaker
 
 import android.content.Context
-import android.content.ContextWrapper
-import java.io.File
+import androidx.test.core.app.ApplicationProvider
 import com.kaleaon.mnxmindmaker.mnx.MnxCodec
 import com.kaleaon.mnxmindmaker.mnx.MnxFile
 import com.kaleaon.mnxmindmaker.mnx.MnxFormat
@@ -20,12 +19,13 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
 
+@RunWith(RobolectricTestRunner::class)
 class MnxRepositoryMigrationTest {
 
-    private val context: Context = object : ContextWrapper(null) {
-        override fun getFilesDir(): File = File(System.getProperty("java.io.tmpdir"), "test-files").also { it.mkdirs() }
-    }
+    private val context: Context = ApplicationProvider.getApplicationContext()
 
     @Test
     fun `dry-run preview reports migrations without mutating artifact`() {
@@ -52,7 +52,7 @@ class MnxRepositoryMigrationTest {
         )
 
         val encodedBytes = MnxCodec.encodeToBytes(file)
-        val expectedFile = MnxCodec.decode(ByteArrayInputStream(encodedBytes))
+        val expectedFile = MnxCodec.decodeFromBytes(encodedBytes)
         val report = repo.previewArtifactMigration(ByteArrayInputStream(encodedBytes))
 
         assertEquals(2, report.initialVersion)
@@ -88,9 +88,9 @@ class MnxRepositoryMigrationTest {
             )
         )
 
-        val encodedBytes = MnxCodec.encodeToBytes(legacyFile)
-        val expectedLegacyFile = MnxCodec.decode(ByteArrayInputStream(encodedBytes))
-        val report = repo.migrateArtifact(ByteArrayInputStream(encodedBytes))
+        val encodedLegacyBytes = MnxCodec.encodeToBytes(legacyFile)
+        val expectedLegacyFile = MnxCodec.decodeFromBytes(encodedLegacyBytes)
+        val report = repo.migrateArtifact(ByteArrayInputStream(encodedLegacyBytes))
 
         assertEquals(1, report.initialVersion)
         assertEquals(3, report.appliedChanges.size)

@@ -535,21 +535,19 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
 
         var lastError: String? = null
         val failoverEvents = mutableListOf<FailoverEvent>()
-        val primarySettings = chain.first()
-        val transcript = buildChatTranscript(prompt)
-        val catchUp = chatCatchUpBuilder.build(
-            history = _chatMessages.value.orEmpty(),
-            targetMindId = _selectedNode.value?.id,
-            currentUserUtterance = prompt,
-            tokenBudget = catchUpTokenBudget(primarySettings)
-        )
-        val systemPrompt = buildSystemPrompt(primarySettings, catchUp)
-        val pipelineRequest = PromptPipelineRequest(
-            prompt = prompt,
-            transcript = transcript,
-            task = "mindmap_assist"
-        )
-        val graphNodes = _graph.value?.nodes.orEmpty()
+        for (settings in chain) {
+            val start = System.currentTimeMillis()
+            val primarySettings = chain.first()
+            val transcript = buildChatTranscript(prompt)
+            val catchUp = chatCatchUpBuilder.build(
+                history = _chatMessages.value.orEmpty(),
+                targetMindId = _selectedNode.value?.id,
+                currentUserUtterance = prompt,
+                tokenBudget = catchUpTokenBudget(primarySettings)
+            )
+            val systemPrompt = buildSystemPrompt(primarySettings, catchUp)
+            val pipelineRequest = PromptPipelineRequest(prompt = prompt, task = "mindmap_assist")
+            val graphNodes = _graph.value?.nodes.orEmpty()
 
         try {
             val pipelineResult = promptPipelineEngine.execute(
@@ -626,7 +624,7 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
                     isAiGenerated = true,
                     provenance = MessageProvenance(
                         provider = primarySettings.provider,
-                        model = fallbackTurn.raw?.optString("model").takeUnless { it.isNullOrBlank() } ?: primarySettings.model,
+                        model = fallbackTurn.raw?.optString("model")?.ifBlank { null } ?: primarySettings.model,
                         toolCalls = listOf("orchestrator_error: ${orchestratedError::class.java.simpleName}"),
                         failoverEvents = failoverEvents.toList(),
                         latencyMs = latency,
@@ -642,10 +640,11 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
                         message = e.message.orEmpty().ifBlank { "Provider request failed" }
                     )
                 )
-                lastError = "${primarySettings.provider.displayName}: ${e.message}"
+                lastError = "${settings.provider.displayName}: ${e.message}"
             } catch (fallbackError: Exception) {
                 lastError = "$traceAwareMessage Fallback failed: ${fallbackError.message}"
             }
+        }
         }
 
         _llmStatusBadge.postValue("REMOTE ERROR")
@@ -656,16 +655,22 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
     private fun buildChatTranscript(currentPrompt: String): List<JSONObject> {
         val transcript = mutableListOf<JSONObject>()
         _chatMessages.value.orEmpty().forEach { message ->
-            transcript += JSONObject()
-                .put("role", "user")
-                .put("content", message.prompt)
-            transcript += JSONObject()
-                .put("role", "assistant")
-                .put("content", message.response)
+            transcript.add(
+                JSONObject()
+                    .put("role", "user")
+                    .put("content", message.prompt)
+            )
+            transcript.add(
+                JSONObject()
+                    .put("role", "assistant")
+                    .put("content", message.response)
+            )
         }
-        transcript += JSONObject()
-            .put("role", "user")
-            .put("content", currentPrompt)
+        transcript.add(
+            JSONObject()
+                .put("role", "user")
+                .put("content", currentPrompt)
+        )
         return transcript
     }
 
@@ -1091,7 +1096,7 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
     }
 }
 
-internal data class PersonaActivationBatch(
+private data class PersonaActivationBatch(
     val activeParticipants: Set<String> = emptySet(),
     val systemMessages: List<ChatMessage> = emptyList()
 )

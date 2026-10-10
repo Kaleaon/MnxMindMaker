@@ -205,13 +205,11 @@ class FoundationalTools(
         if (sensitivityCheck != null) return ToolExecutionOutcome(sensitivityCheck, mutatedGraph = false)
 
         val moderationResult = moderationPipeline.moderate(
-            ModerationRequest(text = rawValue, stage = ModerationStage.MEMORY_WRITE)
+            ModerationRequest(text = rawValue, stage = ModerationStage.MEMORY_WRITE, policyId = "memory_write")
         )
         if (moderationResult.action == ModerationAction.DENY) {
             return ToolExecutionOutcome(
-                JSONObject()
-                    .put("error", "moderation_denied")
-                    .put("reason", moderationResult.reason ?: "Denied by moderation pipeline"),
+                JSONObject().put("error", "moderation_denied").put("reason", moderationResult.reason),
                 mutatedGraph = false
             )
         }
@@ -275,27 +273,10 @@ class FoundationalTools(
         )
         if (sensitivityCheck != null) return ToolExecutionOutcome(sensitivityCheck, mutatedGraph = false)
 
-        val rawValue = args.optString("value")
-        var valueToUse: String? = null
-        if (rawValue.isNotBlank()) {
-            val moderationResult = moderationPipeline.moderate(
-                ModerationRequest(text = rawValue, stage = ModerationStage.MEMORY_WRITE)
-            )
-            if (moderationResult.action == ModerationAction.DENY) {
-                return ToolExecutionOutcome(
-                    JSONObject()
-                        .put("error", "moderation_denied")
-                        .put("reason", moderationResult.reason ?: "Denied by moderation pipeline"),
-                    mutatedGraph = false
-                )
-            }
-            valueToUse = moderationResult.text
-        }
-
         val edited = memoryManager.editMemory(memoryId) { node ->
             node.copy(
                 label = args.optString("label").ifBlank { node.label },
-                description = valueToUse ?: node.description,
+                description = args.optString("value").ifBlank { node.description },
                 attributes = node.attributes.toMutableMap().apply {
                     if (args.has("sensitivity")) put("sensitivity", targetSensitivity)
                     if (args.has("tags")) put("tags", args.optString("tags"))
@@ -398,7 +379,7 @@ class FoundationalTools(
             "delete" -> remove(bucket, recordId)
             "update" -> {
                 val current = find(bucket, recordId) ?: JSONObject().put("id", recordId)
-                for (key in invocation.argumentsJson.keys()) {
+                invocation.argumentsJson.keys().forEach { key ->
                     if (key != "action" && key != "kind") current.put(key, invocation.argumentsJson.get(key))
                 }
                 current.put("updated_at", Instant.now().toString())
@@ -595,8 +576,8 @@ class FoundationalTools(
         connection.connectTimeout = 8_000
         connection.readTimeout = 12_000
         connection.requestMethod = "GET"
-        try {
-            return connection.inputStream.bufferedReader().use { it.readText() }
+        return try {
+            connection.inputStream.bufferedReader().use { it.readText() }
         } finally {
             connection.disconnect()
         }

@@ -15,7 +15,6 @@ import com.kaleaon.mnxmindmaker.util.tooling.AssistantTurn
 import com.kaleaon.mnxmindmaker.util.tooling.ToolSpec
 import org.json.JSONObject
 
-class LlmApiException(message: String, cause: Throwable? = null) : RuntimeException(message, cause)
 
 class LlmApiClient(
     private val capabilityRegistry: ModelCapabilitySource? = null,

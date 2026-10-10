@@ -558,6 +558,7 @@ class MnxRepository(private val context: Context) {
         val meta = MnxCodec.deserializeMeta(file.requireSection(MnxFormat.MnxSectionType.META))
         val explicit = meta.entries[META_SCHEMA_VERSION_KEY]?.toIntOrNull()
         if (explicit != null) return explicit
+        if (!file.hasRawSection(GRAPH_PAYLOAD_SECTION_TYPE)) return 1
         if (meta.entries.containsKey(META_LEGACY_PERSONA_DEPLOYMENT_KEY)) return 2
         return 3
     }

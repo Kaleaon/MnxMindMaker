@@ -673,8 +673,8 @@ private class ChatMessageAdapter(
         val message = messages[position]
 
         view.findViewById<TextView>(R.id.tv_chat_speaker).text = buildSpeakerLabel(message)
-        view.findViewById<TextView>(R.id.tv_chat_content).text = message.content
-        view.findViewById<TextView>(R.id.tv_chat_metadata).text = buildMetadata(message)
+        view.findViewById<TextView>(R.id.tv_chat_content).text = message.response.orEmpty().ifBlank { message.content }
+        view.findViewById<TextView>(R.id.tv_chat_metadata).text = buildProvenance(message)
 
         val retryButton = view.findViewById<MaterialButton>(R.id.btn_retry_provider)
         retryButton.visibility = if (message.isAiGenerated) View.VISIBLE else View.GONE
@@ -697,7 +697,7 @@ private class ChatMessageAdapter(
         }
     }
 
-    private fun buildMetadata(message: ChatMessage): String {
+    private fun buildProvenance(message: ChatMessage): String {
         val p = message.provenance ?: return "No provenance"
         val tools = if (p.toolCalls.isEmpty()) "none" else p.toolCalls.joinToString()
         val latency = p.latencyMs?.let { "${it}ms" } ?: "n/a"
