@@ -221,4 +221,64 @@
     <string name="llm_status_remote_active">REMOTE</string>
     <string name="llm_status_local_fallback">LOCAL FALLBACK</string>
     <string name="llm_status_remote_error">REMOTE ERROR</string>
+
+    <!-- Preflight Error Boundary Strings -->
+    <string name="preflight_success_title">Preflight Check Passed</string>
+    <string name="preflight_success_desc">Provider connection and API reachability verified successfully.</string>
+    <string name="preflight_err_auth_title">Authentication Failed (401/403)</string>
+    <string name="preflight_err_auth_desc">The AI provider rejected the credentials or API key.</string>
+    <string name="preflight_err_auth_tip">Troubleshooting tip: Check your API key in Settings and verify your provider account status.</string>
+    <string name="preflight_err_not_found_title">Endpoint or Model Not Found (404)</string>
+    <string name="preflight_err_not_found_desc">The provider URL or model name was not recognized by the endpoint.</string>
+    <string name="preflight_err_not_found_tip">Troubleshooting tip: Verify the Base URL and Model ID in your settings.</string>
+    <string name="preflight_err_rate_limit_title">Rate Limit Exceeded (429)</string>
+    <string name="preflight_err_rate_limit_desc">The provider account rate limit or quota has been reached.</string>
+    <string name="preflight_err_rate_limit_tip">Troubleshooting tip: Wait a few moments before retrying or check your billing plan.</string>
+    <string name="preflight_err_server_title">Provider Service Unavailable (%1$d)</string>
+    <string name="preflight_err_server_desc">The remote AI provider returned a server-side error.</string>
+    <string name="preflight_err_server_tip">Troubleshooting tip: The remote service may be undergoing maintenance. Try again later.</string>
+    <string name="preflight_err_network_title">Network Transport Failure</string>
+    <string name="preflight_err_network_desc">Could not establish a connection to the provider endpoint.</string>
+    <string name="preflight_err_network_tip">Troubleshooting tip: Check your internet connection or URL host/port configuration.</string>
+    <string name="preflight_err_generic_title">Preflight Check Failed (%1$s)</string>
+    <string name="preflight_err_generic_desc">An unexpected error occurred while testing the provider connection.</string>
+    <string name="preflight_err_generic_tip">Troubleshooting tip: Review technical details or re-check settings configuration.</string>
+    <string name="preflight_retry_button">Retry Preflight</string>
+    <string name="preflight_focus_api_key">Focus API Key</string>
+    <string name="preflight_focus_base_url">Focus Base URL</string>
+    <string name="preflight_show_details">Show Technical Details</string>
+    <string name="preflight_hide_details">Hide Technical Details</string>
+    <string name="preflight_copy_raw_logs">Copy Raw Details</string>
+    <string name="preflight_logs_copied">Copied diagnostic details to clipboard</string>
+
+    <!-- Import Syntax Error Boundary Strings -->
+    <string name="import_error_dialog_title">Import Syntax Diagnostics</string>
+    <string name="import_error_line_indicator">Error on Line %1$d</string>
+    <string name="import_error_snippet_label">Context Snippet:</string>
+    <string name="import_error_fix_tip_label">Fix Recommendation:</string>
+    <string name="import_focus_error_line">Focus Error Line</string>
+    <string name="import_error_json_tip">Ensure proper JSON syntax with quotes around keys, matching brackets, and valid commas.</string>
+    <string name="import_error_csv_tip">Check row column counts and ensure quoted fields are properly closed.</string>
+    <string name="import_error_generic_tip">Review the file format structure and correct any syntax irregularities.</string>
+
+    <!-- Google Drive Sync Error Boundary Strings -->
+    <string name="drive_sync_button">Sync Drive</string>
+    <string name="drive_sync_success">Google Drive sync completed successfully.</string>
+    <string name="drive_sync_error_title">Google Drive Sync Error</string>
+    <string name="drive_sync_conflict_title">Cloud Storage Conflict (412)</string>
+    <string name="drive_sync_conflict_desc">The remote mind map file in Google Drive was modified in another session or device.</string>
+    <string name="drive_sync_conflict_tip">Choose a recovery action below to resolve the sync divergence:</string>
+    <string name="drive_sync_action_save_draft">Save Local Draft</string>
+    <string name="drive_sync_action_overwrite">Overwrite Remote</string>
+    <string name="drive_sync_action_reload">Reload Remote File</string>
+    <string name="drive_sync_auth_title">Drive Session Expired (401)</string>
+    <string name="drive_sync_auth_desc">Your Google Drive authorization token has expired or is invalid.</string>
+    <string name="drive_sync_auth_tip">Re-authenticate to restore cloud storage sync.</string>
+    <string name="drive_sync_action_reauth">Re-authenticate</string>
+    <string name="drive_sync_network_title">Drive Sync Network Failure</string>
+    <string name="drive_sync_network_desc">Unable to reach Google Drive servers due to network disruption.</string>
+    <string name="drive_sync_network_tip">Check your internet connection and tap Retry Sync.</string>
+    <string name="drive_sync_generic_title">Drive Sync Failure (%1$d)</string>
+    <string name="drive_sync_draft_saved">Saved local draft copy to storage.</string>
+    <string name="drive_sync_reauth_success">Drive re-authentication successful. Retrying sync…</string>
 </resources>

@@ -59,7 +59,20 @@ object CsvImporter {
         val lines = tableText.lines().filter { it.isNotBlank() }
         if (lines.size < 2) return MindGraph(name = graphName, nodes = nodes, edges = edges)
 
-        val headers = parseCsvRow(lines[0], delimiter).map { it.trim().lowercase() }
+        val headers = try {
+            parseCsvRow(lines[0], delimiter).map { it.trim().lowercase() }
+        } catch (e: IllegalArgumentException) {
+            throw StructuredImportException(
+                lineNumber = 1,
+                columnNumber = null,
+                lineContext = lines[0].trim().take(120),
+                causeExplanation = "CSV header syntax error: ${e.message}",
+                fixTip = "Check header row formatting and unclosed quotes.",
+                rawTrace = e.stackTraceToString(),
+                cause = e
+            )
+        }
+
         val labelIdx = headers.indexOfFirst { it == "label" || it == "name" }
         val typeIdx = headers.indexOfFirst { it == "type" }
         val descIdx = headers.indexOfFirst { it == "description" || it == "desc" }
@@ -68,7 +81,20 @@ object CsvImporter {
         var rowPos = 0
 
         for (lineIdx in 1 until lines.size) {
-            val values = parseCsvRow(lines[lineIdx], delimiter)
+            val lineContent = lines[lineIdx]
+            val values = try {
+                parseCsvRow(lineContent, delimiter)
+            } catch (e: IllegalArgumentException) {
+                throw StructuredImportException(
+                    lineNumber = lineIdx + 1,
+                    columnNumber = null,
+                    lineContext = lineContent.trim().take(120),
+                    causeExplanation = "CSV syntax error on row ${lineIdx + 1}: ${e.message}",
+                    fixTip = "Check row column formatting and ensure all quoted fields are properly closed.",
+                    rawTrace = e.stackTraceToString(),
+                    cause = e
+                )
+            }
             if (values.isEmpty()) continue
 
             val label = (if (labelIdx >= 0 && labelIdx < values.size) values[labelIdx]
@@ -159,6 +185,9 @@ object CsvImporter {
                 else -> current.append(ch)
             }
             i++
+        }
+        if (inQuotes) {
+            throw IllegalArgumentException("Unclosed double quote in CSV field")
         }
         result.add(current.toString())
         return result
