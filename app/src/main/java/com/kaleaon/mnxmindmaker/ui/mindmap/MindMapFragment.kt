@@ -76,6 +76,8 @@ class MindMapFragment : Fragment() {
             binding.mindMapCanvas.graph = graph
             binding.tvGraphName.text = graph?.name ?: ""
             DeploymentSessionState.currentGraph = graph
+            val isEmpty = graph == null || graph.nodes.isEmpty()
+            binding.layoutEmptyState.visibility = if (isEmpty) View.VISIBLE else View.GONE
         }
 
         viewModel.selectedNode.observe(viewLifecycleOwner) { node ->
@@ -172,8 +174,21 @@ class MindMapFragment : Fragment() {
                 binding.toolbarActions.setBackgroundColor(KthemeManager.parseColor(cs.surface))
                 binding.tvGraphName.setTextColor(KthemeManager.parseColor(cs.onSurface))
                 binding.tvSelectedNode.setTextColor(KthemeManager.parseColor(cs.onSurfaceVariant))
+                binding.layoutEmptyState.setCardBackgroundColor(KthemeManager.parseColor(cs.surfaceVariant))
+                binding.layoutEmptyState.strokeColor = KthemeManager.parseColor(cs.outline)
+                binding.tvEmptyTitle.setTextColor(KthemeManager.parseColor(cs.onSurface))
+                binding.tvEmptyDescription.setTextColor(KthemeManager.parseColor(cs.onSurfaceVariant))
+                binding.tvEmptySymbol.setTextColor(KthemeManager.parseColor(cs.primary))
+                binding.btnEmptyAddConcept.setBackgroundColor(KthemeManager.parseColor(cs.primary))
+                binding.btnEmptyAddConcept.setTextColor(KthemeManager.parseColor(cs.onPrimary))
+                binding.btnEmptyImportFile.setTextColor(KthemeManager.parseColor(cs.onSurface))
+                binding.btnEmptyAskAi.setTextColor(KthemeManager.parseColor(cs.primary))
             }
         }
+
+        binding.btnEmptyAddConcept.setOnClickListener { showAddNodeDialog() }
+        binding.btnEmptyImportFile.setOnClickListener { openMnxFile.launch(arrayOf("*/*")) }
+        binding.btnEmptyAskAi.setOnClickListener { binding.btnAskAi.performClick() }
 
         binding.btnAddNode.setOnClickListener { showAddNodeDialog() }
         binding.btnRemoveNode.setOnClickListener {
