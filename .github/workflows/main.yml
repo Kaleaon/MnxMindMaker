@@ -36,13 +36,17 @@ jobs:
         uses: android-actions/setup-android@v3
         with:
           cmdline-tools-version: 11076708
-          packages: platform-tools
+          packages: 'platforms;android-34 build-tools;34.0.0 platform-tools'
           log-accepted-android-sdk-licenses: false
 
       - name: Install required Android SDK packages
         run: |
-          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses || true
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-34" "build-tools;34.0.0" "platform-tools"
+          SDKMANAGER=$(which sdkmanager 2>/dev/null || echo "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager")
+          if [ ! -x "$SDKMANAGER" ]; then
+            SDKMANAGER=$(find "$ANDROID_HOME/cmdline-tools" -name sdkmanager -type f | head -n 1)
+          fi
+          yes | "$SDKMANAGER" --licenses || true
+          "$SDKMANAGER" "platforms;android-34" "build-tools;34.0.0" "platform-tools"
 
       - name: Compile Kotlin source sets with isolated task logs
         id: kotlin_compile
@@ -126,13 +130,17 @@ jobs:
         uses: android-actions/setup-android@v3
         with:
           cmdline-tools-version: 11076708
-          packages: platform-tools
+          packages: 'platforms;android-34 build-tools;34.0.0 platform-tools'
           log-accepted-android-sdk-licenses: false
 
       - name: Install required Android SDK packages
         run: |
-          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses || true
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-34" "build-tools;34.0.0" "platform-tools"
+          SDKMANAGER=$(which sdkmanager 2>/dev/null || echo "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager")
+          if [ ! -x "$SDKMANAGER" ]; then
+            SDKMANAGER=$(find "$ANDROID_HOME/cmdline-tools" -name sdkmanager -type f | head -n 1)
+          fi
+          yes | "$SDKMANAGER" --licenses || true
+          "$SDKMANAGER" "platforms;android-34" "build-tools;34.0.0" "platform-tools"
 
       - name: Compile project
         run: gradle compileDebugKotlin --continue --stacktrace --warning-mode all
@@ -187,13 +195,17 @@ jobs:
         uses: android-actions/setup-android@v3
         with:
           cmdline-tools-version: 11076708
-          packages: platform-tools
+          packages: 'platforms;android-34 build-tools;34.0.0 platform-tools'
           log-accepted-android-sdk-licenses: false
 
       - name: Install required Android SDK packages
         run: |
-          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses || true
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-34" "build-tools;34.0.0" "platform-tools"
+          SDKMANAGER=$(which sdkmanager 2>/dev/null || echo "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager")
+          if [ ! -x "$SDKMANAGER" ]; then
+            SDKMANAGER=$(find "$ANDROID_HOME/cmdline-tools" -name sdkmanager -type f | head -n 1)
+          fi
+          yes | "$SDKMANAGER" --licenses || true
+          "$SDKMANAGER" "platforms;android-34" "build-tools;34.0.0" "platform-tools"
 
       - name: Build debug APK
         run: gradle assembleDebug --continue --stacktrace --warning-mode all
