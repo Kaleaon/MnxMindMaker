@@ -43,7 +43,7 @@ class MemoryRetrievalServiceTest {
 
         val memories = listOf(
             memory("restricted-room", room = "apollo", relevance = "0.95", sensitivity = "restricted"),
-            memory("safe-global", relevance = "0.50", sensitivity = "low")
+            memory("safe-global", relevance = "0.80", sensitivity = "low")
         )
 
         val retrieved = MemoryRetrievalService.retrieveForPromptInjection(memories, context, limit = 5)

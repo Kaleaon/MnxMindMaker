@@ -1,7 +1,8 @@
 package com.kaleaon.mnxmindmaker
 
 import android.content.Context
-import androidx.test.core.app.ApplicationProvider
+import android.content.ContextWrapper
+import android.content.SharedPreferences
 import com.kaleaon.mnxmindmaker.mnx.MnxCodec
 import com.kaleaon.mnxmindmaker.mnx.MnxFile
 import com.kaleaon.mnxmindmaker.mnx.MnxFormat
@@ -14,6 +15,8 @@ import com.kaleaon.mnxmindmaker.model.MindNode
 import com.kaleaon.mnxmindmaker.model.NodeType
 import com.kaleaon.mnxmindmaker.repository.MnxRepository
 import java.io.ByteArrayInputStream
+import java.io.File
+import java.nio.file.Files
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -22,11 +25,58 @@ import org.junit.Test
 
 class MnxRepositoryMigrationTest {
 
-    private val context: Context = ApplicationProvider.getApplicationContext()
+    private fun tempContext(): Context {
+        val dir = Files.createTempDirectory("mnx-repo-mig-test").toFile()
+        val prefsMap = mutableMapOf<String, SharedPreferences>()
+        return object : ContextWrapper(null) {
+            override fun getFilesDir(): File = dir
+            override fun getSharedPreferences(name: String, mode: Int): SharedPreferences {
+                return prefsMap.getOrPut(name) { TestSharedPreferences() }
+            }
+            override fun getPackageName(): String = "com.kaleaon.mnxmindmaker"
+        }
+    }
+
+    private class TestSharedPreferences : SharedPreferences {
+        private val data = HashMap<String, Any?>()
+
+        override fun getAll(): Map<String, *> = HashMap(data)
+        override fun getString(key: String, defValue: String?): String? = (data[key] as? String) ?: defValue
+        override fun getStringSet(key: String, defValues: Set<String>?): Set<String>? = (data[key] as? Set<*>)?.mapNotNull { it as? String }?.toSet() ?: defValues
+        override fun getInt(key: String, defValue: Int): Int = (data[key] as? Int) ?: defValue
+        override fun getLong(key: String, defValue: Long): Long = (data[key] as? Long) ?: defValue
+        override fun getFloat(key: String, defValue: Float): Float = (data[key] as? Float) ?: defValue
+        override fun getBoolean(key: String, defValue: Boolean): Boolean = (data[key] as? Boolean) ?: defValue
+        override fun contains(key: String): Boolean = data.containsKey(key)
+        override fun edit(): SharedPreferences.Editor = TestEditor()
+        override fun registerOnSharedPreferenceChangeListener(listener: SharedPreferences.OnSharedPreferenceChangeListener?) {}
+        override fun unregisterOnSharedPreferenceChangeListener(listener: SharedPreferences.OnSharedPreferenceChangeListener?) {}
+
+        private inner class TestEditor : SharedPreferences.Editor {
+            private val temp = HashMap<String, Any?>()
+            private val removed = HashSet<String>()
+            private var clear = false
+
+            override fun putString(key: String, value: String?): SharedPreferences.Editor { temp[key] = value; removed.remove(key); return this }
+            override fun putStringSet(key: String, values: Set<String>?): SharedPreferences.Editor { temp[key] = values; removed.remove(key); return this }
+            override fun putInt(key: String, value: Int): SharedPreferences.Editor { temp[key] = value; removed.remove(key); return this }
+            override fun putLong(key: String, value: Long): SharedPreferences.Editor { temp[key] = value; removed.remove(key); return this }
+            override fun putFloat(key: String, value: Float): SharedPreferences.Editor { temp[key] = value; removed.remove(key); return this }
+            override fun putBoolean(key: String, value: Boolean): SharedPreferences.Editor { temp[key] = value; removed.remove(key); return this }
+            override fun remove(key: String): SharedPreferences.Editor { removed.add(key); temp.remove(key); return this }
+            override fun clear(): SharedPreferences.Editor { clear = true; return this }
+            override fun commit(): Boolean { apply(); return true }
+            override fun apply() {
+                if (clear) data.clear()
+                for (r in removed) data.remove(r)
+                data.putAll(temp)
+            }
+        }
+    }
 
     @Test
     fun `dry-run preview reports migrations without mutating artifact`() {
-        val repo = MnxRepository(context)
+        val repo = MnxRepository(tempContext())
         val legacyGraph = MindGraph(
             name = "Legacy",
             nodes = mutableListOf(
@@ -48,7 +98,9 @@ class MnxRepositoryMigrationTest {
             rawSections = mapOf(MnxRepository.GRAPH_PAYLOAD_SECTION_TYPE to payload)
         )
 
-        val report = repo.previewArtifactMigration(ByteArrayInputStream(MnxCodec.encodeToBytes(file)))
+        val encodedBytes = MnxCodec.encodeToBytes(file)
+        val expectedDecodedFile = MnxCodec.decode(ByteArrayInputStream(encodedBytes))
+        val report = repo.previewArtifactMigration(ByteArrayInputStream(encodedBytes))
 
         assertEquals(2, report.initialVersion)
         assertEquals(MnxRepository.LATEST_SCHEMA_VERSION, report.targetVersion)
@@ -56,12 +108,12 @@ class MnxRepositoryMigrationTest {
         assertTrue(report.hasConflicts)
         assertTrue(report.changed)
         assertEquals(null, report.rollbackToken)
-        assertEquals(file, report.migratedFile)
+        assertEquals(expectedDecodedFile, report.migratedFile)
     }
 
     @Test
     fun `migration supports rollback and fixes legacy artifacts`() {
-        val repo = MnxRepository(context)
+        val repo = MnxRepository(tempContext())
         val identity = MnxIdentity(
             name = "Migrated",
             createdAt = 1000L,
@@ -83,7 +135,9 @@ class MnxRepositoryMigrationTest {
             )
         )
 
-        val report = repo.migrateArtifact(ByteArrayInputStream(MnxCodec.encodeToBytes(legacyFile)))
+        val encodedBytes = MnxCodec.encodeToBytes(legacyFile)
+        val expectedDecodedLegacyFile = MnxCodec.decode(ByteArrayInputStream(encodedBytes))
+        val report = repo.migrateArtifact(ByteArrayInputStream(encodedBytes))
 
         assertEquals(1, report.initialVersion)
         assertEquals(3, report.appliedChanges.size)
@@ -91,7 +145,7 @@ class MnxRepositoryMigrationTest {
         assertTrue(report.migratedFile.hasRawSection(MnxRepository.GRAPH_PAYLOAD_SECTION_TYPE))
 
         val rolledBack = repo.rollbackArtifact(report.rollbackToken!!)
-        assertEquals(legacyFile, rolledBack)
+        assertEquals(expectedDecodedLegacyFile, rolledBack)
 
         val migratedMeta = MnxCodec.deserializeMeta(
             report.migratedFile.sections[MnxFormat.MnxSectionType.META]!!
@@ -106,7 +160,7 @@ class MnxRepositoryMigrationTest {
 
     @Test
     fun `normalization handles three duplicate ids with deterministic canonical rewrites`() {
-        val repo = MnxRepository(context)
+        val repo = MnxRepository(tempContext())
         val legacyGraph = MindGraph(
             id = "g-dup",
             name = "Dup graph",

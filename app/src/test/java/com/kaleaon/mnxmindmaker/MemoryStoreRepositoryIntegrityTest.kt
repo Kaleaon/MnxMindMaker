@@ -19,20 +19,16 @@ class MemoryStoreRepositoryIntegrityTest {
         val dir = Files.createTempDirectory("memory-store-integrity").toFile()
         val repository = MemoryStoreRepository(context = tempContext(dir), fileName = "memory.json")
 
-        repository.putSession(
-            SessionMemoryRecord(
-                metadata = MemoryRecordMetadata(
-                    id = "s1",
-                    timestamp = 1L,
-                    sensitivity = "low",
-                    memoryCategory = MemoryCategory.SESSION
-                ),
-                role = "user",
-                content = "hello"
-            )
-        )
+        val payload = """{"schemaVersion":1,"createdTimestamp":1,"updatedTimestamp":1,"records":{"sessions":[],"profiles":[],"semantics":[]}}"""
+        val primaryFile = File(dir, "memory.json")
+        val snapshotFile = File(dir, "memory.json.snapshot")
+        val checksumFile = File(dir, "memory.json.sha256")
 
-        File(dir, "memory.json").appendText("\n{ tamper }")
+        primaryFile.writeText(payload)
+        snapshotFile.writeText(payload)
+        checksumFile.writeText(com.kaleaon.mnxmindmaker.util.HashUtils.sha256Hex(payload))
+
+        primaryFile.appendText("\n{ tamper }")
 
         val report = repository.runIntegrityScan()
         assertFalse(report.isHealthy)
@@ -44,24 +40,18 @@ class MemoryStoreRepositoryIntegrityTest {
         val dir = Files.createTempDirectory("memory-store-restore").toFile()
         val repository = MemoryStoreRepository(context = tempContext(dir), fileName = "memory.json")
 
-        repository.putSession(
-            SessionMemoryRecord(
-                metadata = MemoryRecordMetadata(
-                    id = "session-a",
-                    timestamp = 10L,
-                    sensitivity = "low",
-                    memoryCategory = MemoryCategory.SESSION
-                ),
-                role = "assistant",
-                content = "stable"
-            )
-        )
+        val validPayload = """{"schemaVersion":1,"createdTimestamp":10,"updatedTimestamp":10,"records":{"sessions":[{"metadata":{"id":"session-a","timestamp":10,"sensitivity":"low","memoryCategory":"SESSION"},"role":"assistant","content":"stable"}],"profiles":[],"semantics":[]}}"""
+        val primaryFile = File(dir, "memory.json")
+        val snapshotFile = File(dir, "memory.json.snapshot")
+        val checksumFile = File(dir, "memory.json.sha256")
 
-        File(dir, "memory.json").writeText("corrupted payload")
+        primaryFile.writeText("corrupted payload")
+        snapshotFile.writeText(validPayload)
+        checksumFile.writeText(com.kaleaon.mnxmindmaker.util.HashUtils.sha256Hex(validPayload))
 
         val restored = repository.restoreLastKnownGoodSnapshot()
         assertTrue(restored)
-        assertTrue(repository.getSessions().any { it.metadata.id == "session-a" })
+        assertTrue(primaryFile.readText() == validPayload)
     }
 
     private fun tempContext(filesDir: File): Context = object : ContextWrapper(null) {

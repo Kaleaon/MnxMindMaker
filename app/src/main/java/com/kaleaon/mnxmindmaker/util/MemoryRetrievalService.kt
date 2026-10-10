@@ -336,7 +336,7 @@ object MemoryRetrievalService {
 
         val seedIds = memories
             .map { it to relevanceScore(it, context) }
-            .sortedByDescending { (_, score) -> score }
+            .sortedWith(compareByDescending<Pair<MindNode, Float>> { it.second }.thenBy { it.first.id })
             .take(3)
             .mapNotNull { (node, score) -> node.id.takeIf { score >= 0.3f } }
             .toSet()
@@ -404,8 +404,8 @@ object MemoryRetrievalService {
         RetrievalPolicyProfile.DEPLOYMENT -> PolicyWeights(
             relevance = 0.2f,
             confidence = 0.12f,
-            recency = 0.22f,
-            importance = 0.2f,
+            recency = 0.14f,
+            importance = 0.28f,
             vectorSimilarity = 0.14f,
             graphProximity = 0.12f,
             riskPenaltyWeight = 0.95f
