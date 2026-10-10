@@ -4,6 +4,11 @@ import com.kaleaon.mnxmindmaker.model.MindGraph
 import com.kaleaon.mnxmindmaker.model.MindNode
 import com.kaleaon.mnxmindmaker.model.NodeType
 import com.kaleaon.mnxmindmaker.util.memory.MemoryManager
+import com.kaleaon.mnxmindmaker.util.moderation.ModerationAction
+import com.kaleaon.mnxmindmaker.util.moderation.ModerationPipeline
+import com.kaleaon.mnxmindmaker.util.moderation.ModerationRequest
+import com.kaleaon.mnxmindmaker.util.moderation.ModerationStage
+import com.kaleaon.mnxmindmaker.util.moderation.SensitiveEntityModerationPolicy
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -29,7 +34,8 @@ class FoundationalTools(
     private val allowTerminal: Boolean = false,
     private val allowedCommandPrefixes: List<String> = listOf("echo", "pwd", "date"),
     private val outboundOperationQueue: OutboundOperationQueue? = null,
-    private val isNetworkAvailable: () -> Boolean = { true }
+    private val isNetworkAvailable: () -> Boolean = { true },
+    private val moderationPipeline: ModerationPipeline = ModerationPipeline(listOf(SensitiveEntityModerationPolicy()))
 ) {
 
     private val dbFile = File(appRoot, "tooling/notes_tasks_db.json")
@@ -189,7 +195,7 @@ class FoundationalTools(
         val args = invocation.argumentsJson
         val memoryId = args.optString("memory_id").trim()
         val category = args.optString("category").trim().lowercase()
-        val value = args.optString("value")
+        val rawValue = args.optString("value")
         val label = args.optString("label").ifBlank { memoryId }
         val sensitivity = args.optString("sensitivity", "low").lowercase()
         val sensitivityCheck = enforceSensitivityPolicy(
@@ -197,6 +203,17 @@ class FoundationalTools(
             allowHighSensitivity = args.optBoolean("allow_high_sensitivity", false)
         )
         if (sensitivityCheck != null) return ToolExecutionOutcome(sensitivityCheck, mutatedGraph = false)
+
+        val moderationResult = moderationPipeline.moderate(
+            ModerationRequest(text = rawValue, stage = ModerationStage.MEMORY_WRITE, policyId = "memory_write")
+        )
+        if (moderationResult.action == ModerationAction.DENY) {
+            return ToolExecutionOutcome(
+                JSONObject().put("error", "moderation_denied").put("reason", moderationResult.reason),
+                mutatedGraph = false
+            )
+        }
+        val value = moderationResult.text
 
         when (category) {
             "profile" -> memoryManager.upsertProfileMemory(

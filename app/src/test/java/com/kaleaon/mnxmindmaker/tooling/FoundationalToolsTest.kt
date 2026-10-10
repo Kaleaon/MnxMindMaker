@@ -199,6 +199,16 @@ class FoundationalToolsTest {
                     .put("category", "profile")
                     .put("value", "Reach me at jane.doe@example.com")
                     .put("sensitivity", "low")
+            ),
+            MindGraph()
+        )
+
+        assertEquals("upserted", upsert.contentJson.getString("status"))
+        val stored = memoryManager.getMemory("profile-contact")
+        assertTrue(stored?.description?.contains("[REDACTED:EMAIL]") == true)
+        assertFalse(stored?.description?.contains("jane.doe@example.com") == true)
+    }
+
     @Test
     fun `web fetch queues outbound operation when offline`() {
         val root = createTempDir(prefix = "tooling-test")
@@ -219,10 +229,8 @@ class FoundationalToolsTest {
             MindGraph()
         )
 
-        assertEquals("upserted", upsert.contentJson.getString("status"))
-        val stored = memoryManager.getMemory("profile-contact")
-        assertTrue(stored?.description?.contains("[REDACTED:EMAIL]") == true)
-        assertFalse(stored?.description?.contains("jane.doe@example.com") == true)
+        assertTrue(result.contentJson.getBoolean("queued"))
+        assertEquals(1, queue.pending("web_fetch_search").size)
     }
 
     @Test
@@ -248,8 +256,6 @@ class FoundationalToolsTest {
 
         assertEquals("moderation_denied", denied.contentJson.getString("error"))
         assertEquals(null, memoryManager.getMemory("bad-memory"))
-        assertTrue(result.contentJson.getBoolean("queued"))
-        assertEquals(1, queue.pending("web_fetch_search").size)
     }
 
     @Test
