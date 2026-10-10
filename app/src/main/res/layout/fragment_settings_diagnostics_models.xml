@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/colorBackground">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="16dp">
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_run_preflight"
+            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/run_preflight_diagnostics"
+            android:layout_marginBottom="8dp" />
+
+        <TextView
+            android:id="@+id/tv_preflight_result"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/preflight_result_idle"
+            android:textColor="@color/colorOnSurface"
+            android:textSize="12sp"
+            android:layout_marginBottom="16dp" />
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="@color/colorSurface"
+            android:layout_marginBottom="16dp" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_discover_models"
+            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/discover_models"
+            android:layout_marginBottom="8dp" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_install_recommended"
+            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/install_recommended_model"
+            android:layout_marginBottom="8dp" />
+
+        <TextView
+            android:id="@+id/tv_model_manager_summary"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/model_manager_summary_default"
+            android:textColor="@color/colorOnSurface"
+            android:textSize="12sp"
+            android:layout_marginBottom="16dp" />
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="@color/colorSurface"
+            android:layout_marginBottom="16dp" />
+
+        <TextView
+            android:id="@+id/tv_skill_pack_diagnostics"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/skill_pack_diagnostics_idle"
+            android:textColor="@color/colorOnSurface"
+            android:textSize="12sp"
+            android:layout_marginBottom="16dp" />
+
+    </LinearLayout>
+</ScrollView>
