@@ -2,6 +2,10 @@ package com.kaleaon.mnxmindmaker.util.tooling
 
 import android.content.Context
 import android.util.Log
+import com.kaleaon.mnxmindmaker.model.KnowledgeShard
+import com.kaleaon.mnxmindmaker.model.KnowledgeShardSchemaVersion
+import com.kaleaon.mnxmindmaker.model.ContributorProvenance
+import com.kaleaon.mnxmindmaker.model.EvidenceReference
 import com.kaleaon.mnxmindmaker.model.MindEdge
 import com.kaleaon.mnxmindmaker.model.MindGraph
 import com.kaleaon.mnxmindmaker.model.MindNode
@@ -43,7 +47,11 @@ class ToolRegistry(
         "graph.write.taxonomy_normalization_apply" to ::taxonomyNormalizationApply,
         "memory.read.stale_memory_diagnostics" to ::staleMemoryDiagnostics,
         "graph.read.link_repair_diagnostics" to ::linkRepairDiagnostics,
-        "graph.write.link_repair_apply" to ::linkRepairApply
+        "graph.write.link_repair_apply" to ::linkRepairApply,
+        "shard.write.create" to ::shardCreate,
+        "shard.write.attach_evidence" to ::shardAttachEvidence,
+        "shard.read.query" to ::shardQuery,
+        "shard.write.link" to ::shardLink
     )
 
     private val builtInToolDefs = listOf(
@@ -265,6 +273,67 @@ class ToolRegistry(
                 )
             ),
             handlerId = "graph.write.link_repair_apply"
+        ),
+        BuiltInToolDef(
+            spec = ToolSpec(
+                name = "shard_create",
+                description = "Create a versioned Knowledge Shard containing graph nodes, contributor provenance, and topics.",
+                operationClass = ToolOperationClass.MUTATING,
+                inputSchema = JSONObject().put("type", "object").put("required", JSONArray().put("label").put("contributor_id")).put("properties", JSONObject()
+                    .put("label", JSONObject().put("type", "string").put("minLength", 1))
+                    .put("description", JSONObject().put("type", "string"))
+                    .put("contributor_id", JSONObject().put("type", "string").put("minLength", 1))
+                    .put("contributor_role", JSONObject().put("type", "string"))
+                    .put("contributor_model", JSONObject().put("type", "string"))
+                    .put("schema_version", JSONObject().put("type", "string"))
+                    .put("node_ids", JSONObject().put("type", "array").put("items", JSONObject().put("type", "string")))
+                    .put("topics", JSONObject().put("type", "array").put("items", JSONObject().put("type", "string")))
+                    .put("parent_id", JSONObject().put("type", "string"))
+                )
+            ),
+            handlerId = "shard.write.create"
+        ),
+        BuiltInToolDef(
+            spec = ToolSpec(
+                name = "shard_attach_evidence",
+                description = "Attach source evidence citation (URL/path, snippet, confidence) to a Knowledge Shard.",
+                operationClass = ToolOperationClass.MUTATING,
+                inputSchema = JSONObject().put("type", "object").put("required", JSONArray().put("shard_id").put("source_url_or_path")).put("properties", JSONObject()
+                    .put("shard_id", JSONObject().put("type", "string").put("minLength", 1))
+                    .put("source_url_or_path", JSONObject().put("type", "string").put("minLength", 1))
+                    .put("title", JSONObject().put("type", "string"))
+                    .put("snippet", JSONObject().put("type", "string"))
+                    .put("confidence_score", JSONObject().put("type", "number").put("minimum", 0.0).put("maximum", 1.0))
+                )
+            ),
+            handlerId = "shard.write.attach_evidence"
+        ),
+        BuiltInToolDef(
+            spec = ToolSpec(
+                name = "shard_query",
+                description = "Query native Knowledge Shards by text, topic, or contributor ID.",
+                operationClass = ToolOperationClass.READ_ONLY,
+                inputSchema = JSONObject().put("type", "object").put("properties", JSONObject()
+                    .put("query", JSONObject().put("type", "string"))
+                    .put("topic", JSONObject().put("type", "string"))
+                    .put("contributor_id", JSONObject().put("type", "string"))
+                    .put("limit", JSONObject().put("type", "integer").put("minimum", 1).put("maximum", 50))
+                )
+            ),
+            handlerId = "shard.read.query"
+        ),
+        BuiltInToolDef(
+            spec = ToolSpec(
+                name = "shard_link",
+                description = "Link a Knowledge Shard to a graph node.",
+                operationClass = ToolOperationClass.MUTATING,
+                inputSchema = JSONObject().put("type", "object").put("required", JSONArray().put("shard_id").put("target_node_id")).put("properties", JSONObject()
+                    .put("shard_id", JSONObject().put("type", "string").put("minLength", 1))
+                    .put("target_node_id", JSONObject().put("type", "string").put("minLength", 1))
+                    .put("label", JSONObject().put("type", "string"))
+                )
+            ),
+            handlerId = "shard.write.link"
         )
     )
 
@@ -931,6 +1000,161 @@ class ToolRegistry(
         }
     }
 
+    private fun shardCreate(invocation: ToolInvocation): ToolResult {
+        val label = invocation.arguments.optString("label").trim()
+        val contributorId = invocation.arguments.optString("contributor_id").trim()
+        if (label.isBlank() || contributorId.isBlank()) {
+            return ToolResult(invocation.id, invocation.name, false, "label and contributor_id are required")
+        }
+
+        val description = invocation.arguments.optString("description", "")
+        val role = invocation.arguments.optString("contributor_role", "agent").ifBlank { "agent" }
+        val model = invocation.arguments.optString("contributor_model").ifBlank { null }
+        val schemaVerStr = invocation.arguments.optString("schema_version", "1.0")
+        val parentId = invocation.arguments.optString("parent_id").ifBlank { null }
+
+        val nodeIds = mutableListOf<String>()
+        invocation.arguments.optJSONArray("node_ids")?.let { arr ->
+            for (i in 0 until arr.length()) {
+                val nid = arr.optString(i).trim()
+                if (nid.isNotBlank()) nodeIds.add(nid)
+            }
+        }
+
+        val topics = mutableListOf<String>()
+        invocation.arguments.optJSONArray("topics")?.let { arr ->
+            for (i in 0 until arr.length()) {
+                val top = arr.optString(i).trim()
+                if (top.isNotBlank()) topics.add(top)
+            }
+        }
+
+        val shard = KnowledgeShard(
+            label = label,
+            description = description,
+            schemaVersion = KnowledgeShardSchemaVersion.parse(schemaVerStr),
+            contributor = ContributorProvenance(
+                id = contributorId,
+                role = role,
+                model = model
+            ),
+            nodeIds = nodeIds,
+            topics = topics
+        )
+
+        val x = deterministicCoordinate(label, "x", 100f, 700f)
+        val y = deterministicCoordinate(label, "y", 100f, 600f)
+        val shardNode = shard.toMindNode(x = x, y = y, parentId = parentId)
+
+        val graph = getGraph()
+        val updatedNodes = graph.nodes.toMutableList().also { it.add(shardNode) }
+        val updatedEdges = graph.edges.toMutableList()
+        if (parentId != null && graph.nodes.any { it.id == parentId }) {
+            updatedEdges.add(MindEdge(fromNodeId = parentId, toNodeId = shardNode.id, label = "contains"))
+        }
+        for (nid in nodeIds) {
+            if (graph.nodes.any { it.id == nid } && updatedEdges.none { it.fromNodeId == shardNode.id && it.toNodeId == nid }) {
+                updatedEdges.add(MindEdge(fromNodeId = shardNode.id, toNodeId = nid, label = "includes"))
+            }
+        }
+
+        setGraph(graph.copy(nodes = updatedNodes, edges = updatedEdges, modifiedAt = System.currentTimeMillis()))
+        val payload = shard.toJson().put("node_id", shardNode.id)
+        return ToolResult(invocation.id, invocation.name, true, payload.toString(), payload)
+    }
+
+    private fun shardAttachEvidence(invocation: ToolInvocation): ToolResult {
+        val shardId = invocation.arguments.optString("shard_id").trim()
+        val sourceUrlOrPath = invocation.arguments.optString("source_url_or_path").trim()
+        if (shardId.isBlank() || sourceUrlOrPath.isBlank()) {
+            return ToolResult(invocation.id, invocation.name, false, "shard_id and source_url_or_path are required")
+        }
+
+        val graph = getGraph()
+        val node = graph.nodes.firstOrNull { it.id == shardId }
+            ?: return ToolResult(invocation.id, invocation.name, false, "Shard node not found: $shardId")
+
+        val shard = KnowledgeShard.fromMindNode(node)
+            ?: return ToolResult(invocation.id, invocation.name, false, "Node is not a valid KnowledgeShard: $shardId")
+
+        val evidence = EvidenceReference(
+            sourceUrlOrPath = sourceUrlOrPath,
+            title = invocation.arguments.optString("title", ""),
+            snippet = invocation.arguments.optString("snippet", ""),
+            confidenceScore = invocation.arguments.optDouble("confidence_score", 1.0).toFloat()
+        )
+
+        val updatedShard = shard.copy(
+            evidenceReferences = shard.evidenceReferences + evidence,
+            modifiedAt = System.currentTimeMillis()
+        )
+
+        val updatedNode = updatedShard.toMindNode(x = node.x, y = node.y, parentId = node.parentId)
+        val updatedNodes = graph.nodes.map { if (it.id == shardId) updatedNode else it }
+        setGraph(graph.copy(nodes = updatedNodes.toMutableList(), modifiedAt = System.currentTimeMillis()))
+
+        val payload = updatedShard.toJson()
+        return ToolResult(invocation.id, invocation.name, true, payload.toString(), payload)
+    }
+
+    private fun shardQuery(invocation: ToolInvocation): ToolResult {
+        val graph = getGraph()
+        val query = invocation.arguments.optString("query").trim().lowercase()
+        val topic = invocation.arguments.optString("topic").trim().lowercase()
+        val contributorId = invocation.arguments.optString("contributor_id").trim().lowercase()
+        val limit = invocation.arguments.optInt("limit", 10).coerceIn(1, 50)
+
+        val shards = graph.nodes
+            .mapNotNull { KnowledgeShard.fromMindNode(it) }
+            .filter { shard ->
+                val matchesQuery = query.isBlank() ||
+                        shard.label.lowercase().contains(query) ||
+                        shard.description.lowercase().contains(query) ||
+                        shard.topics.any { it.lowercase().contains(query) }
+                val matchesTopic = topic.isBlank() || shard.topics.any { it.lowercase() == topic }
+                val matchesContrib = contributorId.isBlank() || shard.contributor.id.lowercase() == contributorId
+                matchesQuery && matchesTopic && matchesContrib
+            }
+            .take(limit)
+
+        val payload = JSONObject()
+            .put("count", shards.size)
+            .put("shards", JSONArray().apply { shards.forEach { put(it.toJson()) } })
+        return ToolResult(invocation.id, invocation.name, true, payload.toString(), payload)
+    }
+
+    private fun shardLink(invocation: ToolInvocation): ToolResult {
+        val graph = getGraph()
+        val shardId = invocation.arguments.optString("shard_id").trim()
+        val targetNodeId = invocation.arguments.optString("target_node_id").trim()
+        val label = invocation.arguments.optString("label", "links_to").ifBlank { "links_to" }
+
+        if (shardId.isBlank() || targetNodeId.isBlank()) {
+            return ToolResult(invocation.id, invocation.name, false, "shard_id and target_node_id are required")
+        }
+        if (graph.nodes.none { it.id == shardId } || graph.nodes.none { it.id == targetNodeId }) {
+            return ToolResult(invocation.id, invocation.name, false, "shard_id or target_node_id not found in graph")
+        }
+
+        val alreadyLinked = graph.edges.any { it.fromNodeId == shardId && it.toNodeId == targetNodeId }
+        if (alreadyLinked) {
+            val payload = JSONObject().put("status", "already_linked").put("from_node_id", shardId).put("to_node_id", targetNodeId)
+            return ToolResult(invocation.id, invocation.name, true, payload.toString(), payload)
+        }
+
+        val edge = MindEdge(fromNodeId = shardId, toNodeId = targetNodeId, label = label)
+        val updatedEdges = graph.edges.toMutableList().also { it.add(edge) }
+        setGraph(graph.copy(edges = updatedEdges, modifiedAt = System.currentTimeMillis()))
+
+        val payload = JSONObject()
+            .put("status", "linked")
+            .put("edge_id", edge.id)
+            .put("from_node_id", edge.fromNodeId)
+            .put("to_node_id", edge.toNodeId)
+            .put("label", label)
+        return ToolResult(invocation.id, invocation.name, true, payload.toString(), payload)
+    }
+
     data class BuiltInToolDef(val spec: ToolSpec, val handlerId: String)
 
     data class MergedRegistry(
@@ -960,7 +1184,11 @@ class ToolRegistry(
             "graph.write.taxonomy_normalization_apply",
             "memory.read.stale_memory_diagnostics",
             "graph.read.link_repair_diagnostics",
-            "graph.write.link_repair_apply"
+            "graph.write.link_repair_apply",
+            "shard.write.create",
+            "shard.write.attach_evidence",
+            "shard.read.query",
+            "shard.write.link"
         )
     }
 
