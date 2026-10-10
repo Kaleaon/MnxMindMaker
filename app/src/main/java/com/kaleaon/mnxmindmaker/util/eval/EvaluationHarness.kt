@@ -92,7 +92,7 @@ data class ExecutionResult(
 )
 
 fun interface BenchmarkRunner {
-    fun run(prompt: String, offlineMode: Boolean = false): ExecutionResult
+    fun run(prompt: String, offlineMode: Boolean): ExecutionResult
 }
 
 data class BenchmarkMode(

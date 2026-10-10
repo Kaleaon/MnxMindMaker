@@ -314,7 +314,7 @@ class ToolRegistry(
                     Log.w(TAG, "Skipping tool ${tool.name} from ${pack.source}: unknown handler ${manifestTool.handlerId}")
                     return@forEachIndexed
                 }
-                manifestSpecs += tool
+                manifestSpecs.add(tool)
                 handlers[tool.name] = handler
             }
         }
@@ -561,7 +561,7 @@ class ToolRegistry(
                             fromNodeId = node.parentId!!,
                             toNodeId = node.id
                         )
-                        existingPairs += key
+                        existingPairs.add(key)
                     }
                 }
         }
@@ -653,7 +653,7 @@ class ToolRegistry(
                             "tags" to args.optString("tags")
                         ).apply {
                             args.optString("character_id").ifBlank { null }?.let { put("character_id", it) }
-                        )
+                        }
                     )
                 )
                 else -> return@withMemoryManager ToolResult(
@@ -964,7 +964,9 @@ class ToolRegistry(
         )
     }
 
-    private data class EdgePair(val fromNodeId: String, val toNodeId: String) {
+    private data class EdgePair(val fromNodeId: String, val toNodeId: String) : Comparable<EdgePair> {
         fun serialized(): String = "$fromNodeId->$toNodeId"
+        override fun compareTo(other: EdgePair): Int =
+            compareValuesBy(this, other, EdgePair::fromNodeId, EdgePair::toNodeId)
     }
 }

@@ -127,7 +127,6 @@ class PromptPipelineEngine(
             tracer.recordPromptPipeline("assembled_system_prompt", systemPrompt)
 
             val orchestrator = orchestratorFactory(tracer, settings)
-            val response = orchestrator.run(systemPrompt, moderatedPrompt)
             val transcript = request.transcript.ifEmpty {
                 listOf(JSONObject().put("role", "user").put("content", request.prompt))
             }

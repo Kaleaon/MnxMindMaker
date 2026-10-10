@@ -67,7 +67,7 @@ class DriftCheckWorker(
         val staleCutoffMs = nowMs - THIRTY_DAYS_MS
 
         val semantic = repository.getSemantics()
-        val staleSemantic = semantic.count { it.metadata.timestampMs < staleCutoffMs }
+        val staleSemantic = semantic.count { it.metadata.timestamp < staleCutoffMs }
         val driftScore = if (semantic.isEmpty()) {
             0
         } else {

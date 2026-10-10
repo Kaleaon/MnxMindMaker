@@ -68,7 +68,6 @@ class MemoryManagerTest {
     }
 
     @Test
-    fun `persistent policy applies sensitivity and supports edit delete`() {
     fun `persistent policy supports edit delete`() {
         val manager = MemoryManager()
         manager.setPolicy(
@@ -114,7 +113,7 @@ class MemoryManagerTest {
     fun `auto expiry purges memories by category and keeps fresh entries`() {
         val store = RecordingStore()
         val telemetry = RecordingTelemetry()
-        val manager = MemoryManager(store, telemetry)
+        val manager = MemoryManager(persistenceStore = store, expiryTelemetry = telemetry)
         val now = 50_000L
         manager.setPolicy(
             MemoryManager.MemoryPolicySettings(
@@ -181,7 +180,7 @@ class MemoryManagerTest {
     fun `malformed timestamps use fallback and emit malformed telemetry count`() {
         val store = RecordingStore()
         val telemetry = RecordingTelemetry()
-        val manager = MemoryManager(store, telemetry)
+        val manager = MemoryManager(persistenceStore = store, expiryTelemetry = telemetry)
         manager.setPolicy(
             MemoryManager.MemoryPolicySettings(
                 mode = MemoryManager.MemoryPolicyMode.PERSISTENT,
@@ -201,6 +200,11 @@ class MemoryManagerTest {
         manager.editMemory("tone") { node ->
             node.copy(attributes = node.attributes.toMutableMap().apply { put("timestamp", "not-a-number") })
         }
+        val report = manager.runMaintenance(50_000L)
+        assertEquals(1, telemetry.events.firstOrNull { it.first == MemoryManager.MemoryCategory.PROFILE }?.third)
+    }
+
+    @Test
     fun `embedding cache invalidates when semantic node content changes`() {
         val manager = MemoryManager()
         manager.setPolicy(MemoryManager.MemoryPolicySettings(mode = MemoryManager.MemoryPolicyMode.PERSISTENT))
@@ -302,6 +306,12 @@ class MemoryManagerTest {
                 turnIndex = 7,
                 chunkSpan = "7:0-199"
             )
+        )
+        val retrieved = manager.retrieveForPromptInjection("transcript", "task", 10)
+        assertTrue(retrieved.isNotEmpty())
+    }
+
+    @Test
     fun `strict local privacy blocks remote embedding provider fallback`() {
         val manager = MemoryManager(
             embeddingPolicy = MemoryManager.EmbeddingPolicy(

@@ -1,7 +1,8 @@
 package com.kaleaon.mnxmindmaker
 
 import android.content.Context
-import androidx.test.core.app.ApplicationProvider
+import android.content.ContextWrapper
+import java.io.File
 import com.kaleaon.mnxmindmaker.mnx.MnxCodec
 import com.kaleaon.mnxmindmaker.mnx.MnxFile
 import com.kaleaon.mnxmindmaker.mnx.MnxFormat
@@ -22,7 +23,9 @@ import org.junit.Test
 
 class MnxRepositoryMigrationTest {
 
-    private val context: Context = ApplicationProvider.getApplicationContext()
+    private val context: Context = object : ContextWrapper(null) {
+        override fun getFilesDir(): File = File(System.getProperty("java.io.tmpdir"), "test-files").also { it.mkdirs() }
+    }
 
     @Test
     fun `dry-run preview reports migrations without mutating artifact`() {
@@ -48,7 +51,9 @@ class MnxRepositoryMigrationTest {
             rawSections = mapOf(MnxRepository.GRAPH_PAYLOAD_SECTION_TYPE to payload)
         )
 
-        val report = repo.previewArtifactMigration(ByteArrayInputStream(MnxCodec.encodeToBytes(file)))
+        val encodedBytes = MnxCodec.encodeToBytes(file)
+        val expectedFile = MnxCodec.decode(ByteArrayInputStream(encodedBytes))
+        val report = repo.previewArtifactMigration(ByteArrayInputStream(encodedBytes))
 
         assertEquals(2, report.initialVersion)
         assertEquals(MnxRepository.LATEST_SCHEMA_VERSION, report.targetVersion)
@@ -56,7 +61,7 @@ class MnxRepositoryMigrationTest {
         assertTrue(report.hasConflicts)
         assertTrue(report.changed)
         assertEquals(null, report.rollbackToken)
-        assertEquals(file, report.migratedFile)
+        assertEquals(expectedFile, report.migratedFile)
     }
 
     @Test
@@ -83,7 +88,9 @@ class MnxRepositoryMigrationTest {
             )
         )
 
-        val report = repo.migrateArtifact(ByteArrayInputStream(MnxCodec.encodeToBytes(legacyFile)))
+        val encodedBytes = MnxCodec.encodeToBytes(legacyFile)
+        val expectedLegacyFile = MnxCodec.decode(ByteArrayInputStream(encodedBytes))
+        val report = repo.migrateArtifact(ByteArrayInputStream(encodedBytes))
 
         assertEquals(1, report.initialVersion)
         assertEquals(3, report.appliedChanges.size)
@@ -91,7 +98,7 @@ class MnxRepositoryMigrationTest {
         assertTrue(report.migratedFile.hasRawSection(MnxRepository.GRAPH_PAYLOAD_SECTION_TYPE))
 
         val rolledBack = repo.rollbackArtifact(report.rollbackToken!!)
-        assertEquals(legacyFile, rolledBack)
+        assertEquals(expectedLegacyFile, rolledBack)
 
         val migratedMeta = MnxCodec.deserializeMeta(
             report.migratedFile.sections[MnxFormat.MnxSectionType.META]!!
@@ -137,7 +144,7 @@ class MnxRepositoryMigrationTest {
 
         val report = repo.migrateArtifact(ByteArrayInputStream(MnxCodec.encodeToBytes(file)))
         val normalized = MnxRepository.deserializeGraphPayload(
-a            report.migratedFile.rawSections[MnxRepository.GRAPH_PAYLOAD_SECTION_TYPE]!!
+            report.migratedFile.rawSections[MnxRepository.GRAPH_PAYLOAD_SECTION_TYPE]!!
         )
 
         assertEquals(listOf("dup", "dup#2", "dup#3", "unique"), normalized.nodes.map { it.id })

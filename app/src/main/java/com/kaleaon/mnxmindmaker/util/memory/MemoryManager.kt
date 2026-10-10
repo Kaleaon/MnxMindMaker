@@ -150,6 +150,9 @@ class MemoryManager(
     @Volatile
     private var policySettings: MemoryPolicySettings = MemoryPolicySettings()
 
+    @Volatile
+    var lastMaintenanceRunMs: Long? = null
+
     constructor() : this(storage = InMemoryMemoryStorage())
 
     init {
@@ -777,7 +780,6 @@ private class SemanticMemoryVectorIndex(
     fun deleteMany(ids: List<String>) {
         ids.forEach {
             memories.remove(it)
-            vectors.remove(it)
             vectorCache.remove(it)
         }
     }

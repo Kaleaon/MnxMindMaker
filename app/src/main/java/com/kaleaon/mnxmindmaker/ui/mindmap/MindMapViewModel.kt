@@ -66,7 +66,6 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
     private val llmRepository = LlmSettingsRepository(application)
     private val continuityManager = ContinuityManager(application)
     private val llmClient = LlmApiClient(capabilityRegistry = ModelCapabilityRegistry.create(application))
-    private val llmClient = LlmApiClient()
     private val localRuntimeCoordinator = LocalRuntimeCoordinator(scope = viewModelScope)
     private val chatSessionRepository = ChatSessionRepository(application)
     private val traceStore = InMemoryTraceStore()
@@ -510,7 +509,7 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
         applyChatState(state)
     }
 
-    private fun runSingleChat(
+    private suspend fun runSingleChat(
         prompt: String,
         choice: ComposerProviderChoice,
         forcedProvider: LlmProvider? = null
@@ -536,17 +535,8 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
 
         var lastError: String? = null
         val failoverEvents = mutableListOf<FailoverEvent>()
-        for (settings in chain) {
-            val systemPrompt = buildSystemPrompt(settings)
-            val start = System.currentTimeMillis()
         val primarySettings = chain.first()
-        val systemPrompt = buildSystemPrompt(primarySettings)
         val transcript = buildChatTranscript(prompt)
-        val pipelineRequest = PromptPipelineRequest(
-            prompt = prompt,
-            transcript = transcript,
-            task = "mindmap_assist"
-        )
         val catchUp = chatCatchUpBuilder.build(
             history = _chatMessages.value.orEmpty(),
             targetMindId = _selectedNode.value?.id,
@@ -554,7 +544,11 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
             tokenBudget = catchUpTokenBudget(primarySettings)
         )
         val systemPrompt = buildSystemPrompt(primarySettings, catchUp)
-        val pipelineRequest = PromptPipelineRequest(prompt = prompt, task = "mindmap_assist")
+        val pipelineRequest = PromptPipelineRequest(
+            prompt = prompt,
+            transcript = transcript,
+            task = "mindmap_assist"
+        )
         val graphNodes = _graph.value?.nodes.orEmpty()
 
         try {
@@ -642,11 +636,13 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
                     )
                 )
             } catch (e: LlmApiException) {
-                failoverEvents += FailoverEvent(
-                    reasonCode = reasonCodeFor(e),
-                    message = e.message.orEmpty().ifBlank { "Provider request failed" }
+                failoverEvents.add(
+                    FailoverEvent(
+                        reasonCode = reasonCodeFor(e),
+                        message = e.message.orEmpty().ifBlank { "Provider request failed" }
+                    )
                 )
-                lastError = "${settings.provider.displayName}: ${e.message}"
+                lastError = "${primarySettings.provider.displayName}: ${e.message}"
             } catch (fallbackError: Exception) {
                 lastError = "$traceAwareMessage Fallback failed: ${fallbackError.message}"
             }
@@ -671,6 +667,8 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
             .put("role", "user")
             .put("content", currentPrompt)
         return transcript
+    }
+
     private fun buildMentionCandidates(nodes: List<MindNode>): List<ChatMentionParser.IdentityCandidate> {
         return nodes.map { node ->
             ChatMentionParser.IdentityCandidate(
@@ -981,9 +979,9 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
             }
             val status = personaRuntimeManager.activatePersona(personaId)
             if (status.phase == PersonaRuntimePhase.ACTIVE) {
-                participants += personaId
+                participants.add(personaId)
             } else {
-                systemMessages += buildPersonaActivationFailureMessage(personaId, status)
+                systemMessages.add(buildPersonaActivationFailureMessage(personaId, status))
             }
         }
 
@@ -1011,15 +1009,15 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
             allowedProviders = parseAllowedProviders(node.attributes["persona_allowed_providers"]),
             maxOutboundClassification = parseEnum(
                 raw = node.attributes["persona_max_outbound_classification"],
-                values = enumValues()
+                values = enumValues<DataClassification>()
             ) ?: DataClassification.SENSITIVE,
             enforcedPrivacyMode = parseEnum(
                 raw = node.attributes["persona_privacy_mode"],
-                values = enumValues()
+                values = enumValues<PrivacyMode>()
             ),
             fallbackOrder = parseEnum(
                 raw = node.attributes["persona_fallback_order"],
-                values = enumValues()
+                values = enumValues<LlmFallbackOrder>()
             ),
             allowTools = node.attributes["persona_allow_tools"]?.toBooleanStrictOrNull() ?: true
         )
@@ -1093,7 +1091,7 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
     }
 }
 
-private data class PersonaActivationBatch(
+internal data class PersonaActivationBatch(
     val activeParticipants: Set<String> = emptySet(),
     val systemMessages: List<ChatMessage> = emptyList()
 )

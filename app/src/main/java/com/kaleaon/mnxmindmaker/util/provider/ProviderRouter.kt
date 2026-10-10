@@ -209,17 +209,19 @@ class ProviderRouter(
             filtered = filtered.filter { it.provider.runtime == LlmRuntime.LOCAL_ON_DEVICE }
         }
 
-        if (policy.userPreference != null) {
-            val preferred = filtered.filter { it.provider == policy.userPreference }
-            val rest = filtered.filterNot { it.provider == policy.userPreference }
-            filtered = preferred + rest
-        }
-
-        return filtered.sortedBy { settings ->
+        val sorted = filtered.sortedBy { settings ->
             var score = 0
             if (policy.prioritizeCost) score += costRank(settings.provider)
             if (policy.prioritizeLatency) score += latencyRank(settings.provider)
             score
+        }
+
+        return if (policy.userPreference != null) {
+            val preferred = sorted.filter { it.provider == policy.userPreference }
+            val rest = sorted.filterNot { it.provider == policy.userPreference }
+            preferred + rest
+        } else {
+            sorted
         }
     }
 

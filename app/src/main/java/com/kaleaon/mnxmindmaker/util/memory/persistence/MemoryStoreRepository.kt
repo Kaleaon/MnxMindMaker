@@ -14,7 +14,7 @@ import java.security.MessageDigest
 
 class MemoryStoreRepository(
     context: Context,
-    fileName: String = DEFAULT_FILE_NAME
+    fileName: String = "$DEFAULT_FILE_STEM.json",
     private val baseFileName: String = DEFAULT_FILE_STEM,
     private val remoteSyncLayer: RemoteMemorySyncLayer? = null
 ) : MemoryStore {
@@ -63,6 +63,7 @@ class MemoryStoreRepository(
                 episodic.copy(updatedTimestamp = System.currentTimeMillis(), episodes = updated)
             )
             upsertMetadataLocked(record.metadata)
+            saveStateLocked(composePersistedMemoryStoreLocked())
             syncToRemoteLocked()
         }
     }
@@ -78,6 +79,7 @@ class MemoryStoreRepository(
                 graph.copy(updatedTimestamp = System.currentTimeMillis(), profiles = updated)
             )
             upsertMetadataLocked(record.metadata)
+            saveStateLocked(composePersistedMemoryStoreLocked())
             syncToRemoteLocked()
         }
     }
@@ -93,6 +95,7 @@ class MemoryStoreRepository(
                 semantic.copy(updatedTimestamp = System.currentTimeMillis(), semantics = updated)
             )
             upsertMetadataLocked(record.metadata)
+            saveStateLocked(composePersistedMemoryStoreLocked())
             syncToRemoteLocked()
         }
     }
@@ -140,6 +143,7 @@ class MemoryStoreRepository(
 
         if (changed) {
             removeMetadataLocked(id)
+            saveStateLocked(composePersistedMemoryStoreLocked())
             syncToRemoteLocked()
         }
         changed
@@ -151,6 +155,7 @@ class MemoryStoreRepository(
             saveSemanticLocked(defaultSemanticStore())
             saveEpisodicLocked(defaultEpisodicStore())
             saveMetadataLocked(defaultMetadataStore())
+            saveStateLocked(composePersistedMemoryStoreLocked())
             syncToRemoteLocked()
         }
     }
@@ -163,6 +168,7 @@ class MemoryStoreRepository(
         saveSemanticLocked(merged.semanticStore)
         saveEpisodicLocked(merged.episodicStore)
         saveMetadataLocked(merged.metadataIndex)
+        saveStateLocked(composePersistedMemoryStoreLocked())
         true
     }
 
@@ -200,9 +206,9 @@ class MemoryStoreRepository(
             return remoteEntry.lastUpdatedTimestamp > localEntry.lastUpdatedTimestamp
         }
 
-        val mergedProfiles = mergeById(local.graphStore.profiles, remote.graphStore.profiles, preferRemote)
-        val mergedSemantics = mergeById(local.semanticStore.semantics, remote.semanticStore.semantics, preferRemote)
-        val mergedEpisodes = mergeById(local.episodicStore.episodes, remote.episodicStore.episodes, preferRemote)
+        val mergedProfiles = mergeById(local.graphStore.profiles, remote.graphStore.profiles, ::preferRemote)
+        val mergedSemantics = mergeById(local.semanticStore.semantics, remote.semanticStore.semantics, ::preferRemote)
+        val mergedEpisodes = mergeById(local.episodicStore.episodes, remote.episodicStore.episodes, ::preferRemote)
 
         val mergedMetadataEntries = (local.metadataIndex.entries + remote.metadataIndex.entries)
             .groupBy { it.id }
@@ -255,7 +261,27 @@ class MemoryStoreRepository(
         if (!validatePayloadLocked(snapshotPayload).isHealthy) return@synchronized false
         storageFile.parentFile?.mkdirs()
         storageFile.writeText(snapshotPayload)
+        runCatching {
+            val restoredState = json.decodeFromString<PersistedMemoryStore>(snapshotPayload)
+            saveEpisodicLocked(defaultEpisodicStore().copy(episodes = restoredState.records.sessions))
+            saveGraphLocked(defaultGraphStore().copy(profiles = restoredState.records.profiles))
+            saveSemanticLocked(defaultSemanticStore().copy(semantics = restoredState.records.semantics))
+        }
         true
+    }
+
+    private fun composePersistedMemoryStoreLocked(): PersistedMemoryStore {
+        val now = System.currentTimeMillis()
+        return PersistedMemoryStore(
+            schemaVersion = SCHEMA_VERSION,
+            createdTimestamp = now,
+            updatedTimestamp = now,
+            records = MemoryRecordCollections(
+                sessions = loadEpisodicLocked().episodes,
+                profiles = loadGraphLocked().profiles,
+                semantics = loadSemanticLocked().semantics
+            )
+        )
     }
 
     private fun loadStateLocked(): PersistedMemoryStore {
@@ -263,6 +289,9 @@ class MemoryStoreRepository(
             val initial = defaultState()
             saveStateLocked(initial)
             return initial
+        }
+        return runCatching { json.decodeFromString<PersistedMemoryStore>(storageFile.readText()) }.getOrElse { defaultState() }
+    }
     private fun itemId(item: Any): String = when (item) {
         is SessionMemoryRecord -> item.metadata.id
         is ProfileMemoryRecord -> item.metadata.id
@@ -327,6 +356,15 @@ class MemoryStoreRepository(
         file.writeText(payload)
     }
 
+    private fun defaultState(now: Long = System.currentTimeMillis()): PersistedMemoryStore {
+        return PersistedMemoryStore(
+            schemaVersion = SCHEMA_VERSION,
+            createdTimestamp = now,
+            updatedTimestamp = now,
+            records = MemoryRecordCollections(sessions = emptyList(), profiles = emptyList(), semantics = emptyList())
+        )
+    }
+
     private fun <T> loadStoreLocked(
         file: File,
         default: T,
@@ -340,22 +378,13 @@ class MemoryStoreRepository(
 
         maybeRunPeriodicIntegrityScanLocked()
 
-        val restoredFromSnapshot = verifyChecksumLocked()
-        if (restoredFromSnapshot) {
-            return recoverFromSnapshotLocked() ?: recoverFromCorruptionLocked()
-        }
-
         return try {
-            val raw = String(encryptedStore.readDecryptedBytes(storageFile, "memory_index"))
             val raw = file.readText()
             val payload = json.parseToJsonElement(raw).jsonObject
             val payloadVersion = payload[SCHEMA_VERSION_FIELD]?.jsonPrimitive?.intOrNull ?: 1
             val migratedPayload = applyMigrationsLocked(payload, payloadVersion)
             decode(migratedPayload)
-        } catch (_: SerializationException) {
-            saveStoreLocked(file, encode(default))
-            default
-        } catch (_: IllegalArgumentException) {
+        } catch (_: Exception) {
             saveStoreLocked(file, encode(default))
             default
         }
@@ -368,6 +397,8 @@ class MemoryStoreRepository(
         snapshotFile.writeText(payload)
         checksumFile.writeText(sha256Hex(payload))
         encryptedStore.writeEncryptedBytes(storageFile, json.encodeToString(state).toByteArray(), "memory_index")
+    }
+
     private fun defaultGraphStore(now: Long = System.currentTimeMillis()): GraphMemoryStore {
         return GraphMemoryStore(
             schemaVersion = SCHEMA_VERSION,
@@ -596,8 +627,7 @@ class MemoryStoreRepository(
         private const val EPISODIC_SUFFIX = "episodic"
         private const val METADATA_SUFFIX = "metadata_index"
         private const val SCHEMA_VERSION_FIELD = "schemaVersion"
-        private const val SCHEMA_VERSION = 1
-        private const val INTEGRITY_SCAN_INTERVAL_MS = 15 * 60 * 1000L
         private const val SCHEMA_VERSION = 2
+        private const val INTEGRITY_SCAN_INTERVAL_MS = 15 * 60 * 1000L
     }
 }

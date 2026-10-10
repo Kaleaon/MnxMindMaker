@@ -39,6 +39,9 @@ class EncryptedArtifactStoreRecoveryTest {
 
         assertArrayEquals(expectedV1, restoredHierarchy.keyForVersion(1))
         assertTrue(restoredHierarchy.keyForVersion(2) != null)
+    }
+
+    @Test
     fun `recoverHierarchyFromBackup imports valid recovery bundle`() {
         val passphrase = "correct horse battery staple"
         val sourceHierarchy = AppManagedKeyHierarchy(FakeStore())
@@ -81,24 +84,6 @@ class EncryptedArtifactStoreRecoveryTest {
 
         assertTrue(wrongException is IllegalArgumentException)
         assertTrue(missingException is IllegalArgumentException)
-        val passphrase = "passphrase"
-        val validRecovery = AppManagedKeyHierarchy(FakeStore()).exportEncryptedSnapshot(passphrase)
-        val store = EncryptedArtifactStore(AppManagedKeyHierarchy(FakeStore()))
-
-        val wrongMagicBundle = JSONObject()
-            .put("magic", "WRONG")
-            .put("recovery", JSONObject(validRecovery))
-            .toString()
-        assertThrows(IllegalArgumentException::class.java) {
-            store.recoverHierarchyFromBackup(wrongMagicBundle, passphrase)
-        }
-
-        val missingMagicBundle = JSONObject()
-            .put("recovery", JSONObject(validRecovery))
-            .toString()
-        assertThrows(IllegalArgumentException::class.java) {
-            store.recoverHierarchyFromBackup(missingMagicBundle, passphrase)
-        }
     }
 
     @Test
@@ -123,11 +108,5 @@ class EncryptedArtifactStoreRecoveryTest {
 
         assertTrue(missingException is IllegalArgumentException)
         assertTrue(nonObjectException is IllegalArgumentException)
-        val missingRecoveryBundle = JSONObject()
-            .put("magic", "MMK-BUNDLE-1")
-            .toString()
-        assertThrows(IllegalArgumentException::class.java) {
-            store.recoverHierarchyFromBackup(missingRecoveryBundle, "passphrase")
-        }
     }
 }

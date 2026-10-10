@@ -233,8 +233,8 @@ class PersonaRuntimeManager(
     }
 
     private fun inferFallbackOrder(settings: List<LlmSettings>): LlmFallbackOrder {
-        return settings.firstOrNull { it.provider == LlmProvider.LOCAL_ON_DEVICE }?.fallbackOrder
-            ?: LlmFallbackOrder.REMOTE_ONLY
+        val hasLocal = settings.any { it.provider == LlmProvider.LOCAL_ON_DEVICE && it.enabled }
+        return if (hasLocal) LlmFallbackOrder.LOCAL_FIRST_REMOTE_FALLBACK else LlmFallbackOrder.REMOTE_ONLY
     }
 
     private fun classificationRank(classification: DataClassification): Int = when (classification) {

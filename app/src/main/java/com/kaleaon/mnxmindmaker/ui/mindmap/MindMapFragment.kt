@@ -673,20 +673,16 @@ private class ChatMessageAdapter(
         val message = messages[position]
 
         view.findViewById<TextView>(R.id.tv_chat_speaker).text = buildSpeakerLabel(message)
-        view.findViewById<TextView>(R.id.tv_chat_content).text = message.response
+        view.findViewById<TextView>(R.id.tv_chat_content).text = message.content
         view.findViewById<TextView>(R.id.tv_chat_metadata).text = buildMetadata(message)
+
         val retryButton = view.findViewById<MaterialButton>(R.id.btn_retry_provider)
         retryButton.visibility = if (message.isAiGenerated) View.VISIBLE else View.GONE
         retryButton.setOnClickListener {
-        view.findViewById<TextView>(R.id.tv_chat_prompt).text = message.actorLabel
-        view.findViewById<TextView>(R.id.tv_chat_response).text = message.content
-        view.findViewById<TextView>(R.id.tv_chat_provenance).text = buildProvenance(message)
-        view.findViewById<MaterialButton>(R.id.btn_retry_provider).setOnClickListener {
             onRetry(message)
         }
 
         val compareButton = view.findViewById<MaterialButton>(R.id.btn_compare_side_by_side)
-        compareButton.visibility = if (message.isAiGenerated && isPremium() && message.compareCandidate != null) View.VISIBLE else View.GONE
         compareButton.visibility = if (isPremium() && message.role == ChatRole.MIND && message.compareCandidate != null) View.VISIBLE else View.GONE
         compareButton.setOnClickListener { onCompare(message) }
 
@@ -702,8 +698,6 @@ private class ChatMessageAdapter(
     }
 
     private fun buildMetadata(message: ChatMessage): String {
-        val p = message.provenance
-    private fun buildProvenance(message: ChatMessage): String {
         val p = message.provenance ?: return "No provenance"
         val tools = if (p.toolCalls.isEmpty()) "none" else p.toolCalls.joinToString()
         val latency = p.latencyMs?.let { "${it}ms" } ?: "n/a"

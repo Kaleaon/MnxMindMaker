@@ -29,7 +29,8 @@ object ProviderPreflightDiagnostics {
             LlmProvider.OPENAI,
             LlmProvider.GEMINI,
             LlmProvider.VLLM_GEMMA4,
-            LlmProvider.LOCAL_ON_DEVICE -> "/models"
+            LlmProvider.LOCAL_ON_DEVICE,
+            LlmProvider.OPENAI_COMPATIBLE_SELF_HOSTED -> "/models"
         }
 
         val probeUrl = settings.baseUrl.trimEnd('/') + probePath

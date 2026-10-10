@@ -450,7 +450,7 @@ object BootPacketGenerator {
     private fun toDeterministicJsonObject(raw: Any?, path: String): JSONObject {
         val map = raw as? Map<*, *>
             ?: throw validationError("invalid_map_shape", path, "Expected object/map but got ${raw?.javaClass?.name ?: "null"}")
-        val json = JSONObject()
+        val sortedMap = LinkedHashMap<String, Any?>()
         map.keys
             .mapIndexed { index, key ->
                 val keyString = key as? String
@@ -462,8 +462,25 @@ object BootPacketGenerator {
             }
             .sorted()
             .forEach { key ->
-                json.put(key, toJsonCompatibleValue(map[key], "$path.$key"))
+                sortedMap[key] = toJsonCompatibleValue(map[key], "$path.$key")
             }
+        val json = JSONObject()
+        var setReflectively = false
+        runCatching {
+            val field = JSONObject::class.java.getDeclaredField("nameValuePairs").apply { isAccessible = true }
+            field.set(json, sortedMap)
+            setReflectively = true
+        }
+        if (!setReflectively) {
+            runCatching {
+                val field = JSONObject::class.java.getDeclaredField("map").apply { isAccessible = true }
+                field.set(json, sortedMap)
+                setReflectively = true
+            }
+        }
+        if (!setReflectively) {
+            sortedMap.forEach { (k, v) -> json.put(k, v) }
+        }
         return json
     }
 

@@ -67,26 +67,41 @@ class SecureVault(private val context: Context) {
     }
 
     private class FallbackEncryptedVault(context: Context) : KeyValueVault {
-        private val prefs = context.getSharedPreferences("mnx_secure_vault_fallback", Context.MODE_PRIVATE)
+        private val prefs: SharedPreferences? = runCatching { context.getSharedPreferences("mnx_secure_vault_fallback", Context.MODE_PRIVATE) }.getOrNull()
+        private val inMemoryStore = mutableMapOf<String, String>()
         private val secretKey = deriveDeviceBoundKey(context)
 
         override fun putString(key: String, value: String) {
-            prefs.edit().putString(key, encrypt(value)).apply()
+            val encrypted = encrypt(value)
+            val p = prefs
+            if (p != null) {
+                p.edit().putString(key, encrypted).apply()
+            } else {
+                inMemoryStore[key] = encrypted
+            }
         }
 
         override fun getString(key: String): String? {
-            val raw = prefs.getString(key, null) ?: return null
+            val p = prefs
+            val raw = if (p != null) p.getString(key, null) else inMemoryStore[key]
+            if (raw == null) return null
             return runCatching { decrypt(raw) }.getOrNull()
         }
 
         override fun remove(key: String) {
-            prefs.edit().remove(key).apply()
+            val p = prefs
+            if (p != null) {
+                p.edit().remove(key).apply()
+            } else {
+                inMemoryStore.remove(key)
+            }
         }
 
         private fun deriveDeviceBoundKey(context: Context): SecretKeySpec {
-            val androidId = Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID)
+            val packageName = runCatching { context.packageName }.getOrNull() ?: "com.kaleaon.mnxmindmaker"
+            val androidId = runCatching { Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID) }.getOrNull()
                 ?: "unknown-device"
-            val material = "${context.packageName}|$androidId|mnxmindmaker".toByteArray(StandardCharsets.UTF_8)
+            val material = "$packageName|$androidId|mnxmindmaker".toByteArray(StandardCharsets.UTF_8)
             val digest = MessageDigest.getInstance("SHA-256").digest(material)
             return SecretKeySpec(digest.copyOf(32), "AES")
         }
@@ -96,11 +111,11 @@ class SecureVault(private val context: Context) {
             val cipher = Cipher.getInstance("AES/GCM/NoPadding")
             cipher.init(Cipher.ENCRYPT_MODE, secretKey, GCMParameterSpec(128, iv))
             val ciphertext = cipher.doFinal(plaintext.toByteArray(StandardCharsets.UTF_8))
-            return Base64.encodeToString(iv + ciphertext, Base64.NO_WRAP)
+            return java.util.Base64.getEncoder().encodeToString(iv + ciphertext)
         }
 
         private fun decrypt(encoded: String): String {
-            val payload = Base64.decode(encoded, Base64.NO_WRAP)
+            val payload = java.util.Base64.getDecoder().decode(encoded)
             val iv = payload.copyOfRange(0, 12)
             val ciphertext = payload.copyOfRange(12, payload.size)
             val cipher = Cipher.getInstance("AES/GCM/NoPadding")
