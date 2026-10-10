@@ -1,5 +1,6 @@
 package com.kaleaon.mnxmindmaker.mnx
 
+import com.kaleaon.mnxmindmaker.util.HashUtils
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.EOFException
@@ -9,7 +10,6 @@ import java.io.FileOutputStream
 import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
-import java.security.MessageDigest
 import java.util.UUID
 import java.util.zip.CRC32
 
@@ -78,7 +78,7 @@ object MnxCodec {
             writer.writeShort(0)
         }
 
-        val sha256 = MessageDigest.getInstance("SHA-256")
+        val sha256 = HashUtils.sha256Digest()
         for (payload in allPayloads) {
             writer.writeBytes(payload)
             sha256.update(payload)
@@ -117,7 +117,7 @@ object MnxCodec {
 
         val knownSections = mutableMapOf<MnxFormat.MnxSectionType, ByteArray>()
         val unknownSections = mutableMapOf<Short, ByteArray>()
-        val sha256 = MessageDigest.getInstance("SHA-256")
+        val sha256 = HashUtils.sha256Digest()
 
         for (entry in rawEntries) {
             val payload = reader.readBytes(entry.size)

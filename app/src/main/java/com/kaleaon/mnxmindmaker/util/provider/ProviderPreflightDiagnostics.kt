@@ -29,6 +29,7 @@ object ProviderPreflightDiagnostics {
             LlmProvider.OPENAI,
             LlmProvider.GEMINI,
             LlmProvider.VLLM_GEMMA4,
+            LlmProvider.OPENAI_COMPATIBLE_SELF_HOSTED,
             LlmProvider.LOCAL_ON_DEVICE -> "/models"
         }
 

@@ -135,16 +135,6 @@ class EncryptedArtifactStore private constructor(
 
     internal constructor(hierarchy: AppManagedKeyHierarchy) : this(SecureRandom(), hierarchy)
 
-    constructor(context: Context) : this(
-        random = SecureRandom(),
-        hierarchy = AppManagedKeyHierarchy(SecureVault(context))
-    )
-
-    internal constructor(hierarchy: AppManagedKeyHierarchy) : this(
-        random = SecureRandom(),
-        hierarchy = hierarchy
-    )
-
     fun writeEncryptedBytes(file: File, plaintext: ByteArray, artifactType: String) {
         file.parentFile?.mkdirs()
         val active = hierarchy.activeKey()
@@ -208,24 +198,12 @@ class EncryptedArtifactStore private constructor(
 
     fun recoverHierarchyFromBackup(backupPayload: String, passphrase: String) {
         val root = runCatching { JSONObject(backupPayload) }
-            .getOrElse { throw IllegalArgumentException("Backup payload must be valid JSON", it) }
-        val magic = root.optString("magic")
-        require(magic == "MMK-BUNDLE-1") { "Invalid backup bundle magic: expected MMK-BUNDLE-1" }
-
-        val recoveryRaw = root.opt("recovery")
-            ?: throw IllegalArgumentException("Missing required backup field: recovery")
-        val recovery = recoveryRaw as? JSONObject
-            ?: throw IllegalArgumentException("Invalid backup field: recovery must be a JSON object")
-
             .getOrElse { throw IllegalArgumentException("Invalid backup bundle: payload is not valid JSON.", it) }
         require(root.optString("magic") == BUNDLE_MAGIC) {
             "Invalid backup bundle: expected magic '$BUNDLE_MAGIC'."
         }
-        if (!root.has("recovery")) {
-            throw IllegalArgumentException("Invalid backup bundle: missing 'recovery' object.")
-        }
         val recovery = root.optJSONObject("recovery")
-            ?: throw IllegalArgumentException("Invalid backup bundle: 'recovery' must be a JSON object.")
+            ?: throw IllegalArgumentException("Invalid backup bundle: missing or invalid 'recovery' object.")
         hierarchy.importEncryptedSnapshot(recovery.toString(), passphrase)
     }
 }

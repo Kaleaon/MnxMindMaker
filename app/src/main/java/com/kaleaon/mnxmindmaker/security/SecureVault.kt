@@ -6,8 +6,8 @@ import android.provider.Settings
 import android.util.Base64
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
+import com.kaleaon.mnxmindmaker.util.HashUtils
 import java.nio.charset.StandardCharsets
-import java.security.MessageDigest
 import java.security.SecureRandom
 import javax.crypto.Cipher
 import javax.crypto.spec.GCMParameterSpec
@@ -87,7 +87,7 @@ class SecureVault(private val context: Context) {
             val androidId = Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID)
                 ?: "unknown-device"
             val material = "${context.packageName}|$androidId|mnxmindmaker".toByteArray(StandardCharsets.UTF_8)
-            val digest = MessageDigest.getInstance("SHA-256").digest(material)
+            val digest = HashUtils.sha256(material)
             return SecretKeySpec(digest.copyOf(32), "AES")
         }
 

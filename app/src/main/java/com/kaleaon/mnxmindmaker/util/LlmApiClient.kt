@@ -17,7 +17,6 @@ import org.json.JSONObject
 
 class LlmApiClient(
     private val capabilityRegistry: ModelCapabilitySource? = null,
-    private val providers: List<AssistantProvider> = listOf(
     providers: List<AssistantProvider> = listOf(
         LocalProvider(),
         ClaudeProvider(),

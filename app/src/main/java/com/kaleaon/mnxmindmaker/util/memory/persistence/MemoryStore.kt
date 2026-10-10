@@ -26,16 +26,17 @@ interface MemoryStore {
     fun runIntegrityScan(): MemoryStoreIntegrityReport
 
     fun restoreLastKnownGoodSnapshot(): Boolean
+
+    fun syncFromRemote(): Boolean = false
+
+    fun syncToRemote(): Boolean = false
 }
 
 data class MemoryStoreIntegrityReport(
     val isHealthy: Boolean,
     val issues: List<String>,
     val checkedAtEpochMs: Long = System.currentTimeMillis()
-    fun syncFromRemote(): Boolean = false
-
-    fun syncToRemote(): Boolean = false
-}
+)
 
 interface RemoteMemorySyncLayer {
     fun pullSnapshot(): RemoteMemorySnapshot?

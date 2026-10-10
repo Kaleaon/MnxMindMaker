@@ -29,21 +29,21 @@ class SkillPackLoader(
             } catch (e: Exception) {
                 val msg = "Failed to parse $source: ${e.message}"
                 Log.w(TAG, msg)
-                skipped += source
-                issues += SkillPackValidationIssue(source, msg)
+                skipped.add(source)
+                issues.add(SkillPackValidationIssue(source, msg))
                 continue
             }
 
             val (manifest, validationIssues) = validator.validate(source, root)
             if (validationIssues.isNotEmpty() || manifest == null) {
-                skipped += source
-                issues += validationIssues
+                skipped.add(source)
+                issues.addAll(validationIssues)
                 validationIssues.forEach { Log.w(TAG, "Skipping $source: ${it.message}") }
                 continue
             }
 
             if (!manifest.enabled) {
-                disabled += source
+                disabled.add(source)
                 Log.i(TAG, "Skill pack disabled by manifest flag: $source")
                 continue
             }
@@ -60,7 +60,7 @@ class SkillPackLoader(
                 )
             }
 
-            loaded += LoadedSkillPack(source = source, manifest = manifest, tools = tools)
+            loaded.add(LoadedSkillPack(source = source, manifest = manifest, tools = tools))
             Log.i(TAG, "Loaded skill pack ${manifest.packId} (${manifest.version}) from $source with ${tools.size} tools")
         }
 
@@ -87,13 +87,13 @@ class SkillPackLoader(
         private fun buildToolDescription(tool: ManifestToolSpec): String {
             val playbook = tool.playbook ?: return tool.description
             val sections = mutableListOf<String>()
-            sections += tool.description
-            playbook.summary?.takeIf { it.isNotBlank() }?.let { sections += "Playbook: $it" }
+            sections.add(tool.description)
+            playbook.summary?.takeIf { it.isNotBlank() }?.let { sections.add("Playbook: $it") }
             if (playbook.steps.isNotEmpty()) {
                 val condensedSteps = playbook.steps.joinToString(separator = " -> ")
-                sections += "Suggested sequence: $condensedSteps"
+                sections.add("Suggested sequence: $condensedSteps")
             }
-            playbook.source?.takeIf { it.isNotBlank() }?.let { sections += "Reference: $it" }
+            playbook.source?.takeIf { it.isNotBlank() }?.let { sections.add("Reference: $it") }
             return sections.joinToString(separator = "\n")
         }
     }

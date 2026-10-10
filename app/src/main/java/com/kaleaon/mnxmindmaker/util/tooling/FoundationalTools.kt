@@ -220,7 +220,7 @@ class FoundationalTools(
                         "tags" to args.optString("tags")
                     ).apply {
                         args.optString("character_id").ifBlank { null }?.let { put("character_id", it) }
-                    )
+                    }
                 )
             )
             else -> {
