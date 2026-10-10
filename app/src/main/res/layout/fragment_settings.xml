@@ -208,6 +208,30 @@
             android:layout_marginBottom="8dp">
 
             <com.google.android.material.button.MaterialButton
+                android:id="@+id/btn_oauth_claude"
+                style="@style/Widget.MaterialComponents.Button.UnelevatedButton"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="@string/link_oauth_custom_tabs_claude" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btn_oauth_chatgpt"
+                style="@style/Widget.MaterialComponents.Button.UnelevatedButton"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginStart="8dp"
+                android:text="@string/link_oauth_custom_tabs_chatgpt" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginBottom="8dp">
+
+            <com.google.android.material.button.MaterialButton
                 android:id="@+id/btn_refresh_claude"
                 style="@style/Widget.MaterialComponents.Button.TextButton"
                 android:layout_width="0dp"
@@ -255,9 +279,19 @@
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btn_link_huggingface"
                 style="@style/Widget.MaterialComponents.Button.OutlinedButton"
-                android:layout_width="match_parent"
+                android:layout_width="0dp"
                 android:layout_height="wrap_content"
+                android:layout_weight="1"
                 android:text="@string/link_huggingface_account" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btn_oauth_huggingface"
+                style="@style/Widget.MaterialComponents.Button.UnelevatedButton"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginStart="8dp"
+                android:text="@string/link_oauth_custom_tabs_huggingface" />
         </LinearLayout>
 
         <LinearLayout

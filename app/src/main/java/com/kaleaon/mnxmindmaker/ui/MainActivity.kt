@@ -17,9 +17,17 @@ import com.kaleaon.mnxmindmaker.databinding.ActivityMainBinding
 import com.google.android.material.snackbar.Snackbar
 import com.kaleaon.mnxmindmaker.ktheme.KthemeManager
 import com.kaleaon.mnxmindmaker.ktheme.Theme
+import com.kaleaon.mnxmindmaker.model.OAuthAuthorizationResult
+import com.kaleaon.mnxmindmaker.model.OAuthTokenExchangeResult
+import com.kaleaon.mnxmindmaker.repository.ExternalAccountRepository
+import com.kaleaon.mnxmindmaker.repository.OAuthManager
 import com.kaleaon.mnxmindmaker.ui.importdata.ImportDataHolder
 import com.kaleaon.mnxmindmaker.util.FileImporter
 import com.kaleaon.mnxmindmaker.util.background.MindHealthWorkScheduler
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class MainActivity : AppCompatActivity() {
 
@@ -67,6 +75,12 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun handleInboundIntent(intent: Intent?) {
+        val data = intent?.data
+        if (data != null && isOAuthCallbackUri(data)) {
+            handleOAuthCallback(data)
+            return
+        }
+
         val resolution = ImportIntentResolver.resolve(
             action = intent?.action,
             type = intent?.type,
@@ -97,6 +111,69 @@ class MainActivity : AppCompatActivity() {
                     val reason = error.message ?: getString(R.string.import_intent_unknown_error)
                     showImportErrorAndRoute(getString(R.string.import_parse_error, reason))
                 }
+            }
+        }
+    }
+
+    private fun isOAuthCallbackUri(data: Uri): Boolean {
+        val scheme = data.scheme?.lowercase()
+        val host = data.host?.lowercase()
+        val path = data.path?.lowercase()
+        return (scheme == "mnxmindmaker" || scheme == "mnx") && host == "oauth" && path == "/callback"
+    }
+
+    private fun handleOAuthCallback(uri: Uri) {
+        val oauthManager = OAuthManager(this)
+        val externalAccountRepository = ExternalAccountRepository(this)
+        val authResult = oauthManager.parseAndValidateCallbackUri(uri)
+
+        when (authResult) {
+            is OAuthAuthorizationResult.Success -> {
+                lifecycleScope.launch(Dispatchers.IO) {
+                    val clientId = externalAccountRepository.getOAuthClientId(authResult.provider) ?: ""
+                    val clientSecret = externalAccountRepository.getOAuthClientSecret(authResult.provider)
+
+                    val exchangeResult = oauthManager.exchangeAuthorizationCode(
+                        provider = authResult.provider,
+                        code = authResult.code,
+                        codeVerifier = authResult.codeVerifier,
+                        redirectUri = authResult.redirectUri,
+                        clientId = clientId,
+                        clientSecret = clientSecret
+                    )
+
+                    withContext(Dispatchers.Main) {
+                        when (exchangeResult) {
+                            is OAuthTokenExchangeResult.Success -> {
+                                externalAccountRepository.linkAccount(
+                                    provider = exchangeResult.provider,
+                                    accessToken = exchangeResult.accessToken,
+                                    refreshToken = exchangeResult.refreshToken ?: "",
+                                    expiresInSeconds = exchangeResult.expiresInSeconds
+                                )
+                                navigateToDestination(R.id.settingsFragment)
+                                Snackbar.make(
+                                    binding.root,
+                                    getString(R.string.oauth_success_linked, exchangeResult.provider.displayName),
+                                    Snackbar.LENGTH_LONG
+                                ).show()
+                            }
+                            is OAuthTokenExchangeResult.Failure -> {
+                                navigateToDestination(R.id.settingsFragment)
+                                Snackbar.make(
+                                    binding.root,
+                                    getString(R.string.oauth_failed, exchangeResult.reason),
+                                    Snackbar.LENGTH_LONG
+                                ).show()
+                            }
+                        }
+                    }
+                }
+            }
+            is OAuthAuthorizationResult.Error -> {
+                navigateToDestination(R.id.settingsFragment)
+                val msg = authResult.errorDescription ?: authResult.error
+                Snackbar.make(binding.root, getString(R.string.oauth_failed, msg), Snackbar.LENGTH_LONG).show()
             }
         }
     }
