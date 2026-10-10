@@ -64,7 +64,52 @@ class MemoryStoreRepositoryIntegrityTest {
         assertTrue(repository.getSessions().any { it.metadata.id == "session-a" })
     }
 
-    private fun tempContext(filesDir: File): Context = object : ContextWrapper(null) {
-        override fun getFilesDir(): File = filesDir
+    private fun tempContext(filesDir: File): Context {
+        val prefsMap = mutableMapOf<String, MutableMap<String, Any?>>()
+        return object : ContextWrapper(null) {
+            override fun getFilesDir(): File = filesDir
+            override fun getSharedPreferences(name: String, mode: Int): android.content.SharedPreferences {
+                val store = prefsMap.getOrPut(name) { mutableMapOf() }
+                return FakeSharedPreferences(store)
+            }
+            override fun getPackageName(): String = "com.kaleaon.mnxmindmaker"
+        }
+    }
+
+    private class FakeSharedPreferences(
+        private val data: MutableMap<String, Any?> = mutableMapOf()
+    ) : android.content.SharedPreferences {
+        override fun getAll(): Map<String, *> = data
+        override fun getString(key: String, defValue: String?): String? = data[key] as? String ?: defValue
+        @Suppress("UNCHECKED_CAST")
+        override fun getStringSet(key: String, defValues: Set<String>?): Set<String>? = data[key] as? Set<String> ?: defValues
+        override fun getInt(key: String, defValue: Int): Int = data[key] as? Int ?: defValue
+        override fun getLong(key: String, defValue: Long): Long = data[key] as? Long ?: defValue
+        override fun getFloat(key: String, defValue: Float): Float = data[key] as? Float ?: defValue
+        override fun getBoolean(key: String, defValue: Boolean): Boolean = data[key] as? Boolean ?: defValue
+        override fun contains(key: String): Boolean = data.containsKey(key)
+        override fun edit(): android.content.SharedPreferences.Editor = Editor()
+        override fun registerOnSharedPreferenceChangeListener(listener: android.content.SharedPreferences.OnSharedPreferenceChangeListener?) {}
+        override fun unregisterOnSharedPreferenceChangeListener(listener: android.content.SharedPreferences.OnSharedPreferenceChangeListener?) {}
+
+        private inner class Editor : android.content.SharedPreferences.Editor {
+            private val changes = mutableMapOf<String, Any?>()
+            private var clearAll = false
+
+            override fun putString(key: String, value: String?): android.content.SharedPreferences.Editor { changes[key] = value; return this }
+            override fun putStringSet(key: String, values: Set<String>?): android.content.SharedPreferences.Editor { changes[key] = values; return this }
+            override fun putInt(key: String, value: Int): android.content.SharedPreferences.Editor { changes[key] = value; return this }
+            override fun putLong(key: String, value: Long): android.content.SharedPreferences.Editor { changes[key] = value; return this }
+            override fun putFloat(key: String, value: Float): android.content.SharedPreferences.Editor { changes[key] = value; return this }
+            override fun putBoolean(key: String, value: Boolean): android.content.SharedPreferences.Editor { changes[key] = value; return this }
+            override fun remove(key: String): android.content.SharedPreferences.Editor { changes[key] = null; return this }
+            override fun clear(): android.content.SharedPreferences.Editor { clearAll = true; return this }
+            override fun apply() { commit() }
+            override fun commit(): Boolean {
+                if (clearAll) data.clear()
+                changes.forEach { (k, v) -> if (v == null) data.remove(k) else data[k] = v }
+                return true
+            }
+        }
     }
 }

@@ -230,22 +230,34 @@ object MemoryRetrievalService {
 
     private fun relevanceScore(node: MindNode, context: RetrievalContext): Float {
         val queryTokens = tokenize("${context.prompt} ${context.task}")
+        val intrinsic = node.attributeAsFloat("current_relevance", default = 0.5f)
         if (queryTokens.isEmpty()) {
-            return node.attributeAsFloat("current_relevance", default = 0.5f)
+            return intrinsic
         }
 
         val memoryTokens = tokenize(
-            listOf(node.label, node.description, node.attributes["semantic_subtype"], node.attributes["tags"])
+            listOf(
+                node.label,
+                node.description,
+                node.attributes["semantic_subtype"],
+                node.attributes["tags"],
+                node.attributes["room"],
+                node.attributes["hall"],
+                node.attributes["wing"]
+            )
                 .filterNotNull()
                 .joinToString(" ")
         )
-        if (memoryTokens.isEmpty()) return 0f
+        if (memoryTokens.isEmpty()) return intrinsic * 0.6f
 
         val overlap = queryTokens.intersect(memoryTokens).size.toFloat()
         val lexical = (overlap / queryTokens.size.toFloat()).coerceIn(0f, 1f)
-        val intrinsic = node.attributeAsFloat("current_relevance", default = 0.5f)
 
-        return (lexical * 0.65f + intrinsic * 0.35f).coerceIn(0f, 1f)
+        return if (lexical > 0f) {
+            (lexical * 0.65f + intrinsic * 0.35f).coerceIn(0f, 1f)
+        } else {
+            (intrinsic * 0.6f).coerceIn(0f, 1f)
+        }
     }
 
     private fun buildRouteHints(context: RetrievalContext): RouteHints {
@@ -336,7 +348,7 @@ object MemoryRetrievalService {
 
         val seedIds = memories
             .map { it to relevanceScore(it, context) }
-            .sortedByDescending { (_, score) -> score }
+            .sortedWith(compareByDescending<Pair<MindNode, Float>> { it.second }.thenBy { it.first.id })
             .take(3)
             .mapNotNull { (node, score) -> node.id.takeIf { score >= 0.3f } }
             .toSet()
@@ -404,8 +416,8 @@ object MemoryRetrievalService {
         RetrievalPolicyProfile.DEPLOYMENT -> PolicyWeights(
             relevance = 0.2f,
             confidence = 0.12f,
-            recency = 0.22f,
-            importance = 0.2f,
+            recency = 0.10f,
+            importance = 0.28f,
             vectorSimilarity = 0.14f,
             graphProximity = 0.12f,
             riskPenaltyWeight = 0.95f
@@ -413,8 +425,8 @@ object MemoryRetrievalService {
         RetrievalPolicyProfile.RECOVERY -> PolicyWeights(
             relevance = 0.22f,
             confidence = 0.1f,
-            recency = 0.26f,
-            importance = 0.1f,
+            recency = 0.28f,
+            importance = 0.10f,
             vectorSimilarity = 0.1f,
             graphProximity = 0.22f,
             riskPenaltyWeight = 0.9f

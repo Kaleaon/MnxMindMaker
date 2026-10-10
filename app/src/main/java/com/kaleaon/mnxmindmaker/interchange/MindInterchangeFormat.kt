@@ -382,7 +382,7 @@ object MindInterchangeFormat {
     ): JSONObject {
         val map = raw as? Map<*, *>
             ?: throw validationError("invalid_map_shape", path, "Expected object/map but got ${raw?.javaClass?.name ?: "null"}")
-        val json = JSONObject()
+        val sortedMap = LinkedHashMap<String, Any>()
         map.keys
             .mapIndexed { index, key ->
                 val keyString = key as? String
@@ -394,8 +394,16 @@ object MindInterchangeFormat {
             }
             .sorted()
             .forEach { key ->
-                json.put(key, toJsonCompatibleValue(map[key], "$path.$key"))
+                sortedMap[key] = toJsonCompatibleValue(map[key], "$path.$key")
             }
+        val json = JSONObject()
+        try {
+            val field = JSONObject::class.java.getDeclaredField("map")
+            field.isAccessible = true
+            field.set(json, sortedMap)
+        } catch (_: Exception) {
+            sortedMap.forEach { (k, v) -> json.put(k, v) }
+        }
         return json
     }
 

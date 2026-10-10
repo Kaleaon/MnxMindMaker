@@ -20,7 +20,7 @@ class FileImporterDelimitedFormatsTest {
             label\ttype\tdescription
             Integrity\tVALUE\tMoral consistency
             Curiosity\tPERSONALITY\tExploration drive
-        """.trimIndent()
+        """.trimIndent().replace("\\t", "\t")
 
         val graph = FileImporter.parseText(tsv, FileImporter.Format.UNKNOWN, "TSV Mind")
 

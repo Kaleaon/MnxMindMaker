@@ -63,6 +63,7 @@ class MemoryStoreRepository(
                 episodic.copy(updatedTimestamp = System.currentTimeMillis(), episodes = updated)
             )
             upsertMetadataLocked(record.metadata)
+            persistFullStateLocked()
             syncToRemoteLocked()
         }
     }
@@ -78,6 +79,7 @@ class MemoryStoreRepository(
                 graph.copy(updatedTimestamp = System.currentTimeMillis(), profiles = updated)
             )
             upsertMetadataLocked(record.metadata)
+            persistFullStateLocked()
             syncToRemoteLocked()
         }
     }
@@ -93,6 +95,7 @@ class MemoryStoreRepository(
                 semantic.copy(updatedTimestamp = System.currentTimeMillis(), semantics = updated)
             )
             upsertMetadataLocked(record.metadata)
+            persistFullStateLocked()
             syncToRemoteLocked()
         }
     }
@@ -140,6 +143,7 @@ class MemoryStoreRepository(
 
         if (changed) {
             removeMetadataLocked(id)
+            persistFullStateLocked()
             syncToRemoteLocked()
         }
         changed
@@ -151,6 +155,7 @@ class MemoryStoreRepository(
             saveSemanticLocked(defaultSemanticStore())
             saveEpisodicLocked(defaultEpisodicStore())
             saveMetadataLocked(defaultMetadataStore())
+            persistFullStateLocked()
             syncToRemoteLocked()
         }
     }
@@ -255,7 +260,31 @@ class MemoryStoreRepository(
         if (!validatePayloadLocked(snapshotPayload).isHealthy) return@synchronized false
         storageFile.parentFile?.mkdirs()
         storageFile.writeText(snapshotPayload)
+
+        val decryptedBytes = encryptedStore.decryptIfEnvelope(snapshotPayload.toByteArray(java.nio.charset.StandardCharsets.UTF_8), "memory_index")
+        val rawJson = String(decryptedBytes, java.nio.charset.StandardCharsets.UTF_8)
+        val restoredState = runCatching { json.decodeFromString<PersistedMemoryStore>(rawJson) }.getOrNull()
+        if (restoredState != null) {
+            saveEpisodicLocked(defaultEpisodicStore().copy(episodes = restoredState.records.sessions))
+            saveGraphLocked(defaultGraphStore().copy(profiles = restoredState.records.profiles))
+            saveSemanticLocked(defaultSemanticStore().copy(semantics = restoredState.records.semantics))
+        }
         true
+    }
+
+    private fun persistFullStateLocked() {
+        val now = System.currentTimeMillis()
+        val state = PersistedMemoryStore(
+            schemaVersion = SCHEMA_VERSION,
+            createdTimestamp = now,
+            updatedTimestamp = now,
+            records = MemoryRecordCollections(
+                sessions = loadEpisodicLocked().episodes,
+                profiles = loadGraphLocked().profiles,
+                semantics = loadSemanticLocked().semantics
+            )
+        )
+        saveStateLocked(state)
     }
 
     private fun defaultState(): PersistedMemoryStore {
@@ -376,10 +405,10 @@ class MemoryStoreRepository(
     private fun saveStateLocked(state: PersistedMemoryStore) {
         storageFile.parentFile?.mkdirs()
         val payload = json.encodeToString(state)
-        storageFile.writeText(payload)
-        snapshotFile.writeText(payload)
-        checksumFile.writeText(HashUtils.sha256Hex(payload))
-        encryptedStore.writeEncryptedBytes(storageFile, json.encodeToString(state).toByteArray(), "memory_index")
+        encryptedStore.writeEncryptedBytes(storageFile, payload.toByteArray(), "memory_index")
+        val encryptedPayload = storageFile.readText()
+        snapshotFile.writeText(encryptedPayload)
+        checksumFile.writeText(HashUtils.sha256Hex(encryptedPayload))
     }
     private fun defaultGraphStore(now: Long = System.currentTimeMillis()): GraphMemoryStore {
         return GraphMemoryStore(
@@ -518,7 +547,10 @@ class MemoryStoreRepository(
 
     private fun validatePayloadLocked(raw: String): MemoryStoreIntegrityReport {
         val issues = mutableListOf<String>()
-        val payloadObject = runCatching { json.parseToJsonElement(raw).jsonObject }.getOrElse {
+        val decryptedBytes = encryptedStore.decryptIfEnvelope(raw.toByteArray(java.nio.charset.StandardCharsets.UTF_8), "memory_index")
+        val text = String(decryptedBytes, java.nio.charset.StandardCharsets.UTF_8)
+
+        val payloadObject = runCatching { json.parseToJsonElement(text).jsonObject }.getOrElse {
             issues += "Serialized state is not valid JSON."
             return MemoryStoreIntegrityReport(isHealthy = false, issues = issues)
         }
