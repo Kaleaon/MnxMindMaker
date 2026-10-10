@@ -42,6 +42,8 @@ class MindMapView @JvmOverloads constructor(
             invalidate()
         }
 
+    fun isEmpty(): Boolean = graph?.nodes.isNullOrEmpty()
+
     var onNodeSelected: ((MindNode?) -> Unit)? = null
     var onNodeMoved: ((String, Float, Float) -> Unit)? = null
 
@@ -155,7 +157,7 @@ class MindMapView @JvmOverloads constructor(
             if (node != null) {
                 val newX = node.x + dx
                 val newY = node.y + dy
-                onNodeMoved?.invoke(dragNodeId!!, newX, newY)
+                onNodeMoved?.invoke(node.id, newX, newY)
                 lastDragX = event.x
                 lastDragY = event.y
             }

@@ -120,6 +120,8 @@ function renderControls() {
   $('save-button').textContent = state.busy ? 'Working…' : state.file ? 'Save to Drive' : 'Save new map';
   $('share-button').disabled = state.busy || !state.file || !state.drive;
   $('add-node-button').disabled = !canEdit; $('empty-add-button').disabled = !canEdit;
+  if ($('empty-ai-button')) $('empty-ai-button').disabled = !canEdit;
+  if ($('empty-import-button')) $('empty-import-button').disabled = state.busy;
   $('undo-button').disabled = !canEdit || !state.undo.length;
   for (const id of ['node-label', 'node-type', 'node-description', 'apply-node-button', 'delete-node-button', 'edge-target', 'edge-label', 'add-edge-button']) $(id).disabled = !canEdit;
   $('download-button').disabled = state.busy;
@@ -254,7 +256,31 @@ $('save-button').onclick = () => action(async () => {
   checkpoint(); updateLink(); say('Saved to Google Drive and verified.');
   try { await refreshFolder(); } catch { say('Map saved, but the folder list could not refresh. Use Refresh to try again.', true); }
 });
+function generateAiGraph() {
+  if (!editable()) return;
+  const topic = prompt('Enter a concept or topic for AI graph generation:', 'AI Mind');
+  if (topic === null) return;
+  const name = topic.trim() || 'AI Mind';
+  mutate(() => {
+    const [x, y, w, h] = state.box;
+    const cx = x + w / 2, cy = y + h / 2;
+    const root = addNode(state.map, name + ' Core', cx, cy - 80);
+    root.type = 'IDENTITY';
+    const knode = addNode(state.map, name + ' Knowledge', cx - 140, cy + 60);
+    knode.type = 'KNOWLEDGE';
+    const mnode = addNode(state.map, name + ' Memory', cx + 140, cy + 60);
+    mnode.type = 'MEMORY';
+    state.map.graph.edges.push(
+      { id: crypto.randomUUID(), from_node_id: root.id, to_node_id: knode.id, label: 'includes', strength: 1 },
+      { id: crypto.randomUUID(), from_node_id: root.id, to_node_id: mnode.id, label: 'recalls', strength: 1 }
+    );
+    state.selected = root.id;
+  });
+  say('AI graph generated for ' + (topic.trim() || 'AI Mind') + '.');
+}
 $('add-node-button').onclick = addConcept; $('empty-add-button').onclick = addConcept;
+if ($('empty-import-button')) $('empty-import-button').onclick = () => { if (canLeave()) $('import-input').click(); };
+if ($('empty-ai-button')) $('empty-ai-button').onclick = generateAiGraph;
 $('undo-button').onclick = () => { if (!editable() || !state.undo.length) return; state.map = parseMap(state.undo.pop()); changed(); state.selected = null; render(); };
 $('fit-button').onclick = () => { fit(); renderCanvas(); }; $('zoom-in-button').onclick = () => zoom(.8); $('zoom-out-button').onclick = () => zoom(1.25);
 $('node-form').onsubmit = event => { event.preventDefault(); const label = $('node-label').value.trim(), description = $('node-description').value, type = $('node-type').value;
