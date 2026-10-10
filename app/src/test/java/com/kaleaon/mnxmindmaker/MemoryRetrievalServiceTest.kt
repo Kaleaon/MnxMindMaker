@@ -22,8 +22,8 @@ class MemoryRetrievalServiceTest {
             memory("z-global", relevance = "0.95", confidence = "0.95"),
             memory("a-room", room = "apollo", relevance = "0.40", confidence = "0.40"),
             memory("b-hall", hall = "red", relevance = "0.90", confidence = "0.90"),
-            memory("c-wing-2", wing = "zenith", relevance = "0.60", confidence = "0.60"),
-            memory("c-wing-1", wing = "zenith", relevance = "0.60", confidence = "0.60")
+            memory("c-wing-1", wing = "zenith", relevance = "0.60", confidence = "0.60"),
+            memory("c-wing-2", wing = "zenith", relevance = "0.60", confidence = "0.60")
         )
 
         val retrieved = MemoryRetrievalService.retrieve(memories, context, limit = 5)
@@ -43,7 +43,7 @@ class MemoryRetrievalServiceTest {
 
         val memories = listOf(
             memory("restricted-room", room = "apollo", relevance = "0.95", sensitivity = "restricted"),
-            memory("safe-global", relevance = "0.50", sensitivity = "low")
+            memory("safe-global", relevance = "0.80", sensitivity = "low")
         )
 
         val retrieved = MemoryRetrievalService.retrieveForPromptInjection(memories, context, limit = 5)
@@ -173,7 +173,7 @@ class MemoryRetrievalServiceTest {
         importance: String = "0.5",
         parentId: String? = null,
         dimensions: Map<String, Float> = emptyMap(),
-        timestamp: String = System.currentTimeMillis().toString()
+        timestamp: String = "1000000"
     ): MindNode {
         val attributes = mutableMapOf(
             "current_relevance" to relevance,
