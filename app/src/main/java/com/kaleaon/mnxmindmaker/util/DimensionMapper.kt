@@ -63,6 +63,13 @@ object DimensionMapper {
             "verifiability",       // Can it be externally verified?
             "abstraction"          // Concrete ↔ abstract
         )
+        NodeType.KNOWLEDGE_SHARD -> listOf(
+            "confidence",          // Overall shard confidence
+            "evidence_strength",   // Quality/quantity of evidence citations
+            "relevance",           // Applicability to active mind domain
+            "coherence",           // Internal logical consistency
+            "recency"              // Age/freshness of knowledge shard
+        )
         NodeType.STATE -> listOf(
             "continuity_strain",
             "overload_level",

@@ -250,6 +250,25 @@ object MindInterchangeFormat {
             if (!node.has("attributes") || node.optJSONObject("attributes") == null) {
                 throw ValidationException("graph.nodes[$i].attributes must be an object")
             }
+            val attributesObj = node.optJSONObject("attributes") ?: JSONObject()
+            if (type == NodeType.KNOWLEDGE_SHARD.name || attributesObj.has("shard_schema_version")) {
+                val schemaVer = attributesObj.optString("shard_schema_version")
+                if (schemaVer.isBlank()) {
+                    throw ValidationException("graph.nodes[$i].attributes.shard_schema_version is required for knowledge shards")
+                }
+                val contributorId = attributesObj.optString("shard_contributor_id")
+                if (contributorId.isBlank()) {
+                    throw ValidationException("graph.nodes[$i].attributes.shard_contributor_id is required for knowledge shards")
+                }
+                val evidenceRaw = attributesObj.optString("shard_evidence_references")
+                if (!evidenceRaw.isNullOrBlank()) {
+                    try {
+                        JSONArray(evidenceRaw)
+                    } catch (_: Exception) {
+                        throw ValidationException("graph.nodes[$i].attributes.shard_evidence_references must be a valid JSON array")
+                    }
+                }
+            }
             if (!node.has("dimensions") || node.optJSONObject("dimensions") == null) {
                 throw ValidationException("graph.nodes[$i].dimensions must be an object")
             }

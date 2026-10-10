@@ -502,6 +502,7 @@ object DataMapper {
                 NodeType.IDENTITY -> "IDENTITY"
                 NodeType.MEMORY -> "MEMORY_STORE"
                 NodeType.KNOWLEDGE -> "KNOWLEDGE_GRAPH"
+                NodeType.KNOWLEDGE_SHARD -> "KNOWLEDGE_SHARD"
                 NodeType.STATE -> "STATE_SNAPSHOT"
                 NodeType.AFFECT -> "AFFECT_STATE"
                 NodeType.PERSONALITY -> "PERSONALITY"
