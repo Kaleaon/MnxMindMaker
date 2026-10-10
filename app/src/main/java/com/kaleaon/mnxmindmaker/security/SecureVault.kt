@@ -84,8 +84,8 @@ class SecureVault(private val context: Context) {
         }
 
         private fun deriveDeviceBoundKey(context: Context): SecretKeySpec {
-            val androidId = Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID)
-                ?: "unknown-device"
+            val androidId = runCatching { Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID) }
+                .getOrNull() ?: "unknown-device"
             val material = "${context.packageName}|$androidId|mnxmindmaker".toByteArray(StandardCharsets.UTF_8)
             val digest = HashUtils.sha256(material)
             return SecretKeySpec(digest.copyOf(32), "AES")
@@ -96,11 +96,14 @@ class SecureVault(private val context: Context) {
             val cipher = Cipher.getInstance("AES/GCM/NoPadding")
             cipher.init(Cipher.ENCRYPT_MODE, secretKey, GCMParameterSpec(128, iv))
             val ciphertext = cipher.doFinal(plaintext.toByteArray(StandardCharsets.UTF_8))
-            return Base64.encodeToString(iv + ciphertext, Base64.NO_WRAP)
+            val combined = iv + ciphertext
+            return runCatching { Base64.encodeToString(combined, Base64.NO_WRAP) }
+                .getOrElse { java.util.Base64.getEncoder().encodeToString(combined) }
         }
 
         private fun decrypt(encoded: String): String {
-            val payload = Base64.decode(encoded, Base64.NO_WRAP)
+            val payload = runCatching { Base64.decode(encoded, Base64.NO_WRAP) }
+                .getOrElse { java.util.Base64.getDecoder().decode(encoded) }
             val iv = payload.copyOfRange(0, 12)
             val ciphertext = payload.copyOfRange(12, payload.size)
             val cipher = Cipher.getInstance("AES/GCM/NoPadding")
