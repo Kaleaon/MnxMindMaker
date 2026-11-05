@@ -127,10 +127,17 @@ class AppManagedKeyHierarchy(private val store: KeyHierarchyStore) {
     private fun unb64(value: String): ByteArray = Base64.getDecoder().decode(value)
 }
 
+class InMemoryKeyHierarchyStore : KeyHierarchyStore {
+    private val map = java.util.concurrent.ConcurrentHashMap<String, String>()
+    override fun putString(key: String, value: String) { map[key] = value }
+    override fun getString(key: String): String? = map[key]
+}
+
 class EncryptedArtifactStore private constructor(
     private val random: SecureRandom,
     private val hierarchy: AppManagedKeyHierarchy
 ) {
+    constructor() : this(SecureRandom(), AppManagedKeyHierarchy(InMemoryKeyHierarchyStore()))
     constructor(context: Context) : this(SecureRandom(), AppManagedKeyHierarchy(SecureVault(context)))
 
     internal constructor(hierarchy: AppManagedKeyHierarchy) : this(SecureRandom(), hierarchy)

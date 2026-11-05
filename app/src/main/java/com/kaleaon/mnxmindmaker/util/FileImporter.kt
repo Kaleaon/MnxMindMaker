@@ -97,27 +97,44 @@ object FileImporter {
      * - Contains a markdown heading (`# ` at line start) → Markdown
      * - Otherwise                → plain text
      */
+    @Suppress("TooGenericExceptionCaught")
     fun parseText(text: String, format: Format, graphName: String = "Imported Mind"): MindGraph {
-        return when (format) {
-            Format.MARKDOWN -> MarkdownImporter.fromMarkdown(text, graphName)
-            Format.CSV -> CsvImporter.fromCsv(text, graphName)
-            Format.TSV -> CsvImporter.fromTsv(text, graphName)
-            Format.JSON -> DataMapper.fromJson(text, graphName)
-            Format.PLAIN_TEXT -> DataMapper.fromPlainText(text, graphName)
-            Format.UNKNOWN, Format.DOCX -> autoDetectAndParse(text, graphName)
+        return try {
+            when (format) {
+                Format.MARKDOWN -> MarkdownImporter.fromMarkdown(text, graphName)
+                Format.CSV -> CsvImporter.fromCsv(text, graphName)
+                Format.TSV -> CsvImporter.fromTsv(text, graphName)
+                Format.JSON -> DataMapper.fromJson(text, graphName)
+                Format.PLAIN_TEXT -> DataMapper.fromPlainText(text, graphName)
+                Format.UNKNOWN, Format.DOCX -> autoDetectAndParse(text, graphName)
+            }
+        } catch (e: StructuredImportException) {
+            throw e
+        } catch (e: Exception) {
+            throw StructuredImportException.create(
+                message = "Import failed: ${e.message ?: e.javaClass.simpleName}",
+                rawText = text,
+                cause = e,
+                fallbackFixTip = "Check file syntax and format structure."
+            )
         }
     }
 
     /** Content-based format detection and parsing fallback. */
     private fun autoDetectAndParse(text: String, graphName: String): MindGraph {
         val trimmed = text.trimStart()
+        val normalizedTsv = if (!text.contains('\t') && text.contains("\\t")) {
+            text.replace("\\t", "\t")
+        } else {
+            text
+        }
         return when {
             trimmed.startsWith("{") || trimmed.startsWith("[") ->
                 DataMapper.fromJson(text, graphName)
             text.contains(Regex("(?m)^#{1,3} ")) ->
                 MarkdownImporter.fromMarkdown(text, graphName)
-            looksLikeDelimitedTable(text, '\t') ->
-                CsvImporter.fromTsv(text, graphName)
+            looksLikeDelimitedTable(normalizedTsv, '\t') ->
+                CsvImporter.fromTsv(normalizedTsv, graphName)
             looksLikeDelimitedTable(text, ',') ->
                 CsvImporter.fromCsv(text, graphName)
             else ->
