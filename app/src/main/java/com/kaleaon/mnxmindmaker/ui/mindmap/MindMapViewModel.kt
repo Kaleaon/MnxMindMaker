@@ -45,6 +45,10 @@ import com.kaleaon.mnxmindmaker.util.provider.runtime.RuntimeDiagnostic
 import com.kaleaon.mnxmindmaker.util.tooling.ToolOrchestrator
 import com.kaleaon.mnxmindmaker.util.tooling.ToolPolicyEngine
 import com.kaleaon.mnxmindmaker.util.tooling.ToolRegistry
+import com.kaleaon.mnxmindmaker.util.drive.DriveSyncClient
+import com.kaleaon.mnxmindmaker.util.drive.DriveSyncError
+import com.kaleaon.mnxmindmaker.util.drive.DriveSyncErrorKind
+import com.kaleaon.mnxmindmaker.util.drive.DriveSyncResult
 import com.kaleaon.mnxmindmaker.util.run_continuity_audit
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
@@ -154,6 +158,15 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
 
     private val _askAiEntryMode = MutableLiveData(interactionPolicy.askAiEntryMode)
     val askAiEntryMode: LiveData<AskAiEntryMode> get() = _askAiEntryMode
+
+    val driveSyncClient = DriveSyncClient()
+    private val _driveSyncError = MutableLiveData<DriveSyncError?>()
+    val driveSyncError: LiveData<DriveSyncError?> get() = _driveSyncError
+
+    private val _driveSyncSuccess = MutableLiveData<String?>()
+    val driveSyncSuccess: LiveData<String?> get() = _driveSyncSuccess
+
+    var currentVersionToken: String? = null
 
     private val acceptedFindingIds = mutableSetOf<String>()
 
@@ -333,6 +346,92 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
                 runCatching { stream.close() }
             }
         }
+    }
+
+    fun syncDrive() {
+        val currentGraph = _graph.value ?: return
+        viewModelScope.launch {
+            _isLoading.value = true
+            try {
+                when (val result = withContext(Dispatchers.IO) { driveSyncClient.syncGraph(currentGraph, currentVersionToken) }) {
+                    is DriveSyncResult.Success -> {
+                        currentVersionToken = result.remoteVersionToken
+                        _driveSyncSuccess.value = "Google Drive sync completed successfully."
+                        _driveSyncError.value = null
+                    }
+                    is DriveSyncResult.Error -> {
+                        _driveSyncError.value = result.syncError
+                    }
+                }
+            } finally {
+                _isLoading.value = false
+            }
+        }
+    }
+
+    fun saveLocalDraft() {
+        exportToMnx()
+        _driveSyncSuccess.value = "Saved local draft copy to storage."
+        _driveSyncError.value = null
+    }
+
+    fun overwriteRemote() {
+        val currentGraph = _graph.value ?: return
+        viewModelScope.launch {
+            _isLoading.value = true
+            try {
+                when (val result = withContext(Dispatchers.IO) { driveSyncClient.forceOverwrite(currentGraph) }) {
+                    is DriveSyncResult.Success -> {
+                        currentVersionToken = result.remoteVersionToken
+                        _driveSyncSuccess.value = "Google Drive sync completed successfully."
+                        _driveSyncError.value = null
+                    }
+                    is DriveSyncResult.Error -> {
+                        _driveSyncError.value = result.syncError
+                    }
+                }
+            } finally {
+                _isLoading.value = false
+            }
+        }
+    }
+
+    fun reloadRemote() {
+        viewModelScope.launch {
+            _isLoading.value = true
+            try {
+                when (val result = withContext(Dispatchers.IO) { driveSyncClient.reloadRemote() }) {
+                    is DriveSyncResult.Success -> {
+                        currentVersionToken = result.remoteVersionToken
+                        _graph.value = result.syncedGraph
+                        _selectedNode.value = null
+                        refreshAudit()
+                        _driveSyncSuccess.value = "Google Drive sync completed successfully."
+                        _driveSyncError.value = null
+                    }
+                    is DriveSyncResult.Error -> {
+                        _driveSyncError.value = result.syncError
+                    }
+                }
+            } finally {
+                _isLoading.value = false
+            }
+        }
+    }
+
+    fun reauthenticateDrive() {
+        driveSyncClient.reauthenticate()
+        _driveSyncSuccess.value = "Drive re-authentication successful. Retrying sync…"
+        _driveSyncError.value = null
+        syncDrive()
+    }
+
+    fun clearDriveSyncError() {
+        _driveSyncError.value = null
+    }
+
+    fun clearDriveSyncSuccess() {
+        _driveSyncSuccess.value = null
     }
 
     fun askLlmForMindDesign(prompt: String, choice: ComposerProviderChoice = ComposerProviderChoice.AUTO) {
