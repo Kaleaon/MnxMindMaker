@@ -209,16 +209,16 @@ class FoundationalTools(
         )
         if (moderationResult.action == ModerationAction.DENY) {
             return ToolExecutionOutcome(
-                JSONObject().put("error", "moderation_denied").put("reason", moderationResult.reason),
+                JSONObject().put("error", "moderation_denied").put("reason", moderationResult.reason ?: "Prohibited content detected"),
                 mutatedGraph = false
             )
         }
-        val value = moderationResult.text
+        val safeValue = moderationResult.text
 
         when (category) {
             "profile" -> memoryManager.upsertProfileMemory(
                 key = memoryId,
-                value = value,
+                value = safeValue,
                 writingStyle = args.optString("writing_style").ifBlank { null },
                 characterId = args.optString("character_id").ifBlank { null },
                 sensitivity = sensitivity
@@ -228,7 +228,7 @@ class FoundationalTools(
                     id = memoryId,
                     label = label,
                     type = NodeType.MEMORY,
-                    description = value,
+                    description = safeValue,
                     attributes = mutableMapOf(
                         "semantic_subtype" to "semantic",
                         "memory_category" to "semantic",
