@@ -1,6 +1,5 @@
 package com.kaleaon.mnxmindmaker.repository
 
-import com.kaleaon.mnxmindmaker.model.ExternalProvider
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull

@@ -83,7 +83,7 @@ class ToolRegistry(
         BuiltInToolDef(
             spec = ToolSpec(
                 name = "link_nodes",
-                description = "Create edge between source_node_id and target_node_id.",
+                description = "Create edge between source_node_id and target_node_id. Accepts relationship_type, confidence, label, and attributes map.",
                 operationClass = ToolOperationClass.MUTATING
             ),
             handlerId = "graph.write.link_nodes"
@@ -837,7 +837,11 @@ class ToolRegistry(
     private fun linkNodes(invocation: ToolInvocation): ToolResult {
         val graph = getGraph()
         val sourceId = invocation.arguments.optString("source_node_id")
+            .ifBlank { invocation.arguments.optString("from_node_id") }
+            .ifBlank { invocation.arguments.optString("from_id") }
         val targetId = invocation.arguments.optString("target_node_id")
+            .ifBlank { invocation.arguments.optString("to_node_id") }
+            .ifBlank { invocation.arguments.optString("to_id") }
         if (sourceId.isBlank() || targetId.isBlank()) {
             return ToolResult(invocation.id, invocation.name, false, "source_node_id and target_node_id are required")
         }
@@ -848,13 +852,80 @@ class ToolRegistry(
         if (alreadyLinked) {
             return ToolResult(invocation.id, invocation.name, true, "Edge already exists")
         }
-        val edge = MindEdge(fromNodeId = sourceId, toNodeId = targetId)
+
+        val relationshipType = invocation.arguments.optString("relationship_type")
+            .ifBlank { invocation.arguments.optString("relationshipType") }
+            .ifBlank { invocation.arguments.optString("relation_type") }
+            .ifBlank { invocation.arguments.optString("type") }
+            .ifBlank { invocation.arguments.optString("relation") }
+            .ifBlank { "relates_to" }
+
+        val label = invocation.arguments.optString("label")
+
+        val confidenceVal = if (invocation.arguments.has("confidence")) {
+            invocation.arguments.optDouble("confidence", 1.0)
+        } else if (invocation.arguments.has("strength")) {
+            invocation.arguments.optDouble("strength", 1.0)
+        } else {
+            1.0
+        }
+        val strength = confidenceVal.toFloat()
+
+        val edgeAttributes = mutableMapOf<String, String>()
+        val rawAttrs = invocation.arguments.opt("attributes")
+        if (rawAttrs is JSONObject) {
+            rawAttrs.keys().forEach { key ->
+                edgeAttributes[key] = rawAttrs.optString(key)
+            }
+        } else if (rawAttrs is String && rawAttrs.isNotBlank()) {
+            try {
+                val parsedAttrs = JSONObject(rawAttrs)
+                parsedAttrs.keys().forEach { key ->
+                    edgeAttributes[key] = parsedAttrs.optString(key)
+                }
+            } catch (_: Exception) {
+                edgeAttributes["attributes"] = rawAttrs
+            }
+        }
+
+        if (invocation.arguments.has("confidence") && !edgeAttributes.containsKey("confidence")) {
+            edgeAttributes["confidence"] = confidenceVal.toString()
+        }
+
+        val reservedKeys = setOf(
+            "source_node_id", "from_node_id", "from_id",
+            "target_node_id", "to_node_id", "to_id",
+            "relationship_type", "relationshipType", "relation_type", "type", "relation",
+            "label", "confidence", "strength", "attributes"
+        )
+        invocation.arguments.keys().forEach { key ->
+            if (!reservedKeys.contains(key)) {
+                edgeAttributes[key] = invocation.arguments.optString(key)
+            }
+        }
+
+        val edge = MindEdge(
+            fromNodeId = sourceId,
+            toNodeId = targetId,
+            label = label,
+            strength = strength,
+            relationshipType = relationshipType,
+            attributes = edgeAttributes
+        )
         val updatedEdges = graph.edges.toMutableList().also { it.add(edge) }
         setGraph(graph.copy(edges = updatedEdges, modifiedAt = System.currentTimeMillis()))
+
+        val attrsJson = JSONObject()
+        edge.attributes.forEach { (k, v) -> attrsJson.put(k, v) }
+
         val payload = JSONObject()
             .put("edge_id", edge.id)
             .put("from_node_id", edge.fromNodeId)
             .put("to_node_id", edge.toNodeId)
+            .put("label", edge.label)
+            .put("strength", edge.strength.toDouble())
+            .put("relationship_type", edge.relationshipType)
+            .put("attributes", attrsJson)
         return ToolResult(invocation.id, invocation.name, true, payload.toString(), payload)
     }
 
