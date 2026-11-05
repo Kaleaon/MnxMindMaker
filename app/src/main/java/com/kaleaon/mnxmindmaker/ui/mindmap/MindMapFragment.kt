@@ -693,7 +693,7 @@ private class ChatMessageAdapter(
         return when (message.role) {
             ChatRole.USER -> "User"
             ChatRole.SYSTEM -> "System"
-            ChatRole.MIND -> message.actorLabel ?: "Mind"
+            ChatRole.MIND -> message.actorLabel.ifEmpty { "Mind" }
         }
     }
 

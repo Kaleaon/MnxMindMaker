@@ -546,7 +546,11 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
                 tokenBudget = catchUpTokenBudget(primarySettings)
             )
             val systemPrompt = buildSystemPrompt(primarySettings, catchUp)
-            val pipelineRequest = PromptPipelineRequest(prompt = prompt, task = "mindmap_assist")
+            val pipelineRequest = PromptPipelineRequest(
+                prompt = prompt,
+                transcript = transcript,
+                task = "mindmap_assist"
+            )
             val graphNodes = _graph.value?.nodes.orEmpty()
 
         try {
@@ -640,7 +644,7 @@ class MindMapViewModel(application: Application) : AndroidViewModel(application)
                         message = e.message.orEmpty().ifBlank { "Provider request failed" }
                     )
                 )
-                lastError = "${settings.provider.displayName}: ${e.message}"
+                lastError = "${primarySettings.provider.displayName}: ${e.message}"
             } catch (fallbackError: Exception) {
                 lastError = "$traceAwareMessage Fallback failed: ${fallbackError.message}"
             }
