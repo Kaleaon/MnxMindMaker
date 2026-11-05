@@ -209,25 +209,20 @@ class ProviderRouter(
             filtered = filtered.filter { it.provider.runtime == LlmRuntime.LOCAL_ON_DEVICE }
         }
 
-        return filtered.sortedWith { a, b ->
-            if (policy.userPreference != null) {
-                val aPref = a.provider == policy.userPreference
-                val bPref = b.provider == policy.userPreference
-                if (aPref && !bPref) return@sortedWith -1
-                if (!aPref && bPref) return@sortedWith 1
-            }
-            var scoreA = 0
-            var scoreB = 0
-            if (policy.prioritizeCost) {
-                scoreA += costRank(a.provider)
-                scoreB += costRank(b.provider)
-            }
-            if (policy.prioritizeLatency) {
-                scoreA += latencyRank(a.provider)
-                scoreB += latencyRank(b.provider)
-            }
-            scoreA.compareTo(scoreB)
+        fun score(settings: LlmSettings): Int {
+            var s = 0
+            if (policy.prioritizeCost) s += costRank(settings.provider)
+            if (policy.prioritizeLatency) s += latencyRank(settings.provider)
+            return s
         }
+
+        if (policy.userPreference != null) {
+            val preferred = filtered.filter { it.provider == policy.userPreference }.sortedBy { score(it) }
+            val rest = filtered.filterNot { it.provider == policy.userPreference }.sortedBy { score(it) }
+            return preferred + rest
+        }
+
+        return filtered.sortedBy { score(it) }
     }
 
     private fun classificationRank(classification: DataClassification): Int = when (classification) {

@@ -291,6 +291,9 @@ object MindInterchangeFormat {
             if (!nodeIds.contains(from)) throw ValidationException("graph.edges[$i].from_node_id must reference an existing node")
             if (!nodeIds.contains(to)) throw ValidationException("graph.edges[$i].to_node_id must reference an existing node")
             validateFiniteFloat(edge, "strength", "graph.edges[$i].strength")
+            if (edge.has("attributes") && edge.optJSONObject("attributes") == null) {
+                throw ValidationException("graph.edges[$i].attributes must be an object")
+            }
         }
     }
 
@@ -324,6 +327,8 @@ object MindInterchangeFormat {
                     .put("to_node_id", edge.toNodeId)
                     .put("label", edge.label)
                     .put("strength", edge.strength.toDouble())
+                    .put("relationship_type", edge.relationshipType)
+                    .put("attributes", toDeterministicJsonObject(edge.attributes, "graph.edges[${edge.id}].attributes"))
             })
         )
 
@@ -354,12 +359,20 @@ object MindInterchangeFormat {
         val edges = mutableListOf<MindEdge>()
         for (i in 0 until edgesJson.length()) {
             val edge = edgesJson.getJSONObject(i)
+            val relType = edge.optString("relationship_type").ifBlank { "relates_to" }
+            val attrs = if (edge.has("attributes") && edge.optJSONObject("attributes") != null) {
+                edge.getJSONObject("attributes").toStringMap().toMutableMap()
+            } else {
+                mutableMapOf()
+            }
             edges += MindEdge(
                 id = edge.getString("id"),
                 fromNodeId = edge.getString("from_node_id"),
                 toNodeId = edge.getString("to_node_id"),
                 label = edge.optString("label"),
-                strength = edge.optDouble("strength").toFloat()
+                strength = edge.optDouble("strength", 1.0).toFloat(),
+                relationshipType = relType,
+                attributes = attrs
             )
         }
 
@@ -398,15 +411,15 @@ object MindInterchangeFormat {
     private fun createOrderedJsonObject(): JSONObject {
         val json = JSONObject()
         try {
-            val field = JSONObject::class.java.getDeclaredField("map")
-            field.isAccessible = true
-            field.set(json, LinkedHashMap<String, Any>())
-        } catch (_: Exception) {
+            val mapField = JSONObject::class.java.getDeclaredField("map")
+            mapField.isAccessible = true
+            mapField.set(json, LinkedHashMap<String, Any>())
+        } catch (_: Throwable) {
             try {
-                val field = JSONObject::class.java.getDeclaredField("nameValuePairs")
-                field.isAccessible = true
-                field.set(json, LinkedHashMap<String, Any>())
-            } catch (_: Exception) {}
+                val nvField = JSONObject::class.java.getDeclaredField("nameValuePairs")
+                nvField.isAccessible = true
+                nvField.set(json, LinkedHashMap<String, Any>())
+            } catch (_: Throwable) {}
         }
         return json
     }
@@ -418,7 +431,7 @@ object MindInterchangeFormat {
         val map = raw as? Map<*, *>
             ?: throw validationError("invalid_map_shape", path, "Expected object/map but got ${raw?.javaClass?.name ?: "null"}")
         val json = createOrderedJsonObject()
-        map.keys
+        val sortedKeys = map.keys
             .mapIndexed { index, key ->
                 val keyString = key as? String
                     ?: throw validationError("invalid_key_type", "$path.keys[$index]", "Expected string key but got ${key?.javaClass?.name ?: "null"}")
@@ -428,9 +441,29 @@ object MindInterchangeFormat {
                 keyString
             }
             .sorted()
-            .forEach { key ->
-                json.put(key, toJsonCompatibleValue(map[key], "$path.$key"))
+        try {
+            val field = JSONObject::class.java.getDeclaredField("map")
+            field.isAccessible = true
+            val sortedLinkedMap = LinkedHashMap<String, Any>()
+            for (key in sortedKeys) {
+                sortedLinkedMap[key] = toJsonCompatibleValue(map[key], "$path.$key")
             }
+            field.set(json, sortedLinkedMap)
+            return json
+        } catch (_: Exception) {}
+        try {
+            val field = JSONObject::class.java.getDeclaredField("nameValuePairs")
+            field.isAccessible = true
+            val sortedLinkedMap = LinkedHashMap<String, Any>()
+            for (key in sortedKeys) {
+                sortedLinkedMap[key] = toJsonCompatibleValue(map[key], "$path.$key")
+            }
+            field.set(json, sortedLinkedMap)
+            return json
+        } catch (_: Exception) {}
+        for (key in sortedKeys) {
+            json.put(key, toJsonCompatibleValue(map[key], "$path.$key"))
+        }
         return json
     }
 
