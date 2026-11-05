@@ -623,11 +623,12 @@ class ToolRegistry(
                 .filter { !it.parentId.isNullOrBlank() && it.parentId in nodeIds }
                 .sortedBy { it.id }
                 .forEach { node ->
-                    val key = EdgePair(node.parentId!!, node.id)
+                    val parentId = node.parentId ?: return@forEach
+                    val key = EdgePair(parentId, node.id)
                     if (key !in existingPairs) {
                         nextEdges = nextEdges + MindEdge(
-                            id = "auto-parent:${node.parentId}:${node.id}",
-                            fromNodeId = node.parentId!!,
+                            id = "auto-parent:${parentId}:${node.id}",
+                            fromNodeId = parentId,
                             toNodeId = node.id
                         )
                         existingPairs += key
