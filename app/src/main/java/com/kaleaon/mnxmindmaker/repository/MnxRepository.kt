@@ -35,9 +35,13 @@ import org.json.JSONObject
  * Repository for reading and writing .mnx files.
  * Bridges the MindGraph model to the MNX binary format.
  */
-class MnxRepository(private val context: Context) {
+class MnxRepository(
+    private val context: Context? = null,
+    private val encryptedStore: EncryptedArtifactStore = context?.let { EncryptedArtifactStore(it) } ?: EncryptedArtifactStore()
+) {
+    private val baseDir: File
+        get() = context?.filesDir ?: File(System.getProperty("java.io.tmpdir"), "mnx")
 
-    private val encryptedStore = EncryptedArtifactStore(context)
     private fun MnxFile.requireRawSection(sectionType: Short): ByteArray =
         requireNotNull(rawSections[sectionType]) {
             "MNX file missing required raw section type=$sectionType"
@@ -373,7 +377,7 @@ class MnxRepository(private val context: Context) {
      * Returns the output [File].
      */
     fun exportToMnx(graph: MindGraph, continuityMetadata: ContinuityMetadata? = null): File {
-        val outDir = File(context.filesDir, "mnx_exports")
+        val outDir = File(baseDir, "mnx_exports")
         outDir.mkdirs()
         val safeName = graph.name.replace(Regex("[^a-zA-Z0-9_-]"), "_")
         val outFile = File(outDir, "${safeName}_${System.currentTimeMillis()}.mnx")
@@ -764,7 +768,7 @@ class MnxRepository(private val context: Context) {
         compatibilityHooks: MindInterchangeFormat.CompatibilityHooks =
             MindInterchangeFormat.CompatibilityHooks()
     ): File {
-        val outDir = File(context.filesDir, "interchange_exports").also { it.mkdirs() }
+        val outDir = File(baseDir, "interchange_exports").also { it.mkdirs() }
         val safeName = graph.name.replace(Regex("[^a-zA-Z0-9_-]"), "_")
         val outFile = File(outDir, "${safeName}_${System.currentTimeMillis()}.mnxj")
         val json = MindInterchangeFormat.exportJson(graph, compatibilityHooks, metadata)
@@ -784,7 +788,7 @@ class MnxRepository(private val context: Context) {
         compatibilityHooks: MindInterchangeFormat.CompatibilityHooks =
             MindInterchangeFormat.CompatibilityHooks()
     ): File {
-        val outDir = File(context.filesDir, "interchange_exports").also { it.mkdirs() }
+        val outDir = File(baseDir, "interchange_exports").also { it.mkdirs() }
         val safeName = graph.name.replace(Regex("[^a-zA-Z0-9_-]"), "_")
         val outFile = File(outDir, "${safeName}_${System.currentTimeMillis()}.mnxb")
         val bytes = MindInterchangeFormat.exportBundle(
@@ -799,14 +803,14 @@ class MnxRepository(private val context: Context) {
         return MindInterchangeFormat.importBundle(stream.readBytes())
     }
 
-    fun getMnxExportsDir(): File = File(context.filesDir, "mnx_exports").also { it.mkdirs() }
+    fun getMnxExportsDir(): File = File(baseDir, "mnx_exports").also { it.mkdirs() }
 
     fun listExportedFiles(): List<File> =
         getMnxExportsDir().listFiles { f -> f.extension == "mnx" || f.extension == "enc" }
             ?.sortedByDescending { it.lastModified() } ?: emptyList()
 
     fun exportWorkspacePack(pack: MindWorkspacePack, fileName: String? = null): File {
-        val outDir = File(context.filesDir, "workspace_packs").also { it.mkdirs() }
+        val outDir = File(baseDir, "workspace_packs").also { it.mkdirs() }
         val output = if (fileName.isNullOrBlank()) {
             File(outDir, "workspace_pack_${System.currentTimeMillis()}.mnx")
         } else {
@@ -846,7 +850,7 @@ class MnxRepository(private val context: Context) {
         mode: BootPacketGenerator.Mode = BootPacketGenerator.Mode.FULL
     ): File {
         val packetJson = BootPacketGenerator.generate(graph, mode).toJson()
-        val outDir = File(context.filesDir, "boot_packets").also { it.mkdirs() }
+        val outDir = File(baseDir, "boot_packets").also { it.mkdirs() }
         val safeName = graph.name.replace(Regex("[^a-zA-Z0-9_-]"), "_")
         return File(outDir, "${safeName}_${mode.name.lowercase()}_${System.currentTimeMillis()}.json")
             .also { it.writeText(packetJson) }
@@ -857,7 +861,7 @@ class MnxRepository(private val context: Context) {
         mode: BootPacketGenerator.Mode = BootPacketGenerator.Mode.FULL
     ): File {
         val packetMd = BootPacketGenerator.generate(graph, mode).toMarkdown()
-        val outDir = File(context.filesDir, "boot_packets").also { it.mkdirs() }
+        val outDir = File(baseDir, "boot_packets").also { it.mkdirs() }
         val safeName = graph.name.replace(Regex("[^a-zA-Z0-9_-]"), "_")
         return File(outDir, "${safeName}_${mode.name.lowercase()}_${System.currentTimeMillis()}.md")
             .also { it.writeText(packetMd) }

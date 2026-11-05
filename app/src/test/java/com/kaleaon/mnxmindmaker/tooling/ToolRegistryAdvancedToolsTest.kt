@@ -88,5 +88,48 @@ class ToolRegistryAdvancedToolsTest {
         assertEquals(0, driftAfter.contentJson.getInt("drifted_count"))
         assertEquals("project_notes", graph.nodes.first { it.id == "m-old" }.attributes["taxonomy_key"])
     }
+
+    @Test
+    fun `link_nodes tool creates typed edge with relationship type and evidence attributes`() {
+        var graph = MindGraph(
+            nodes = mutableListOf(
+                MindNode(id = "n1", label = "Node 1", type = NodeType.KNOWLEDGE),
+                MindNode(id = "n2", label = "Node 2", type = NodeType.MEMORY)
+            )
+        )
+        val registry = ToolRegistry(getGraph = { graph }, setGraph = { graph = it })
+
+        val attrs = JSONObject()
+            .put("evidence_status", "corroborated")
+            .put("citation", "Ref 123")
+
+        val result = registry.invoke(
+            ToolInvocation(
+                "l1",
+                "link_nodes",
+                JSONObject()
+                    .put("source_node_id", "n1")
+                    .put("target_node_id", "n2")
+                    .put("relationship_type", "supports")
+                    .put("confidence", 0.9)
+                    .put("attributes", attrs)
+            )
+        )
+
+        assertTrue(result.success)
+        assertEquals(1, graph.edges.size)
+        val edge = graph.edges[0]
+        assertEquals("n1", edge.fromNodeId)
+        assertEquals("n2", edge.toNodeId)
+        assertEquals("supports", edge.relationshipType)
+        assertEquals(0.9f, edge.strength, 0.001f)
+        assertEquals("corroborated", edge.attributes["evidence_status"])
+        assertEquals("Ref 123", edge.attributes["citation"])
+        assertEquals("0.9", edge.attributes["confidence"])
+
+        assertEquals("supports", result.contentJson.getString("relationship_type"))
+        val returnedAttrs = result.contentJson.getJSONObject("attributes")
+        assertEquals("corroborated", returnedAttrs.getString("evidence_status"))
+    }
 }
 

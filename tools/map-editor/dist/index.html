@@ -27,7 +27,7 @@
       <input id="folder-link" type="url" placeholder="https://drive.google.com/drive/folders/…" required>
       <button id="open-folder-button" class="wide" type="submit">Open folder</button>
     </form>
-    <div class="folder-heading"><h2 id="folder-name">No folder open</h2><button id="refresh-button" class="icon-button" aria-label="Refresh folder" title="Refresh folder" disabled>↻</button></div>
+    <div class="folder-heading"><h3 id="folder-name">No folder open</h3><button id="refresh-button" class="icon-button" aria-label="Refresh folder" title="Refresh folder" disabled>↻</button></div>
     <p id="folder-help" class="help">Connect your Google account to see the maps you can access.</p>
     <div id="map-list" class="map-list"></div>
     <div class="library-bottom">
@@ -41,8 +41,7 @@
     <div class="map-toolbar">
       <div class="map-heading">
         <h2 id="workspace-heading" class="sr-only">Map editor workspace</h2>
-        <label class="sr-only" for="map-name">Map name</label>
-        <input id="map-name" value="Untitled map" maxlength="200">
+        <h1><label class="sr-only" for="map-name">Map name</label><input id="map-name" value="Untitled map" maxlength="200"></h1>
         <span id="save-state" class="save-state">Local draft</span>
       </div>
       <div class="map-actions"><button id="download-button" class="subtle">Download</button><button id="share-button" class="subtle" disabled>Share</button><button id="save-button" class="primary" disabled>Save to Drive</button></div>
