@@ -168,6 +168,7 @@ class PersonaRuntimeManagerTest {
 
     @Test
     fun `activate persona short-circuits when already active`() {
+        java.io.File("/tmp/model.gguf").createNewFile()
         val manifestLookups = AtomicInteger(0)
         val manager = PersonaRuntimeManager(
             providerRouter = ProviderRouter(emptyList()),
@@ -178,7 +179,8 @@ class PersonaRuntimeManagerTest {
                         provider = LlmProvider.LOCAL_ON_DEVICE,
                         enabled = true,
                         localModelPath = "/tmp/model.gguf",
-                        outboundClassification = DataClassification.PUBLIC
+                        outboundClassification = DataClassification.PUBLIC,
+                        fallbackOrder = LlmFallbackOrder.LOCAL_FIRST_REMOTE_FALLBACK
                     )
                 )
             },
