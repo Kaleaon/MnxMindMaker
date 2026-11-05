@@ -315,29 +315,6 @@ class MemoryStoreRepository(
         )
     }
 
-    private fun loadStateLocked(): PersistedMemoryStore {
-        val initial = defaultState()
-        if (!storageFile.exists()) {
-            saveStateLocked(initial)
-            return initial
-        }
-
-        maybeRunPeriodicIntegrityScanLocked()
-
-        if (verifyChecksumLocked()) {
-            return recoverFromSnapshotLocked() ?: recoverFromCorruptionLocked()
-        }
-
-        return try {
-            val raw = storageFile.readText()
-            val payload = json.parseToJsonElement(raw).jsonObject
-            val payloadVersion = payload[SCHEMA_VERSION_FIELD]?.jsonPrimitive?.intOrNull ?: 1
-            val migratedPayload = applyMigrationsLocked(payload, payloadVersion)
-            json.decodeFromString<PersistedMemoryStore>(migratedPayload.toString())
-        } catch (_: Exception) {
-            recoverFromCorruptionLocked()
-        }
-    }
     private fun itemId(item: Any): String = when (item) {
         is SessionMemoryRecord -> item.metadata.id
         is ProfileMemoryRecord -> item.metadata.id
