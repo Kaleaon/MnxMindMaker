@@ -166,7 +166,7 @@ class MainActivity : AppCompatActivity() {
                 val message =
                     "Expected NavHostFragment at R.id.nav_host_fragment, but found $actualType. " +
                             "Ensure activity_main.xml defines a NavHostFragment with that id."
-                Log.e(TAG, message)
+                runCatching { Log.e(TAG, message) }
                 throw IllegalStateException(message)
             }
         }

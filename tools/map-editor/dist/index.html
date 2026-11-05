@@ -27,7 +27,7 @@
       <input id="folder-link" type="url" placeholder="https://drive.google.com/drive/folders/…" required>
       <button id="open-folder-button" class="wide" type="submit">Open folder</button>
     </form>
-    <div class="folder-heading"><h2 id="folder-name">No folder open</h2><button id="refresh-button" class="icon-button" aria-label="Refresh folder" title="Refresh folder" disabled>↻</button></div>
+    <div class="folder-heading"><h3 id="folder-name">No folder open</h3><button id="refresh-button" class="icon-button" aria-label="Refresh folder" title="Refresh folder" disabled>↻</button></div>
     <p id="folder-help" class="help">Connect your Google account to see the maps you can access.</p>
     <div id="map-list" class="map-list"></div>
     <div class="library-bottom">
@@ -41,8 +41,7 @@
     <div class="map-toolbar">
       <div class="map-heading">
         <h2 id="workspace-heading" class="sr-only">Map editor workspace</h2>
-        <label class="sr-only" for="map-name">Map name</label>
-        <input id="map-name" value="Untitled map" maxlength="200">
+        <h1><label class="sr-only" for="map-name">Map name</label><input id="map-name" value="Untitled map" maxlength="200"></h1>
         <span id="save-state" class="save-state">Local draft</span>
       </div>
       <div class="map-actions"><button id="download-button" class="subtle">Download</button><button id="share-button" class="subtle" disabled>Share</button><button id="save-button" class="primary" disabled>Save to Drive</button></div>
@@ -82,16 +81,16 @@
     </div>
   </aside>
 </main>
-<dialog id="settings-dialog">
-  <form id="settings-form"><div class="dialog-heading"><h2>Google Drive connection</h2><button type="button" data-close="settings-dialog" class="icon-button" aria-label="Close">×</button></div>
+<dialog id="settings-dialog" aria-labelledby="settings-heading">
+  <form id="settings-form"><div class="dialog-heading"><h2 id="settings-heading">Google Drive connection</h2><button type="button" data-close="settings-dialog" class="icon-button" aria-label="Close">×</button></div>
     <p>The editor needs the app’s Google OAuth web client ID. Your access token stays in this tab and is sent only to Google.</p>
     <label for="client-id">Google OAuth web client ID</label><input id="client-id" placeholder="….apps.googleusercontent.com" required>
     <p class="help">The owner configures this once for the published site. A value entered here is a setting for this browser only.</p>
     <p><a href="./setup.html" target="_blank" rel="noopener">Google setup instructions</a></p><button class="primary" type="submit">Save settings</button>
   </form>
 </dialog>
-<dialog id="share-dialog">
-  <form id="share-form"><div class="dialog-heading"><h2>Share this map</h2><button type="button" data-close="share-dialog" class="icon-button" aria-label="Close">×</button></div>
+<dialog id="share-dialog" aria-labelledby="share-heading">
+  <form id="share-form"><div class="dialog-heading"><h2 id="share-heading">Share this map</h2><button type="button" data-close="share-dialog" class="icon-button" aria-label="Close">×</button></div>
     <p>People open the map in this editor and sign in to Google. Drive decides whether they can save changes.</p>
     <label for="link-access">Link access</label><select id="link-access"><option value="keep">Keep current Drive permissions</option><option value="reader">Anyone with the link can view</option><option value="writer">Anyone with the link can edit</option></select>
     <p id="sharing-help" class="help">Changing link access affects the Drive file. Your organization may restrict public sharing.</p>

@@ -231,4 +231,44 @@ class MindInterchangeFormatTest {
             assertTrue(ex.message!!.contains(".bad"))
         }
     }
+
+    @Test
+    fun `export and import round trips typed edges with evidence attributes`() {
+        val graph = MindGraph(
+            id = "g-typed-edge",
+            name = "Typed Edge Test",
+            createdAt = 1000,
+            modifiedAt = 2000,
+            nodes = mutableListOf(
+                MindNode(id = "n1", label = "Claim Node", type = NodeType.BELIEF),
+                MindNode(id = "n2", label = "Source Node", type = NodeType.MEMORY)
+            ),
+            edges = mutableListOf(
+                MindEdge(
+                    id = "e1",
+                    fromNodeId = "n1",
+                    toNodeId = "n2",
+                    label = "supported by",
+                    strength = 0.95f,
+                    relationshipType = "evidence",
+                    attributes = mutableMapOf(
+                        "evidence_status" to "corroborated",
+                        "citation" to "Journal of AI, 2026",
+                        "reviewer" to "alice"
+                    )
+                )
+            )
+        )
+
+        val json = MindInterchangeFormat.exportJson(graph)
+        assertTrue(json.contains("\"relationship_type\": \"evidence\""))
+        assertTrue(json.contains("\"evidence_status\": \"corroborated\""))
+        assertTrue(json.contains("\"citation\": \"Journal of AI, 2026\""))
+
+        val imported = MindInterchangeFormat.importJson(json)
+        assertEquals(graph, imported)
+        assertEquals("evidence", imported.edges[0].relationshipType)
+        assertEquals("corroborated", imported.edges[0].attributes["evidence_status"])
+        assertEquals("Journal of AI, 2026", imported.edges[0].attributes["citation"])
+    }
 }
