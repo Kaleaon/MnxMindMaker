@@ -1,5 +1,8 @@
 package com.kaleaon.mnxmindmaker.ui.settings
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
@@ -652,6 +655,9 @@ class SettingsFragment : Fragment() {
                     ProviderPreflightDiagnostics.run(draft)
                 }
                 binding.tvPreflightResult.text = renderPreflightResult(result, issues)
+                if (result.rootCause != null || !result.reachable) {
+                    showPreflightDiagnosticsDialog(result)
+                }
             }
         }
     }
@@ -775,12 +781,44 @@ class SettingsFragment : Fragment() {
             "Validation: $critical critical, $warning warning"
         }
         val reachability = if (result.reachable) "Reachable" else "Unreachable"
+        val rc = result.rootCause
+        val causeSection = if (rc != null) {
+            "\nRoot Cause: ${rc.title}\n" +
+            "Explanation: ${rc.description}\n" +
+            "Tip: ${rc.troubleshootingTip}"
+        } else ""
+
         return "$validationSummary\n" +
             "Provider: ${result.provider.displayName}\n" +
             "Probe: ${result.endpoint.trimEnd('/')}${result.probePath}\n" +
             "Status: $reachability (${result.statusCode ?: "n/a"})\n" +
             "Latency: ${result.latencyMs}ms\n" +
-            "Detail: ${result.detail}"
+            "Detail: ${result.detail}$causeSection"
+    }
+
+    private fun showPreflightDiagnosticsDialog(result: PreflightDiagnosticsResult) {
+        val rc = result.rootCause
+        val title = rc?.title ?: getString(R.string.preflight_err_generic_title, result.statusCode?.toString() ?: "Error")
+        val explanation = rc?.description ?: result.detail
+        val tip = rc?.troubleshootingTip ?: getString(R.string.preflight_err_generic_tip)
+        val rawTrace = rc?.rawTrace ?: "Endpoint: ${result.endpoint}\nPath: ${result.probePath}\nStatus: ${result.statusCode}\nDetail: ${result.detail}"
+
+        val message = "$explanation\n\n$tip\n\nProbe: ${result.endpoint.trimEnd('/')}${result.probePath} (${result.statusCode ?: "n/a"}, ${result.latencyMs}ms)"
+
+        AlertDialog.Builder(requireContext())
+            .setTitle(title)
+            .setMessage(message)
+            .setPositiveButton(R.string.preflight_retry_button) { _, _ ->
+                runPreflightDiagnostics()
+            }
+            .setNeutralButton(R.string.preflight_copy_raw_logs) { _, _ ->
+                val clipboard = requireContext().getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                val clip = ClipData.newPlainText("Preflight Diagnostics Log", rawTrace)
+                clipboard.setPrimaryClip(clip)
+                Snackbar.make(binding.root, R.string.preflight_logs_copied, Snackbar.LENGTH_SHORT).show()
+            }
+            .setNegativeButton(R.string.cancel, null)
+            .show()
     }
 
     private fun renderLocalRuntimeConnectionReport(
