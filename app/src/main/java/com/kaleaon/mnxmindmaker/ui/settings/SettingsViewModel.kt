@@ -76,6 +76,13 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     private val _modelInstallSuccessEvent = MutableLiveData<LlmSettings?>()
     val modelInstallSuccessEvent: LiveData<LlmSettings?> = _modelInstallSuccessEvent
 
+    private val _preflightDiagnosticsDialogEvent = MutableLiveData<PreflightDiagnosticsResult?>()
+    val preflightDiagnosticsDialogEvent: LiveData<PreflightDiagnosticsResult?> = _preflightDiagnosticsDialogEvent
+
+    fun clearPreflightDiagnosticsDialogEvent() {
+        _preflightDiagnosticsDialogEvent.value = null
+    }
+
     init {
         repository.loadAllSettings().forEach { settings ->
             draftSettingsMap[settings.provider] = settings
@@ -161,6 +168,9 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                     ProviderPreflightDiagnostics.run(draft)
                 }
                 _preflightResultText.value = renderPreflightResult(result, issues)
+                if (result.rootCause != null || !result.reachable) {
+                    _preflightDiagnosticsDialogEvent.value = result
+                }
             }
         }
     }
@@ -418,12 +428,19 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             "Validation: $critical critical, $warning warning"
         }
         val reachability = if (result.reachable) "Reachable" else "Unreachable"
+        val rc = result.rootCause
+        val causeSection = if (rc != null) {
+            "\nRoot Cause: ${rc.title}\n" +
+            "Explanation: ${rc.description}\n" +
+            "Tip: ${rc.troubleshootingTip}"
+        } else ""
+
         return "$validationSummary\n" +
             "Provider: ${result.provider.displayName}\n" +
             "Probe: ${result.endpoint.trimEnd('/')}${result.probePath}\n" +
             "Status: $reachability (${result.statusCode ?: "n/a"})\n" +
             "Latency: ${result.latencyMs}ms\n" +
-            "Detail: ${result.detail}"
+            "Detail: ${result.detail}$causeSection"
     }
 
     private fun renderLocalRuntimeConnectionReport(

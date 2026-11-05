@@ -1,5 +1,9 @@
 package com.kaleaon.mnxmindmaker.ui.settings
 
+import android.app.AlertDialog
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
@@ -7,7 +11,9 @@ import android.view.ViewGroup
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.viewModels
 import com.google.android.material.snackbar.Snackbar
+import com.kaleaon.mnxmindmaker.R
 import com.kaleaon.mnxmindmaker.databinding.FragmentSettingsDiagnosticsModelsBinding
+import com.kaleaon.mnxmindmaker.util.provider.PreflightDiagnosticsResult
 
 class SettingsDiagnosticsModelsFragment : Fragment() {
 
@@ -64,6 +70,39 @@ class SettingsDiagnosticsModelsFragment : Fragment() {
                 Snackbar.make(binding.root, msg, Snackbar.LENGTH_SHORT).show()
             }
         }
+
+        viewModel.preflightDiagnosticsDialogEvent.observe(viewLifecycleOwner) { result ->
+            if (result != null) {
+                showPreflightDiagnosticsDialog(result)
+                viewModel.clearPreflightDiagnosticsDialogEvent()
+            }
+        }
+    }
+
+    private fun showPreflightDiagnosticsDialog(result: PreflightDiagnosticsResult) {
+        val rc = result.rootCause
+        val title = rc?.title ?: getString(R.string.preflight_err_generic_title, result.statusCode?.toString() ?: "Error")
+        val explanation = rc?.description ?: result.detail
+        val tip = rc?.troubleshootingTip ?: getString(R.string.preflight_err_generic_tip)
+        val rawTrace = rc?.rawTrace ?: "Endpoint: ${result.endpoint}\nPath: ${result.probePath}\nStatus: ${result.statusCode}\nDetail: ${result.detail}"
+
+        val message = "$explanation\n\n$tip\n\nProbe: ${result.endpoint.trimEnd('/')}${result.probePath} (${result.statusCode ?: "n/a"}, ${result.latencyMs}ms)"
+
+        AlertDialog.Builder(requireContext())
+            .setTitle(title)
+            .setMessage(message)
+            .setPositiveButton(R.string.preflight_retry_button) { _, _ ->
+                val draft = viewModel.getDraftSettings(viewModel.currentProvider)
+                viewModel.runPreflightDiagnostics(draft, viewModel.privacyMode)
+            }
+            .setNeutralButton(R.string.preflight_copy_raw_logs) { _, _ ->
+                val clipboard = requireContext().getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                val clip = ClipData.newPlainText("Preflight Diagnostics Log", rawTrace)
+                clipboard.setPrimaryClip(clip)
+                Snackbar.make(binding.root, R.string.preflight_logs_copied, Snackbar.LENGTH_SHORT).show()
+            }
+            .setNegativeButton(R.string.cancel, null)
+            .show()
     }
 
     override fun onDestroyView() {

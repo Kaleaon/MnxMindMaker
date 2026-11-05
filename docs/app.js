@@ -70,10 +70,27 @@ if (typeof document !== 'undefined') {
 }
 
 function editable() { return !state.busy && (!state.file || state.file.capabilities?.canEdit === true); }
-function say(message, error = false, permanent = false) {
+function say(message, error = false, permanent = false, targetInput = null) {
   clearTimeout(messageTimer);
-  $('message').textContent = message; $('message').classList.toggle('error', error); $('message').hidden = false;
-  if (!permanent) messageTimer = setTimeout(() => { $('message').hidden = true; }, error ? 12000 : 6500);
+  const msgEl = $('message');
+  msgEl.textContent = message; msgEl.classList.toggle('error', error);
+  if (error) {
+    msgEl.setAttribute('role', 'alert');
+    msgEl.setAttribute('aria-live', 'assertive');
+  } else {
+    msgEl.setAttribute('role', 'status');
+    msgEl.setAttribute('aria-live', 'polite');
+  }
+  msgEl.hidden = false;
+  if (targetInput && error) {
+    targetInput.setAttribute('aria-invalid', 'true');
+    targetInput.setAttribute('aria-describedby', 'message');
+    targetInput.addEventListener('input', () => {
+      targetInput.removeAttribute('aria-invalid');
+      targetInput.removeAttribute('aria-describedby');
+    }, { once: true });
+  }
+  if (!permanent) messageTimer = setTimeout(() => { msgEl.hidden = true; }, error ? 12000 : 6500);
 }
 async function action(fn) {
   if (state.busy) return;
@@ -234,7 +251,7 @@ $('disconnect-button').onclick = () => {
   state.drive = null; state.connected = false; state.folder = null; state.files = []; render(); say('Disconnected. Your current map stays open as a draft; download it to keep your changes.');
 };
 $('folder-form').onsubmit = event => {
-  event.preventDefault(); if (!state.drive) { say('Connect Google Drive first.', true); return; }
+  event.preventDefault(); if (!state.drive) { say('Connect Google Drive first.', true, false, $('folder-link')); return; }
   action(async () => { const folder = parseDriveLink($('folder-link').value); await openFolder(folder); });
 };
 $('refresh-button').onclick = () => action(refreshFolder);
@@ -245,7 +262,7 @@ $('import-input').onchange = event => {
   action(async () => { if (file.size > MAX_BYTES) throw new Error('Maps must be smaller than 64 MiB.'); loadMap(parseMap(await file.text())); say('Map imported as a local draft. Save it to your Drive folder to share it.'); });
   event.target.value = '';
 };
-$('map-name').onchange = () => { const name = $('map-name').value.trim(); if (!name) { say('Give your map a name.', true); $('map-name').value = state.map.graph.name; return; } mutate(() => { state.map.graph.name = name; }); };
+$('map-name').onchange = () => { const name = $('map-name').value.trim(); if (!name) { say('Give your map a name.', true, false, $('map-name')); $('map-name').value = state.map.graph.name; return; } mutate(() => { state.map.graph.name = name; }); };
 $('download-button').onclick = download;
 $('save-button').onclick = () => action(async () => {
   const map = structuredClone(state.map), generation = state.generation;
@@ -258,7 +275,7 @@ $('add-node-button').onclick = addConcept; $('empty-add-button').onclick = addCo
 $('undo-button').onclick = () => { if (!editable() || !state.undo.length) return; state.map = parseMap(state.undo.pop()); changed(); state.selected = null; render(); };
 $('fit-button').onclick = () => { fit(); renderCanvas(); }; $('zoom-in-button').onclick = () => zoom(.8); $('zoom-out-button').onclick = () => zoom(1.25);
 $('node-form').onsubmit = event => { event.preventDefault(); const label = $('node-label').value.trim(), description = $('node-description').value, type = $('node-type').value;
-  if (!label) return say('Concept labels cannot be empty.', true);
+  if (!label) return say('Concept labels cannot be empty.', true, false, $('node-label'));
   mutate(() => { const node = state.map.graph.nodes.find(item => item.id === state.selected); reviseNode(node, { label, description, type }); });
 };
 $('embedded-pdf-button').onclick = () => action(async () => {
@@ -276,7 +293,7 @@ $('edge-form').onsubmit = event => { event.preventDefault(); const target = $('e
   mutate(() => { state.map.graph.edges.push({ id: crypto.randomUUID(), from_node_id: state.selected, to_node_id: target, label, strength: 1 }); }); $('edge-label').value = '';
 };
 $('settings-button').onclick = () => { $('client-id').value = clientId; settingsModal.open($('settings-button')); };
-$('settings-form').onsubmit = event => { event.preventDefault(); const value = $('client-id').value.trim(); if (!/^[\w.-]+\.apps\.googleusercontent\.com$/.test(value)) return say('Use a Google OAuth web client ID ending in .apps.googleusercontent.com.', true);
+$('settings-form').onsubmit = event => { event.preventDefault(); const value = $('client-id').value.trim(); if (!/^[\w.-]+\.apps\.googleusercontent\.com$/.test(value)) return say('Use a Google OAuth web client ID ending in .apps.googleusercontent.com.', true, false, $('client-id'));
   clientId = value; try { storage?.setItem('mnx.googleClientId', value); } catch { /* retain session setting */ } settingsModal.close(); say('Settings saved. Connect Google Drive when you’re ready.');
 };
 for (const button of document.querySelectorAll('[data-close]')) button.onclick = () => $(button.dataset.close).close();
