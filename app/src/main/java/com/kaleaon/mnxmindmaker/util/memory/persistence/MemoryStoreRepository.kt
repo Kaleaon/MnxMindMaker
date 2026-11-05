@@ -379,11 +379,6 @@ class MemoryStoreRepository(
         file.writeText(payload)
         File(file.parentFile, "${file.name}.snapshot").writeText(payload)
         File(file.parentFile, "${file.name}.sha256").writeText(HashUtils.sha256Hex(payload))
-        if (file != storageFile) {
-            storageFile.writeText(payload)
-            snapshotFile.writeText(payload)
-            checksumFile.writeText(HashUtils.sha256Hex(payload))
-        }
     }
 
     private fun <T> loadStoreLocked(
