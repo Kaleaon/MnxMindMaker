@@ -107,6 +107,10 @@
     <string name="deploy_ops_retry">Retry</string>
 
     <string name="settings_title">Settings</string>
+    <string name="settings_tab_llm_runtimes">LLM &amp; Runtimes</string>
+    <string name="settings_tab_accounts_security">Accounts &amp; Security</string>
+    <string name="settings_tab_appearance">Appearance</string>
+    <string name="settings_tab_diagnostics_models">Diagnostics &amp; Models</string>
     <string name="settings_saved">%1$s settings saved</string>
     <string name="hint_anthropic_key">Get your key at console.anthropic.com</string>
     <string name="hint_openai_key">Get your key at platform.openai.com</string>
