@@ -18,6 +18,7 @@ import com.kaleaon.mnxmindmaker.model.PrivacyMode
 import com.kaleaon.mnxmindmaker.repository.AuthRepository
 import com.kaleaon.mnxmindmaker.repository.ExternalAccountRepository
 import com.kaleaon.mnxmindmaker.repository.LlmSettingsRepository
+import com.kaleaon.mnxmindmaker.repository.OAuthManager
 import com.kaleaon.mnxmindmaker.repository.RefreshStatus
 import com.kaleaon.mnxmindmaker.util.provider.PreflightDiagnosticsResult
 import com.kaleaon.mnxmindmaker.util.provider.ProviderPreflightDiagnostics
@@ -44,6 +45,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     val repository = LlmSettingsRepository(application)
     val authRepository = AuthRepository(application)
     val externalAccountRepository = ExternalAccountRepository(application)
+    val oauthManager = OAuthManager(application)
     val modelManager = ModelManager(application)
     val localRuntimeCoordinator = LocalRuntimeCoordinator(scope = viewModelScope)
 

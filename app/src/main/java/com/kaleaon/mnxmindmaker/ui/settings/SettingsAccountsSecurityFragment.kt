@@ -67,6 +67,10 @@ class SettingsAccountsSecurityFragment : Fragment() {
         binding.btnLinkChatgpt.setOnClickListener { promptLinkAccount(ExternalProvider.CHATGPT) }
         binding.btnLinkHuggingface.setOnClickListener { promptLinkAccount(ExternalProvider.HUGGING_FACE) }
 
+        binding.btnOauthClaude.setOnClickListener { startOAuthFlow(ExternalProvider.CLAUDE) }
+        binding.btnOauthChatgpt.setOnClickListener { startOAuthFlow(ExternalProvider.CHATGPT) }
+        binding.btnOauthHuggingface.setOnClickListener { startOAuthFlow(ExternalProvider.HUGGING_FACE) }
+
         binding.btnRefreshClaude.setOnClickListener { viewModel.refreshLinkedAccount(ExternalProvider.CLAUDE) }
         binding.btnRefreshChatgpt.setOnClickListener { viewModel.refreshLinkedAccount(ExternalProvider.CHATGPT) }
         binding.btnRefreshHuggingface.setOnClickListener { viewModel.refreshLinkedAccount(ExternalProvider.HUGGING_FACE) }
@@ -74,6 +78,37 @@ class SettingsAccountsSecurityFragment : Fragment() {
         binding.btnRevokeClaude.setOnClickListener { viewModel.revokeLinkedAccount(ExternalProvider.CLAUDE) }
         binding.btnRevokeChatgpt.setOnClickListener { viewModel.revokeLinkedAccount(ExternalProvider.CHATGPT) }
         binding.btnRevokeHuggingface.setOnClickListener { viewModel.revokeLinkedAccount(ExternalProvider.HUGGING_FACE) }
+    }
+
+    private fun startOAuthFlow(provider: ExternalProvider) {
+        val clientId = viewModel.externalAccountRepository.getOAuthClientId(provider)
+        if (clientId.isNullOrBlank()) {
+            Snackbar.make(
+                binding.root,
+                getString(R.string.oauth_client_id_required, provider.displayName),
+                Snackbar.LENGTH_LONG
+            ).show()
+            promptLinkAccount(provider)
+            return
+        }
+
+        val authUrl = viewModel.oauthManager.buildAuthorizationUrl(
+            provider = provider,
+            clientId = clientId
+        )
+
+        if (authUrl == null) {
+            Snackbar.make(binding.root, "Failed to build OAuth authorization URL.", Snackbar.LENGTH_SHORT).show()
+            return
+        }
+
+        Snackbar.make(
+            binding.root,
+            getString(R.string.oauth_custom_tabs_launched, provider.displayName),
+            Snackbar.LENGTH_SHORT
+        ).show()
+
+        viewModel.oauthManager.launchOAuthCustomTab(requireContext(), authUrl)
     }
 
     private fun observeViewModel() {
