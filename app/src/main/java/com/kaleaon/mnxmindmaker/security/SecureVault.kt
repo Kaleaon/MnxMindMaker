@@ -3,7 +3,7 @@ package com.kaleaon.mnxmindmaker.security
 import android.content.Context
 import android.content.SharedPreferences
 import android.provider.Settings
-import android.util.Base64
+import java.util.Base64
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import com.kaleaon.mnxmindmaker.util.HashUtils
@@ -84,9 +84,10 @@ class SecureVault(private val context: Context) {
         }
 
         private fun deriveDeviceBoundKey(context: Context): SecretKeySpec {
-            val androidId = runCatching { Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID) }
-                .getOrNull() ?: "unknown-device"
-            val material = "${context.packageName}|$androidId|mnxmindmaker".toByteArray(StandardCharsets.UTF_8)
+            val androidId = runCatching { Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID) }.getOrNull()
+                ?: "unknown-device"
+            val packageName = runCatching { context.packageName }.getOrNull() ?: "com.kaleaon.mnxmindmaker"
+            val material = "$packageName|$androidId|mnxmindmaker".toByteArray(StandardCharsets.UTF_8)
             val digest = HashUtils.sha256(material)
             return SecretKeySpec(digest.copyOf(32), "AES")
         }
@@ -96,14 +97,11 @@ class SecureVault(private val context: Context) {
             val cipher = Cipher.getInstance("AES/GCM/NoPadding")
             cipher.init(Cipher.ENCRYPT_MODE, secretKey, GCMParameterSpec(128, iv))
             val ciphertext = cipher.doFinal(plaintext.toByteArray(StandardCharsets.UTF_8))
-            val combined = iv + ciphertext
-            return runCatching { Base64.encodeToString(combined, Base64.NO_WRAP) }
-                .getOrElse { java.util.Base64.getEncoder().encodeToString(combined) }
+            return Base64.getEncoder().encodeToString(iv + ciphertext)
         }
 
         private fun decrypt(encoded: String): String {
-            val payload = runCatching { Base64.decode(encoded, Base64.NO_WRAP) }
-                .getOrElse { java.util.Base64.getDecoder().decode(encoded) }
+            val payload = Base64.getDecoder().decode(encoded)
             val iv = payload.copyOfRange(0, 12)
             val ciphertext = payload.copyOfRange(12, payload.size)
             val cipher = Cipher.getInstance("AES/GCM/NoPadding")

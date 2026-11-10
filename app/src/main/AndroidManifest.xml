@@ -21,10 +21,25 @@
         <activity
             android:name=".ui.MainActivity"
             android:exported="true"
+            android:launchMode="singleTask"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <!-- OAuth Custom Tabs Deep Link Callback -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="mnxmindmaker"
+                    android:host="oauth"
+                    android:path="/callback" />
+                <data
+                    android:scheme="mnx"
+                    android:host="oauth"
+                    android:path="/callback" />
             </intent-filter>
             <!-- Open supported shared files via picker, file manager, or browser links. -->
             <intent-filter>
