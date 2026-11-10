@@ -107,6 +107,10 @@
     <string name="deploy_ops_retry">Retry</string>
 
     <string name="settings_title">Settings</string>
+    <string name="settings_tab_llm_runtimes">LLM &amp; Runtimes</string>
+    <string name="settings_tab_accounts_security">Accounts &amp; Security</string>
+    <string name="settings_tab_appearance">Appearance</string>
+    <string name="settings_tab_diagnostics_models">Diagnostics &amp; Models</string>
     <string name="settings_saved">%1$s settings saved</string>
     <string name="hint_anthropic_key">Get your key at console.anthropic.com</string>
     <string name="hint_openai_key">Get your key at platform.openai.com</string>
@@ -202,6 +206,13 @@
     <string name="link_refresh_invalid_response">%1$s refresh returned an invalid response. Re-link the account and retry.</string>
     <string name="link_refresh_disabled_reason">%1$s refresh disabled: link a refresh token and configure OAuth client credentials.</string>
     <string name="link_revoke_success">%1$s account link revoked.</string>
+    <string name="link_oauth_custom_tabs_claude">Authorize Claude (Browser)</string>
+    <string name="link_oauth_custom_tabs_chatgpt">Authorize ChatGPT (Browser)</string>
+    <string name="link_oauth_custom_tabs_huggingface">Authorize Hugging Face (Browser)</string>
+    <string name="oauth_client_id_required">OAuth Client ID for %1$s is required. Configure it in manual link first.</string>
+    <string name="oauth_custom_tabs_launched">Launching browser authorization for %1$s...</string>
+    <string name="oauth_success_linked">%1$s account successfully authorized via OAuth!</string>
+    <string name="oauth_failed">OAuth authorization failed: %1$s</string>
     <string name="link_expiry_unknown">unknown</string>
     <string name="link_status_not_linked">%1$s: not linked</string>
     <string name="link_status_linked">%1$s: linked (expiry %2$s) • models: %3$d • tools: %4$s • rate limit: %5$s</string>
