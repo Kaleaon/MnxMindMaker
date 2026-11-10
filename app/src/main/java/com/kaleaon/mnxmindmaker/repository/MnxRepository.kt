@@ -557,8 +557,9 @@ class MnxRepository(
     }
 
     private fun schemaVersion(file: MnxFile): Int {
-        if (!file.hasRawSection(GRAPH_PAYLOAD_SECTION_TYPE)) return 1
-        if (!file.hasSection(MnxFormat.MnxSectionType.META)) return 2
+        if (!file.hasSection(MnxFormat.MnxSectionType.META)) {
+            return if (file.hasRawSection(GRAPH_PAYLOAD_SECTION_TYPE)) 3 else 1
+        }
         val meta = MnxCodec.deserializeMeta(file.requireSection(MnxFormat.MnxSectionType.META))
         val explicit = meta.entries[META_SCHEMA_VERSION_KEY]?.toIntOrNull()
         if (explicit != null) return explicit

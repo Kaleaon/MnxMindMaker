@@ -83,7 +83,6 @@ class MnxRepositoryMigrationTest {
                 MnxFormat.MnxSectionType.META to MnxCodec.serializeMeta(meta)
             )
         )
-
         val legacyBytes = MnxCodec.encodeToBytes(legacyFile)
         val decodedLegacy = MnxCodec.decodeFromBytes(legacyBytes)
         val report = repo.migrateArtifact(ByteArrayInputStream(legacyBytes))

@@ -135,7 +135,8 @@ class PersonaRuntimeManagerTest {
                         provider = LlmProvider.LOCAL_ON_DEVICE,
                         enabled = true,
                         localModelPath = "/tmp/model.gguf",
-                        outboundClassification = DataClassification.PUBLIC
+                        outboundClassification = DataClassification.PUBLIC,
+                        fallbackOrder = LlmFallbackOrder.LOCAL_FIRST_REMOTE_FALLBACK
                     )
                 )
             },
@@ -178,7 +179,8 @@ class PersonaRuntimeManagerTest {
                         provider = LlmProvider.LOCAL_ON_DEVICE,
                         enabled = true,
                         localModelPath = "/tmp/model.gguf",
-                        outboundClassification = DataClassification.PUBLIC
+                        outboundClassification = DataClassification.PUBLIC,
+                        fallbackOrder = LlmFallbackOrder.LOCAL_FIRST_REMOTE_FALLBACK
                     )
                 )
             },
